@@ -999,13 +999,21 @@ def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
 
 
 @pytest.mark.parametrize(
-    ("total_frames", "expected_start"),
-    [(22, 0), (120, 102), (124, 102), (240, 221)],
+    ("total_frames", "expected_start", "expected_padding"),
+    [
+        (22, 0, 0),
+        (120, 102, 4),
+        (124, 102, 0),
+        (153, 136, 5),
+        (168, 153, 7),
+        (240, 221, 3),
+    ],
 )
 def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
     monkeypatch,
     total_frames,
     expected_start,
+    expected_padding,
 ):
     module = _load_minimax_node(monkeypatch)
     images = torch.arange(total_frames, dtype=torch.float32).reshape(
@@ -1025,10 +1033,25 @@ def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
     )
 
     output_images, output_audio = result.values
-    assert output_images[:, 0, 0, 0].tolist() == list(
-        range(expected_start, total_frames)
-    )
+    expected = list(range(expected_start, total_frames))
+    expected.extend([total_frames - 1] * expected_padding)
+    assert output_images[:, 0, 0, 0].tolist() == expected
+    assert len(output_images) == 22
+    assert output_images[-1].item() == images[-1].item()
     assert output_audio is audio
+
+
+def test_h3_context_media_trim_rejects_empty_phase_aligned_video(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    audio = {"waveform": torch.zeros(1, 1, 2), "sample_rate": 48}
+
+    with pytest.raises(ValueError, match="at least one frame"):
+        module.EasyH3ContextMediaTrim.execute(
+            torch.empty(0, 1, 1, 1),
+            audio,
+            output_frames=22,
+            phase_align_video_encode=True,
+        )
 
 
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
@@ -1800,8 +1823,8 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     low_context_link = context_selflift["inputs"]["low_context_latent"]
     low_context_node = result.expand[low_context_link[0]]
     assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
-    first_selflift_id = selflift_nodes[0][0]
-    assert low_context_node["inputs"]["latent"] == [first_selflift_id, 1]
+    low_context_source = result.expand[low_context_node["inputs"]["latent"][0]]
+    assert low_context_source["class_type"] == "LTXVConcatAVLatent"
     if continuity_mode == "context_swap":
         assert context_selflift["inputs"]["model"] == [context_id, 0]
 
@@ -2608,19 +2631,12 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
         for node_id, node in result.expand.items()
         if node["class_type"] == "easy MiniMaxH3MotionContextHard"
     )
-    samples = [
-        (node_id, node)
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "SamplerCustomAdvanced"
-    ]
-    first_sample_id = samples[0][0]
-    first_context_trim_id, first_context_trim = next(
-        (node_id, node)
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "easy h3MotionContextLatentTrim"
-        and node["inputs"]["latent"] == [first_sample_id, 1]
-    )
+    first_context_trim_id = motion["inputs"]["context_latent"][0]
+    first_context_trim = result.expand[first_context_trim_id]
+    assert first_context_trim["class_type"] == "easy h3MotionContextLatentTrim"
     assert first_context_trim["inputs"]["context_length"] == "22"
+    first_context_source = result.expand[first_context_trim["inputs"]["latent"][0]]
+    assert first_context_source["class_type"] == "LTXVConcatAVLatent"
     assert motion["inputs"]["context_latent"] == [first_context_trim_id, 0]
     assert "audio_context_length" not in motion["inputs"]
     assert motion["inputs"]["context_length"] == "22"
@@ -2649,19 +2665,17 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     )
     assert math_node["inputs"]["expression"] == "a + 34"
     task_length_link = math_node["inputs"]["values.a"]
-    assert result.expand[task_length_link[0]]["class_type"] == (
-        "easy multiTrackTaskOutput"
-    )
-    assert task_length_link[1] == 3
+    assert task_length_link == 124
     assert "a" not in math_node["inputs"]
     assert context_conditioning["inputs"]["length"] == [math_id, 1]
     trim = next(
         node
         for node in nodes
         if node["class_type"] == "easy h3ContextMediaTrim"
+        and node["inputs"]["trim_frames"] == [motion_id, 1]
     )
     assert trim["inputs"]["trim_frames"] == [motion_id, 1]
-    assert trim["inputs"]["output_frames"] == [task_length_link[0], 3]
+    assert trim["inputs"]["output_frames"] == 120
     assert trim["inputs"]["pad_audio"] is False
     assert "fit_video_duration" not in trim["inputs"]
     trim_id = next(
@@ -2716,22 +2730,23 @@ def test_multitrack_h3_first_context_task_does_not_add_an_empty_prefix(monkeypat
     conditioning = next(
         node for node in nodes if node["class_type"] == "easy minimaxH3ToVideo"
     )
-    task_output_id = next(
-        node_id
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "easy multiTrackTaskOutput"
-    )
     audio_lock = next(
         node for node in nodes if node["class_type"] == "easy minimaxH3AudioLock"
     )
 
-    assert conditioning["inputs"]["length"] == [task_output_id, 3]
+    assert conditioning["inputs"]["length"] == 124
     assert audio_lock["inputs"]["prepend_frames"] == 0
+    delivery_trim = next(
+        node for node in nodes
+        if node["class_type"] == "easy h3ContextMediaTrim"
+        and not node["inputs"].get("phase_align_video_encode")
+    )
+    assert delivery_trim["inputs"]["output_frames"] == 120
+    assert "fit_video_duration" not in delivery_trim["inputs"]
     assert not any(
         node["class_type"] in {
             "ComfyMathExpression",
             "easy MiniMaxH3MotionContextHard",
-            "easy h3ContextMediaTrim",
         }
         for node in nodes
     )
@@ -2915,7 +2930,7 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         ]
 
 
-def test_multitrack_h3_context_swap_noises_both_passes_without_replacing_context(
+def test_multitrack_h3_context_swap_uses_drift_control_only_in_first_pass(
     monkeypatch,
 ):
     module = _load_minimax_node(monkeypatch)
@@ -2952,28 +2967,31 @@ def test_multitrack_h3_context_swap_noises_both_passes_without_replacing_context
         for node_id, node in result.expand.items()
         if node["class_type"] == "easy MiniMaxH3ContextSwap"
     ]
-    assert len(noise_nodes) == 2
-    first_noise_id, first_noise = next(
-        item for item in noise_nodes if "first_pass_context_swap_noise" in item[0]
-    )
-    hires_noise_id, hires_noise = next(
-        item for item in noise_nodes if "hires_context_swap_noise" in item[0]
-    )
-    motion = _graph_node(result, "easy MiniMaxH3MotionContextHard")
+    assert len(noise_nodes) == 1
+    first_noise_id, first_noise = noise_nodes[0]
+    assert "first_pass_context_swap_noise" in first_noise_id
     hires = _graph_node(result, "easy MiniMaxH3HiResContinuity")
-    assert motion["inputs"]["context_latent"] == [first_noise_id, 0]
-    assert hires["inputs"]["previous_hires_latent"] == [hires_noise_id, 0]
     assert first_noise["inputs"]["context_length"] == "22"
-    assert hires_noise["inputs"]["context_length"] == "22"
+    assert not any(
+        node["class_type"] == "easy MiniMaxH3MotionContextHard"
+        for node in result.expand.values()
+    )
     artifacts = [
         node
         for node in result.expand.values()
         if node["class_type"] == "easy h3ProjectArtifact"
     ]
+    low_context = result.expand[first_noise["inputs"]["context_latent"][0]]
+    assert low_context["class_type"] == "easy h3MotionContextLatentTrim"
+    assert low_context["inputs"]["latent"] == artifacts[0]["inputs"][
+        "context_latent_low"
+    ]
+    assert hires["inputs"]["previous_hires_latent"] == artifacts[0]["inputs"][
+        "context_latent"
+    ]
     assert artifacts[1]["inputs"]["continuity_mode"] == "context_swap"
     assert all(
-        artifact["inputs"]["context_latent"]
-        not in ([first_noise_id, 0], [hires_noise_id, 0])
+        artifact["inputs"]["context_latent"] != [first_noise_id, 0]
         for artifact in artifacts
     )
 
@@ -3085,29 +3103,24 @@ def test_multitrack_h3_consecutive_context_uses_previous_trimmed_latent(monkeypa
         for node in result.expand.values()
         if node["class_type"] == "easy h3ProjectArtifact"
     ]
-    samples = [
-        (node_id, node)
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "SamplerCustomAdvanced"
-    ]
-
     assert len(motions) == 2
     assert len(artifacts) == 3
     first_context_link = artifacts[0]["inputs"]["context_latent"]
-    assert result.expand[first_context_link[0]]["class_type"] == (
+    first_context_trim = result.expand[first_context_link[0]]
+    assert first_context_trim["class_type"] == (
         "easy h3MotionContextLatentTrim"
     )
-    assert result.expand[first_context_link[0]]["inputs"]["latent"] == [
-        samples[0][0],
-        1,
-    ]
+    first_context_source = result.expand[first_context_trim["inputs"]["latent"][0]]
+    assert first_context_source["class_type"] == "LTXVConcatAVLatent"
     assert motions[0]["inputs"]["context_latent"] == first_context_link
     second_context_link = artifacts[1]["inputs"]["context_latent"]
     assert result.expand[second_context_link[0]]["class_type"] == (
         "easy h3MotionContextLatentTrim"
     )
     assert motions[1]["inputs"]["context_latent"] == second_context_link
-    assert motions[1]["inputs"]["context_latent"] != [samples[1][0], 1]
+    second_context_trim = result.expand[second_context_link[0]]
+    second_context_source = result.expand[second_context_trim["inputs"]["latent"][0]]
+    assert second_context_source["class_type"] == "LTXVConcatAVLatent"
     assert [
         node["inputs"]["prepend_frames"]
         for node in result.expand.values()
@@ -4356,8 +4369,8 @@ def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
 @pytest.mark.parametrize("duration", [120, 125, 124])
 @pytest.mark.parametrize("continuity", ["shot", "context", "context_swap"])
 @pytest.mark.parametrize("sampling", ["single", "dual"])
-@pytest.mark.parametrize("track_type", ["video"])
-def test_audio_lock_preserves_source_span_in_both_passes(
+@pytest.mark.parametrize("track_type", ["audio", "video"])
+def test_locked_media_preserves_source_span_in_both_passes(
     monkeypatch, duration, continuity, sampling, track_type,
 ):
     module = _load_minimax_node(monkeypatch)
@@ -4400,7 +4413,10 @@ def test_audio_lock_preserves_source_span_in_both_passes(
     ]
     assert len(trims) == (4 if sampling == "dual" else 2)
     assert all(n["inputs"]["output_frames"] == duration for n in trims)
-    assert all(n["inputs"]["fit_video_duration"] is True for n in trims)
+    assert all(
+        n["inputs"].get("fit_video_duration", False) is (track_type == "video")
+        for n in trims
+    )
     saves = [n for n in graph.values() if n["class_type"] == "easy saveVideo"]
     assert len(saves) == 2
     for node in saves:
@@ -4411,6 +4427,49 @@ def test_audio_lock_preserves_source_span_in_both_passes(
     encodes = [n for n in graph.values() if n["class_type"] == "VAEEncode"
                and "hires_context" in n["inputs"]["pixels"][0]]
     assert len(encodes) == 2
+
+
+def test_audio_locked_context_mv_delivers_exact_timeline_spans(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    info = inputs["tracks_info"][0]
+    durations = [187, 185, 197, 223, 203, 191, 228, 204, 195, 222, 209]
+    cursor = 0
+    task_segments = []
+    for duration in durations:
+        task_segments.append({
+            "start_frame": cursor,
+            "end_frame": cursor + duration,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+            },
+        })
+        cursor += duration
+    info["tracks"][0]["segments"] = task_segments
+    info["tracks"].append({
+        "type": "audio",
+        "audio_locked": True,
+        "segments": [{
+            "start_frame": 0,
+            "end_frame": cursor,
+            "content": {"media_type": "audio"},
+        }],
+    })
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+
+    delivery_trims = sorted(
+        (
+            node for node in result.expand.values()
+            if node["class_type"] == "easy h3ContextMediaTrim"
+            and not node["inputs"].get("phase_align_video_encode")
+        ),
+        key=lambda node: node["_meta"]["easy_media_segment"],
+    )
+    assert [node["inputs"]["output_frames"] for node in delivery_trims] == durations
+    assert all("fit_video_duration" not in node["inputs"] for node in delivery_trims)
+    assert sum(node["inputs"]["output_frames"] for node in delivery_trims) == 2244
 
 
 def test_audio_lock_priority_keeps_locked_video_timing(monkeypatch):
@@ -4447,13 +4506,17 @@ def test_audio_lock_priority_keeps_locked_video_timing(monkeypatch):
     assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
 
 
-@pytest.mark.parametrize("track_type,locked,audio_only", [
-    ("video", False, False), ("audio", False, False), ("audio", True, False),
-    ("video", True, True), ("audio", True, True),
+@pytest.mark.parametrize("track_type,locked,audio_only,preserves_timing,fits_video", [
+    ("video", False, False, False, False),
+    ("audio", False, False, False, False),
+    ("audio", True, False, True, False),
+    ("video", True, False, True, True),
+    ("video", True, True, False, False),
+    ("audio", True, True, False, False),
 ])
 @pytest.mark.parametrize("duration", [120, 125, 131])
 def test_source_timing_policy_leaves_other_tasks_unchanged(
-    monkeypatch, track_type, locked, audio_only, duration,
+    monkeypatch, track_type, locked, audio_only, preserves_timing, fits_video, duration,
 ):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
@@ -4468,10 +4531,24 @@ def test_source_timing_policy_leaves_other_tasks_unchanged(
     })
     result = module.EasyMultiTrackProject.execute(**inputs)
     length = _graph_node(result, "easy minimaxH3ToVideo")["inputs"]["length"]
-    assert isinstance(length, list)
-    assert length[1] == 3
-    assert result.expand[length[0]]["class_type"] == "easy multiTrackTaskOutput"
-    assert not any(n["class_type"] == "easy h3ContextMediaTrim" for n in result.expand.values())
+    if preserves_timing:
+        assert length == module._align_frame_count(duration)
+        trims = [
+            node for node in result.expand.values()
+            if node["class_type"] == "easy h3ContextMediaTrim"
+            and not node["inputs"].get("phase_align_video_encode")
+        ]
+        assert len(trims) == 1
+        assert trims[0]["inputs"]["output_frames"] == duration
+        assert trims[0]["inputs"].get("fit_video_duration", False) is fits_video
+    else:
+        assert isinstance(length, list)
+        assert length[1] == 3
+        assert result.expand[length[0]]["class_type"] == "easy multiTrackTaskOutput"
+        assert not any(
+            node["class_type"] == "easy h3ContextMediaTrim"
+            for node in result.expand.values()
+        )
 
 
 @pytest.mark.parametrize("duration", [120, 125, 124])
@@ -4498,6 +4575,37 @@ def test_video_locked_trim_fits_full_generated_span_without_dropping_tail(
     assert result.values[0][0].item() == images[prefix].item()
     assert result.values[0][-1].item() == images[-1].item()
     assert torch.equal(result.values[1]["waveform"], audio["waveform"][..., prefix * 2:(prefix + duration) * 2])
+
+
+def test_audio_locked_trim_discards_generated_tail_without_time_compression(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    duration = 187
+    prefix = 22
+    generated = module._align_frame_count(duration) + 34
+    images = torch.arange(generated, dtype=torch.float32).reshape(-1, 1, 1, 1)
+    audio = {
+        "waveform": torch.arange(generated * 2).reshape(1, 1, -1),
+        "sample_rate": 48,
+    }
+
+    result = module.EasyH3ContextMediaTrim.execute(
+        images,
+        audio,
+        trim_frames=prefix,
+        output_frames=duration,
+        pad_audio=False,
+        fps=24,
+    )
+
+    assert torch.equal(result.values[0], images[prefix:prefix + duration])
+    assert result.values[0][-1].item() == images[prefix + duration - 1].item()
+    assert result.values[0][-1].item() != images[-1].item()
+    assert torch.equal(
+        result.values[1]["waveform"],
+        audio["waveform"][..., prefix * 2:(prefix + duration) * 2],
+    )
 
 
 @pytest.mark.parametrize("track_type", ["video"])
