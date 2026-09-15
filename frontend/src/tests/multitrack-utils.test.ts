@@ -1020,6 +1020,60 @@ describe('multitrack utilities', () => {
     ])
   })
 
+  it('uses the gap after a task segment before shifting later segments', () => {
+    const data = createDefaultTrackData()
+    const segments = [
+      {
+        id: 'first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+      {
+        id: 'second',
+        start_frame: 48,
+        end_frame: 72,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+      {
+        id: 'third',
+        start_frame: 84,
+        end_frame: 108,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+    ]
+
+    expect(resizeTaskSegmentEnd(segments, 'first', 36).map((segment) => [
+      segment.start_frame,
+      segment.end_frame,
+    ])).toEqual([
+      [0, 36],
+      [48, 72],
+      [84, 108],
+    ])
+
+    expect(resizeTaskSegmentEnd(segments, 'first', 48).map((segment) => [
+      segment.start_frame,
+      segment.end_frame,
+    ])).toEqual([
+      [0, 48],
+      [48, 72],
+      [84, 108],
+    ])
+
+    expect(resizeTaskSegmentEnd(segments, 'first', 60).map((segment) => [
+      segment.start_frame,
+      segment.end_frame,
+    ])).toEqual([
+      [0, 60],
+      [60, 84],
+      [96, 120],
+    ])
+  })
+
   it('increases total length when editing the duration of an earlier task', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [

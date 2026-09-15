@@ -1175,13 +1175,22 @@ export function resizeTaskSegmentEnd(
   const delta = endFrame - selected.end_frame
   if (delta === 0) return sorted
 
+  const nextSegment = sorted[selectedIndex + 1]
+  const gapAfterSelected = nextSegment
+    ? Math.max(0, nextSegment.start_frame - selected.end_frame)
+    : 0
+  const downstreamDelta = delta > 0
+    ? Math.max(0, delta - gapAfterSelected)
+    : delta
+
   return sorted.map((segment, index) => {
     if (index < selectedIndex) return segment
     if (index === selectedIndex) return { ...segment, end_frame: endFrame }
+    if (downstreamDelta === 0) return segment
     return {
       ...segment,
-      start_frame: segment.start_frame + delta,
-      end_frame: segment.end_frame + delta,
+      start_frame: segment.start_frame + downstreamDelta,
+      end_frame: segment.end_frame + downstreamDelta,
     }
   })
 }
