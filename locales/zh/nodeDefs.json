@@ -628,6 +628,7 @@
     "description": "加载最多 25 张图像，按所选分辨率处理后输出图像列表。",
     "inputs": {
       "resolution": { "name": "分辨率" },
+      "max_limit": { "name": "输出数量上限", "tooltip": "最终输出的图像数量，-1 表示不限制（输出所有加载的图像）。" },
       "image_data": { "name": "图像数据" }
     },
     "outputs": {

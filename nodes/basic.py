@@ -1765,13 +1765,25 @@ class MultiImagesLoader(io.ComfyNode):
             description="Load up to 25 images and resize each using the selected resolution.",
             inputs=[
                 io.DynamicCombo.Input("resolution", options=resolution_combo_options),
+                io.Int.Input(
+                    "max_limit",
+                    default=-1,
+                    max=25,
+                    min=-1,
+                    tooltip="Maximum number of images to output. -1 means no limit (output all loaded images).",
+                ),
                 TYPE_IMAGE_DATA.Input("image_data"),
             ],
             outputs=[io.Image.Output("IMAGES", is_output_list=True)],
         )
 
     @classmethod
-    def execute(cls, resolution: str | dict, image_data: str | dict) -> io.NodeOutput:
+    def execute(
+        cls,
+        resolution: str | dict,
+        max_limit: int,
+        image_data: str | dict,
+    ) -> io.NodeOutput:
         if isinstance(image_data, str):
             try:
                 image_data = json.loads(image_data)
@@ -1782,6 +1794,8 @@ class MultiImagesLoader(io.ComfyNode):
         images = image_data["images"]
         if len(images) > 25:
             raise ValueError("IMAGE_DATA supports at most 25 images.")
+        if max_limit >= 0 and len(images) > max_limit:
+            images = images[:max_limit]
 
         resize_method = _configured_resize_method(resolution)
         output: list[torch.Tensor] = []
