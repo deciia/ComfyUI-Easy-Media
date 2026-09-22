@@ -419,6 +419,9 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
         for track in info.get("tracks", [])
     )
     mode = str(content.get("task_mode", "default")).lower()
+    # Deciia 本地新增：直通任务模式
+    if mode == "passthrough":
+        return "passthrough"
     if mode == "l2v":
         return "l2v"
     if mode == "ref":
@@ -472,6 +475,10 @@ def h3_locked_video_track(
 
 def h3_generation_mode(task_type: str) -> str:
     normalized = task_type.strip().lower()
+    # Deciia 本地新增：直通段在 project 循环里被单独拦截，
+    # 走不到 conditioning 分支；这里返回哨兵值仅用于日志。
+    if normalized == "passthrough":
+        return "passthrough"
     if normalized in {"r2v", "rv2v", "vi2v", "v2v"}:
         return "reference"
     if normalized == "l2v":

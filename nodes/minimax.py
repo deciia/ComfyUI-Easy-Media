@@ -1187,6 +1187,13 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             segment = manifest["segments"][str(int(segment_index))]
             generation = str(int(segment["active_generation"]))
             generation_data = segment["generations"][generation]
+            if generation_data.get("context_cut") is True:
+                # Deciia 本地新增：直通段 shot 切断 → 返回占位空 latent
+                # 下游 trim/motion_context 会按 0 帧处理, 等效独立开场
+                return io.NodeOutput({
+                    "samples": torch.zeros(1, 16, 1, 60, 34, dtype=torch.float32),
+                    "context_cut": True,
+                })
             if resolution == "low":
                 filename = (
                     generation_data.get("context_latent_low")
@@ -2297,7 +2304,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                     default="new",
                 ),
                 io.Int.Input("segment_index", min=0),
-                io.Latent.Input("context_latent"),
+                io.Latent.Input("context_latent", optional=True),
                 io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path", default="", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
@@ -2334,8 +2341,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         project_name: str,
         project_save: str,
         segment_index: int,
-        context_latent: dict[str, Any],
         tracks_info: dict[str, Any],
+        context_latent: dict[str, Any] | None = None,
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
         seed: int = 0,
@@ -2402,19 +2409,32 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             project_dir
             / f"context_latent_{int(segment_index)}_{generation}.safetensors"
         )
-        with log_stage_time(
-            "MultiTrack Project",
-            f"{safe_name} / segment {segment_index} / save_latent_high",
-            synchronize=synchronize_execution_device,
-        ):
-            save_h3_latent(
-                (
-                    context_latent
-                    if sampling_pass == "first"
-                    else trim_motion_context_latent(context_latent)
-                ),
-                target_context_latent,
-            )
+        # Deciia 本地新增：直通段 shot 切断 → 占位 latent + manifest 标记
+        context_cut = context_latent is None
+        if context_cut:
+            placeholder_latent = {
+                "samples": torch.zeros(1, 16, 1, 60, 34, dtype=torch.float32),
+                "context_cut": True,
+            }
+            with log_stage_time(
+                "MultiTrack Project",
+                f"{safe_name} / segment {segment_index} / save_latent_placeholder",
+            ):
+                save_h3_latent(placeholder_latent, target_context_latent)
+        else:
+            with log_stage_time(
+                "MultiTrack Project",
+                f"{safe_name} / segment {segment_index} / save_latent_high",
+                synchronize=synchronize_execution_device,
+            ):
+                save_h3_latent(
+                    (
+                        context_latent
+                        if sampling_pass == "first"
+                        else trim_motion_context_latent(context_latent)
+                    ),
+                    target_context_latent,
+                )
 
         target_context_latent_low: Path | None = None
         if context_latent_low is not None:
@@ -2486,6 +2506,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
+        if context_cut:
+            generation_manifest["context_cut"] = True
         if target_context_latent_low is not None:
             generation_manifest["context_latent_low"] = (
                 target_context_latent_low.name

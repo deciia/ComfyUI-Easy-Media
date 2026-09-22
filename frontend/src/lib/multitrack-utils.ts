@@ -16,7 +16,7 @@ import { synchronizeSharedTaskImages } from './task-image-utils'
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
 export const MULTITRACK_MIN_DURATION_SECONDS = 5
-export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit', 'l2v'] as const
+export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit', 'l2v', 'passthrough'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
 export const MULTITRACK_CONTINUITY_MODES = ['shot', 'context', 'context_swap'] as const
 export const MULTITRACK_DEFAULT_CONTINUITY_MODE: MultiTrackContinuityMode = 'shot'
@@ -111,6 +111,7 @@ export function getMultiTrackTaskType(
   hasVideoInRange: boolean,
 ): string {
   if (mode === 'l2v') return 'l2v'
+  if (mode === 'passthrough') return 'passthrough'
   if (mode === 'ref') return hasVideoInRange ? 'rv2v' : 'r2v'
   if (mode === 'edit') return imageCount > 0 ? 'vi2v' : 'v2v'
   if (imageCount <= 0) return 't2v'

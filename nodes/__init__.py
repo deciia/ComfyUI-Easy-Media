@@ -1,6 +1,7 @@
 from .basic import *
 from .audio import *
 from .common import *
+from .deciiapass_stage import *
 from .image import *
 from .ltx import *
 from .ltxv import *

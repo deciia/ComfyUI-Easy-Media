@@ -4,7 +4,7 @@
     "save": "Save",
     "add": "Add",
     "delete": "Delete",
-    "syncPlay":"Sync Play"
+    "syncPlay": "Sync Play"
   },
   "compareVideo": {
     "empty": "Choose source and output videos to compare, or run the node with inputs.",
@@ -115,7 +115,8 @@
     "rv2v": "RV2V",
     "vi2v": "VI2V",
     "ref": "R2V",
-    "edit": "Edit"
+    "edit": "Edit",
+    "passthrough": "Pass"
   },
   "multitrackSegment": {
     "taskLabel": "Segment {n} {mode}"
@@ -341,8 +342,8 @@
   },
   "audioTrack": {
     "addMarker": "Add marker",
-    "importFile": "Import audio file\u2026",
-    "importUrl": "Import from URL\u2026",
+    "importFile": "Import audio file…",
+    "importUrl": "Import from URL…",
     "enterUrl": "Enter audio URL:",
     "frameLabel": "Frame {n}",
     "markerAriaLabel": "Marker: {label}",
@@ -361,8 +362,8 @@
     "dropZone": "Image track drop zone",
     "addSegment": "Add image",
     "deleteSegment": "Delete selected segment",
-    "importFile": "Import image file\u2026",
-    "importUrl": "Import from URL\u2026",
+    "importFile": "Import image file…",
+    "importUrl": "Import from URL…",
     "enterUrl": "Enter image URL:",
     "placeholder": "Image Track",
     "placeholderHint": "Double-click to add content",
@@ -421,7 +422,7 @@
     "tabOutputs": "Outputs",
     "tabHistory": "History",
     "filter": "Multi",
-    "selectAll":"SelectAll",
+    "selectAll": "SelectAll",
     "confirm": "Confirm",
     "tabLocal": "Local",
     "tabUrl": "URL",

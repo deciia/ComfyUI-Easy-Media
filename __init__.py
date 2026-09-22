@@ -116,6 +116,8 @@ class EasyMediaExtension(ComfyExtension):
             EasyMinimaxPromptOverride,
             EasyMiniMaxH3ReferenceToVideoBridge,
             EasyRemoveH3MotionContextLatent,
+            # Deciia 本地新增
+            DeciiaPassthroughStage,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,

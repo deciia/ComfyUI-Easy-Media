@@ -1121,7 +1121,11 @@ export function TaskSegmentEditor({
               </TooltipProvider>
               <SelectContent>
                 {MULTITRACK_CONTINUITY_MODES.map((continuityOption) => (
-                  <SelectItem key={continuityOption} value={continuityOption}>
+                  <SelectItem
+                    key={continuityOption}
+                    value={continuityOption}
+                    disabled={mode === 'passthrough' && continuityOption === 'context_swap'}
+                  >
                     <span className="text-[10px]">{t(`multitrackContinuityModes.${continuityOption}`)}</span>
                   </SelectItem>
                 ))}

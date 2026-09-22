@@ -36,6 +36,11 @@ from ..utils.h3_project import (
     validate_h3_project_outputs,
 )
 from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
+from .deciiapassthrough import (
+    PASSTHROUGH_CONTEXT_FRAMES,
+    is_passthrough_task,
+    passthrough_continuity_mode,
+)
 from ..utils.project_memory import (
     BOUNDARY_META,
     SEGMENT_META,
@@ -53,6 +58,22 @@ TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
 TYPE_H3_PROJECT_STATIC_DATA = io.Custom(io_type="H3_PROJECT_STATIC_DATA")
 H3_CONTEXT_CONTINUITY_MODES = {"context", "context_swap"}
 H3_CONTEXT_SOURCE_FRAMES = 22
+
+
+def _h3_manifest_context_cut(project_name: str, segment_index: int) -> bool:
+    """Deciia 本地新增：读盘上 manifest 判断段 i 是否标记 context_cut（跨 run 切断）。"""
+    from pathlib import Path
+    try:
+        output_dir = Path(folder_paths.get_output_directory()).resolve()
+        manifest_path = (
+            output_dir / "easy_media" / "projects" / project_name / "project.json"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        segment = manifest["segments"][str(int(segment_index))]
+        generation = str(int(segment["active_generation"]))
+        return segment["generations"][generation].get("context_cut") is True
+    except (KeyError, OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
 
 
 def _first_input(value: Any, default: Any = None) -> Any:
@@ -1183,6 +1204,16 @@ class EasyMultiTrackProject(io.ComfyNode):
             raise ValueError(
                 "No H3 task segments are available from segment_start_number."
             )
+        # Deciia 本地新增：直通段需要原始 entry（含窗口帧位），
+        # 打包进 tracks_info 传给子图节点（GRAPH 序列化只认这些字段）。
+        info_with_pass_entries = {
+            **info,
+            "_deciiapass_entries": [
+                {"index": int(task_index), "entry": entry}
+                for task_index, entry in selected_entries
+                if is_passthrough_task(entry)
+            ],
+        }
 
         first_selected_index, first_selected_entry = selected_entries[0]
         first_selected_task = first_selected_entry.get("task", {})
@@ -1284,6 +1315,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             and str(entry["task"]["content"].get("continuity_mode", "shot")).lower()
             in H3_CONTEXT_CONTINUITY_MODES for task_index, entry in selected_entries
         )
+        previous_context_cut = False
         if uses_linked_prepare:
             def raw_sampling_input(name: str) -> Any:
                 value = sampling_config.get(name)
@@ -1396,6 +1428,75 @@ class EasyMultiTrackProject(io.ComfyNode):
                 preserve_source_timing
                 and h3_locked_video_track(entry, info) is not None
             )
+
+            # ---- Deciia 本地新增：直通(passthrough)任务段 ------------------
+            # 不采样不重绘：素材文件级加工成 staging 交付视频 + 尾部上下文，
+            # 直接走 h3ProjectArtifact 登记（成片合并/版本管理全复用）。
+            if is_passthrough_task(entry):
+                report_segment_step(0.05)
+                passthrough_stage = graph.node(
+                    "easy deciiaPassthroughStage",
+                    id=f"passthrough_stage_{task_index}",
+                    project_name=safe_project_name,
+                    segment_index=task_index,
+                    tracks_info=info_with_pass_entries,
+                    width=target_width,
+                    height=target_height,
+                    fps=fps,
+                    # shot 切断时不需要尾帧解码, 但 staging 视频仍要出
+                    context_frames=PASSTHROUGH_CONTEXT_FRAMES,
+                )
+                if passthrough_continuity_mode(entry) == "shot":
+                    # 切断: 不编码素材尾帧, artifact 记 context_cut 标记
+                    passthrough_context = None
+                    passthrough_continuity = "shot"
+                else:
+                    passthrough_context = _h3_encode_context_media(
+                        graph,
+                        passthrough_stage.out(1),
+                        passthrough_stage.out(2),
+                        vae,
+                        audio_vae,
+                        f"passthrough_context_{task_index}",
+                        context_frames=PASSTHROUGH_CONTEXT_FRAMES,
+                    )
+                    passthrough_continuity = "context"
+                report_segment_step(0.7)
+                passthrough_artifact_inputs: dict[str, Any] = {
+                    "project_name": safe_project_name,
+                    "project_save": project_save,
+                    "segment_index": task_index,
+                    "context_latent": passthrough_context,
+                    "video_path": passthrough_stage.out(0),
+                    "tracks_info": output_info,
+                    "continuity_mode": passthrough_continuity,
+                    "seed": first_pass_seed,
+                    "sampling_pass": "single",
+                }
+                if previous_artifact is not None:
+                    passthrough_artifact_inputs["previous"] = previous_artifact
+                passthrough_artifact = graph.node(
+                    "easy h3ProjectArtifact",
+                    id=f"artifact_{task_index}",
+                    **passthrough_artifact_inputs,
+                )
+                previous_artifact = passthrough_artifact.out(0)
+                last_project_output = passthrough_artifact.out(0)
+                if passthrough_context is not None:
+                    previous_hires_context_latent = passthrough_context
+                    previous_low_context_latent = passthrough_context
+                else:
+                    # 切断: 清空链上的续接 latent, 同 run 内下一段也不会误接
+                    previous_hires_context_latent = None
+                    previous_low_context_latent = None
+                previous_context_cut = passthrough_context is None
+                segment_nodes.update({
+                    node_id: task_index
+                    for node_id in graph.nodes.keys() - previous_graph_nodes
+                })
+                report_segment_step(1.0)
+                continue
+            # ---- Deciia 直通段结束 ----------------------------------------
 
             ref_image_size = (
                 str(content.get("ref_image_size", "match")).lower()
@@ -1525,6 +1626,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 uses_context
                 and previous_hires_context_latent is None
                 and task_index > 0
+                and not previous_context_cut
+                and not _h3_manifest_context_cut(safe_project_name, task_index - 1)
             ):
                 report_segment_step(0.14)
                 loaded_hires_context = graph.node(
@@ -2143,6 +2246,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             last_project_output = artifact.out(0)
             previous_hires_context_latent = runtime_hires_context_latent
             previous_low_context_latent = runtime_low_context_latent
+            previous_context_cut = False
             segment_nodes.update({
                 node_id: task_index
                 for node_id in graph.nodes.keys() - previous_graph_nodes
