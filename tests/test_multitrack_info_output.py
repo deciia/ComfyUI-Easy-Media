@@ -4057,6 +4057,7 @@ def test_multitrack_task_output_audio_lock_prefers_ffmpeg(monkeypatch):
 def test_extract_video_audio_caches_by_source_path(monkeypatch):
     """Two different ``VideoInput`` wrappers around the same source file must
     share a single extraction via the cache dict the helper accepts."""
+    _load_basic_module()
     video_module = sys.modules["easy_media.utils.video"]
     audio = {
         "waveform": torch.full((1, 1, 4), 5.0),
