@@ -238,6 +238,7 @@ def _load_basic_module():
         "merge_video_track_with_ffmpeg",
         "canonicalize_multitrack_slot_content",
         "multitrack_is_shared_reference",
+        "multitrack_is_muted_image",
         "multitrack_media_identity",
         "multitrack_shared_task_images",
         "multitrack_segments_in_window",
@@ -361,6 +362,7 @@ def _load_basic_module():
     utils_module.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     utils_module.canonicalize_multitrack_slot_content = multitrack_module.canonicalize_multitrack_slot_content
     utils_module.multitrack_is_shared_reference = multitrack_module.multitrack_is_shared_reference
+    utils_module.multitrack_is_muted_image = multitrack_module.multitrack_is_muted_image
     utils_module.multitrack_media_identity = multitrack_module.multitrack_media_identity
     utils_module.multitrack_shared_task_images = multitrack_module.multitrack_shared_task_images
     utils_module.multitrack_segments_in_window = multitrack_module.multitrack_segments_in_window
@@ -1118,6 +1120,40 @@ def test_multitrack_editor_outputs_task_images_as_unresized_list_items():
         for image in segment["content"]["images"]
     ]
     assert [image["media_index"] for image in task_images] == [0, 1]
+
+
+def test_multitrack_editor_keeps_muted_task_image_metadata_but_skips_reference_output():
+    module = _load_basic_module()
+    muted_image = torch.zeros(1, 10, 20, 3)
+    active_image = torch.ones(1, 10, 20, 3)
+    track_data = {
+        "tracks": [{
+            "id": "task-track",
+            "type": "task",
+            "segments": [{
+                "id": "task-1",
+                "content": {"media_type": "none", "images": [
+                    {"id": "muted", "source_type": "slot", "slot_name": "image1", "muted": True},
+                    {"id": "active", "source_type": "slot", "slot_name": "image2"},
+                ]},
+            }],
+        }],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "crop"},
+        "None",
+        track_data,
+        image=[muted_image, active_image],
+    )
+
+    tracks_info, images, _audio, _videos = result.values
+    image_items = tracks_info["tracks"][0]["segments"][0]["content"]["images"]
+    assert len(images) == 1
+    assert torch.equal(images[0], active_image)
+    assert image_items[0]["muted"] is True
+    assert "media_index" not in image_items[0]
+    assert image_items[1]["media_index"] == 0
 
 
 def test_multitrack_editor_passes_task_markers_through_tracks_info():

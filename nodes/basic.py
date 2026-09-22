@@ -47,6 +47,7 @@ from ..utils import (
     merge_video_track_with_ffmpeg,
     canonicalize_multitrack_slot_content,
     multitrack_is_shared_reference,
+    multitrack_is_muted_image,
     multitrack_media_identity,
     multitrack_shared_task_images,
     multitrack_segments_in_window,
@@ -904,6 +905,10 @@ def _build_tracks_info_and_media_outputs(
                         if not isinstance(image_item, dict):
                             continue
                         normalized_image = canonicalize_multitrack_slot_content(image_item)
+                        if multitrack_is_muted_image(normalized_image):
+                            normalized_image.pop("media_index", None)
+                            normalized_images.append(normalized_image)
+                            continue
                         panorama_view = image_item.get("panorama_view")
                         shared_cache_key = None
                         if multitrack_is_shared_reference(normalized_image):
@@ -2946,6 +2951,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
             for task_content, task_content_start in task_content_entries:
                 for image_info in task_content.get("images", []):
                     if not isinstance(image_info, dict):
+                        continue
+                    if multitrack_is_muted_image(image_info):
                         continue
                     shared_identity = (
                         multitrack_media_identity(image_info)

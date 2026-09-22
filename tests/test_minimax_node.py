@@ -327,6 +327,7 @@ def _load_minimax_node(monkeypatch):
         "load_audio_waveform",
         "load_image_tensor",
         "multitrack_is_shared_reference",
+        "multitrack_is_muted_image",
         "multitrack_media_identity",
         "multitrack_segments_in_window",
         "multitrack_slot_name",

@@ -88,6 +88,14 @@ def test_parse_tracks_info_extracts_dimensions_and_fps():
     assert len(h3_task_entries(result)) == 2
 
 
+def test_h3_task_type_ignores_muted_reference_images():
+    info = _tracks_info()
+    entry = h3_task_entries(info)[0]
+    entry["task"]["content"]["images"] = [{"muted": True}]
+
+    assert h3_task_type(entry, info) == "t2v"
+
+
 def test_parse_tracks_info_rejects_invalid_dimensions():
     with pytest.raises(ValueError, match="width and height"):
         parse_tracks_info({"width": 0, "height": 768, "tracks": []})

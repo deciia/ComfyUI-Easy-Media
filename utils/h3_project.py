@@ -35,6 +35,7 @@ from .multitrack import (
     _trim_track_audio,
     multitrack_audio_lock_is_effective,
     multitrack_is_shared_reference,
+    multitrack_is_muted_image,
     multitrack_media_identity,
     multitrack_segments_in_window,
 )
@@ -410,7 +411,16 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
 
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
-    image_count = len(content.get("images", [])) if isinstance(content.get("images"), list) else 0
+    images = content.get("images", [])
+    image_count = (
+        sum(
+            1
+            for image in images
+            if isinstance(image, dict) and not multitrack_is_muted_image(image)
+        )
+        if isinstance(images, list)
+        else 0
+    )
     has_video = any(
         isinstance(track, dict)
         and track.get("type") == "video"
@@ -1416,6 +1426,9 @@ def prepare_multitrack_project_media(
                 retained_images: list[dict] = []
                 for image_info in images if isinstance(images, list) else []:
                     if not isinstance(image_info, dict):
+                        continue
+                    if multitrack_is_muted_image(image_info):
+                        retained_images.append(image_info)
                         continue
                     identity = multitrack_media_identity(image_info)
                     if not multitrack_is_shared_reference(image_info):

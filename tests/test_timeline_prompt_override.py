@@ -106,6 +106,7 @@ def _load_basic_module(monkeypatch):
     utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
     utils.canonicalize_multitrack_slot_content = lambda value: value
     utils.multitrack_is_shared_reference = lambda value: False
+    utils.multitrack_is_muted_image = lambda value: False
     utils.multitrack_media_identity = lambda value: None
     utils.multitrack_shared_task_images = lambda tracks: []
     utils.multitrack_segments_in_window = lambda *args, **kwargs: []
