@@ -1455,11 +1455,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                 base_task_length = task_output.out(3)
                 if preserve_source_timing:
                     base_task_length = task_duration_frames
-            task_length: Any = (
+            aligned_task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing
                 else base_task_length
             )
+            task_length: Any = aligned_task_length
             will_have_context_continuity = (
                 uses_context
                 and (previous_hires_context_latent is not None or task_index > 0)
@@ -1487,6 +1488,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "audios": task_output.out(5),
                     "videos": task_output.out(6),
                 })
+                if fit_locked_video_timing:
+                    conditioning_inputs["locked_video_timing_frames"] = (
+                        aligned_task_length
+                    )
             encoded_conditioning = graph.node(
                 "easy minimaxH3ToVideo",
                 id=f"conditioning_{task_index}",
