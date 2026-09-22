@@ -1187,6 +1187,7 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
         "width",
         "height",
         "length",
+        "locked_video_timing_frames",
         "ref_image_size",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
@@ -4871,6 +4872,22 @@ def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypat
     assert conditioning["inputs"]["ref_video_audio_0"] == [components_id, 1]
 
 
+def test_locked_video_timing_is_forwarded_to_reference_bridge(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["reference"],
+            videos=[object()],
+            locked_video_timing_frames=[56],
+        )
+    )
+
+    conditioning = _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
+    assert conditioning["inputs"]["locked_video_timing_frames"] == 56
+
+
 def test_easy_node_reports_progress_for_each_media_input(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -5061,6 +5078,56 @@ def test_reference_bridge_pads_video_tail_without_resizing(monkeypatch):
     assert aligned.shape == (124, 1, 1, 1)
     assert aligned[:120, 0, 0, 0].tolist() == list(map(float, range(120)))
     assert aligned[120:, 0, 0, 0].tolist() == [119.0] * 4
+
+
+@pytest.mark.parametrize("source_frame_count", [39, 40, 41, 55, 56, 57])
+def test_reference_bridge_uniformly_fits_locked_video_timing(
+    monkeypatch,
+    source_frame_count,
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    calls = []
+
+    class _NativeReferenceNode:
+        @classmethod
+        def execute(cls, **kwargs):
+            calls.append(kwargs)
+            return _NodeOutput("conditioning", "latent")
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[
+        "MiniMaxH3ReferenceToVideo"
+    ] = _NativeReferenceNode
+    target_frame_count = module._align_frame_count(source_frame_count)
+    frames = _image_values(*range(source_frame_count))
+
+    module.EasyMiniMaxH3ReferenceToVideoBridge.execute(
+        clip=_Clip(),
+        vae=_Vae(),
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=target_frame_count,
+        locked_video_timing_frames=target_frame_count,
+        ref_video_0=frames,
+    )
+
+    fitted = calls[0]["ref_videos"]["ref_video_0"]
+    expected_indexes = torch.linspace(
+        0,
+        source_frame_count - 1,
+        target_frame_count,
+    ).round().long()
+    assert fitted.shape == (target_frame_count, 1, 1, 1)
+    assert torch.equal(fitted[:, 0, 0, 0], expected_indexes.float())
+    restored_indexes = torch.linspace(
+        0,
+        target_frame_count - 1,
+        source_frame_count,
+    ).round().long()
+    assert fitted.index_select(0, restored_indexes)[:, 0, 0, 0].tolist() == list(
+        map(float, range(source_frame_count))
+    )
 
 
 def test_reference_fallback_pads_video_tail_instead_of_dropping_frames(monkeypatch):
@@ -5528,6 +5595,10 @@ def test_locked_media_preserves_source_span_in_both_passes(
             assert expression["expression"] == "a + 34"
         else:
             assert length == expected_generated
+        if track_type == "video":
+            assert node["inputs"]["locked_video_timing_frames"] == expected_generated
+        else:
+            assert "locked_video_timing_frames" not in node["inputs"]
     trims = [
         n for n in graph.values()
         if n["class_type"] == "easy h3ContextMediaTrim"
