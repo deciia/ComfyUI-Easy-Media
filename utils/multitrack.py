@@ -73,6 +73,11 @@ def multitrack_is_shared_reference(content: dict) -> bool:
     )
 
 
+def multitrack_is_muted_image(content: dict) -> bool:
+    """Return whether a task image is explicitly bypassed."""
+    return isinstance(content, dict) and content.get("muted") is True
+
+
 def multitrack_media_identity(content: dict) -> tuple[str, str] | None:
     """Return the source/path identity used to match shared media references."""
     if not isinstance(content, dict):
@@ -168,7 +173,9 @@ def multitrack_slot_media_types(data: dict) -> set[str]:
             if track_type == "task":
                 images = content.get("images", [])
                 if isinstance(images, list) and any(
-                    isinstance(image, dict) and multitrack_slot_name(image) is not None
+                    isinstance(image, dict)
+                    and not multitrack_is_muted_image(image)
+                    and multitrack_slot_name(image) is not None
                     for image in images
                 ):
                     required.add("image")

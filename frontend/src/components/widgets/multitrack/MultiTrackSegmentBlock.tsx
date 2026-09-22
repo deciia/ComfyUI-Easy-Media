@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import { activeTaskImages } from '@/lib/task-image-utils'
 import { useT } from '@/lib/i18n'
 import { formatMultiTrackTime, getMultiTrackTaskModeLabel } from '@/lib/multitrack-utils'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
@@ -42,6 +43,7 @@ interface MultiTrackSegmentBlockProps {
   onDelete: (segmentId: string) => void
   onDistribute?: () => void
   onClone?: (segmentId: string) => void
+  onMerge?: () => void
   onSplitTask?: (segmentId: string) => void
   onSmartSplit?: (segmentId: string) => void
   onSmartSplitTasks?: (segmentId: string) => void
@@ -85,6 +87,7 @@ export function MultiTrackSegmentBlock({
   onDelete,
   onDistribute,
   onClone,
+  onMerge,
   onSplitTask,
   onSmartSplit,
   onSmartSplitTasks,
@@ -166,7 +169,7 @@ export function MultiTrackSegmentBlock({
       : segment.content.file_name ?? segment.id
   const durationLabel = formatMultiTrackTime(segmentDuration, { frameRate, showFrames: true })
   const taskPrompt = segment.content.user_prompt?.trim() ?? ''
-  const taskImageUrls = (segment.content.images ?? []).flatMap((image) => {
+  const taskImageUrls = activeTaskImages(segment.content.images).flatMap((image) => {
     const url = mediaContentToViewUrl({
       source_type: image.source_type ?? 'input',
       file_path: image.file_path,
@@ -621,6 +624,11 @@ export function MultiTrackSegmentBlock({
         {onClone ? (
           <ContextMenuItem onClick={() => onClone(segment.id)}>
             {cloneLabel}
+          </ContextMenuItem>
+        ) : null}
+        {trackType === 'task' && onMerge ? (
+          <ContextMenuItem onClick={onMerge}>
+            {t('multitrack.mergeTaskSegments')}
           </ContextMenuItem>
         ) : null}
         {trackType === 'task' && onSplitTask ? (
