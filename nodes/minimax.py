@@ -2279,6 +2279,55 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
         return io.NodeOutput({**audio, "waveform": aligned, "sample_rate": sample_rate})
 
 
+class EasyH3LockedAudioSelect(io.ComfyNode):
+    """Use effective locked audio, falling back to generated task audio."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3LockedAudioSelect",
+            display_name="H3 Locked Audio Select",
+            category="EasyUse/H3/dev",
+            description=(
+                "Internal selector that ignores missing locked audio while "
+                "preserving video timeline timing."
+            ),
+            inputs=[
+                io.Audio.Input("generated_audio"),
+                io.Audio.Input("locked_audio", optional=True),
+            ],
+            outputs=[io.Audio.Output("audio")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        generated_audio: dict[str, Any],
+        locked_audio: dict[str, Any] | None = None,
+    ) -> io.NodeOutput:
+        waveform = (
+            locked_audio.get("waveform")
+            if isinstance(locked_audio, dict)
+            else None
+        )
+        sample_rate = (
+            locked_audio.get("sample_rate")
+            if isinstance(locked_audio, dict)
+            else None
+        )
+        selected = (
+            locked_audio
+            if isinstance(waveform, torch.Tensor)
+            and waveform.ndim == 3
+            and waveform.shape[-1] > 0
+            and isinstance(sample_rate, int)
+            and sample_rate > 0
+            else generated_audio
+        )
+        return io.NodeOutput(selected)
+
+
 class EasyH3ProjectArtifact(io.ComfyNode):
     """Save one video or audio segment and its continuity latent."""
 
