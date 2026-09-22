@@ -1157,6 +1157,78 @@ def ffmpeg_extract_audio(video_path: str) -> dict | None:
             pass
 
 
+def extract_video_audio(
+    video,
+    cache: "dict | None" = None,
+) -> "dict | None":
+    """Extract a ComfyUI AUDIO dict from a VIDEO input. Prefers FFmpeg.
+
+    PyAV's full-frame decode walks every frame of the source file — wasteful
+    when only the audio stream is needed. FFmpeg demuxes the audio stream
+    directly. This helper is the shared extraction path for any code that
+    needs the audio track of a VIDEO input (e.g. audio-locked multitrack
+    tracks).
+
+    When ``cache`` is provided, the result is memoized for inputs that resolve
+    to the same underlying source so repeated calls (one per timeline segment)
+    share a single decode. The cache key is the source path when the input is
+    file-backed, else ``id(video)``.
+
+    Falls back to PyAV's ``video.get_components().audio`` when FFmpeg cannot
+    be used (in-memory / URL / trimmed source, or when FFmpeg raised or
+    returned no audio). A ``[Warning]`` is logged only when FFmpeg was
+    actually attempted but failed — in-memory / URL sources silently fall
+    back because FFmpeg was never in the picture.
+    """
+    # Lazy import: ``utils/__init__.py`` loads ``.video`` (step 4) before
+    # ``.multitrack`` (step 13), so a top-level ``from .multitrack import …``
+    # here would fire before ``_video_stream_source`` exists.
+    from .multitrack import _video_stream_source
+
+    source_path = _video_stream_source(video)
+    cache_key = source_path if isinstance(source_path, str) else id(video)
+
+    if isinstance(cache, dict) and cache_key in cache:
+        return cache[cache_key]
+
+    audio = _extract_video_audio_uncached(video, source_path)
+    if isinstance(audio, dict) and cache is not None:
+        cache[cache_key] = audio
+    return audio
+
+
+def _extract_video_audio_uncached(video, source_path) -> "dict | None":
+    ffmpeg_attempted = False
+    if isinstance(source_path, str) and os.path.isfile(source_path):
+        ffmpeg_attempted = True
+        try:
+            audio = ffmpeg_extract_audio(source_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[extract_video_audio] FFmpeg audio extraction raised: %s",
+                exc,
+            )
+            audio = None
+        if isinstance(audio, dict):
+            return audio
+    try:
+        components = video.get_components()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[extract_video_audio] PyAV get_components raised: %s",
+            exc,
+        )
+        return None
+    audio = getattr(components, "audio", None)
+    if ffmpeg_attempted and isinstance(audio, dict):
+        logger.warning(
+            "[extract_video_audio] FFmpeg returned no audio for %s; "
+            "falling back to PyAV full-frame decode (slower).",
+            source_path,
+        )
+    return audio if isinstance(audio, dict) else None
+
+
 # ---------------------------------------------------------------------------
 # Media segment helpers (used by routes.py)
 # ---------------------------------------------------------------------------

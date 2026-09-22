@@ -14,6 +14,8 @@ from typing import Any
 
 import folder_paths
 import torch
+
+logger = logging.getLogger(__name__)
 from .audio_gain import (
     audio_db_to_gain,
     audio_is_muted,
@@ -35,6 +37,7 @@ from .multitrack import (
     multitrack_media_identity,
     multitrack_segments_in_window,
 )
+from .video import extract_video_audio
 
 
 H3_FRAME_STEP = 17
@@ -1303,14 +1306,18 @@ def _project_source_audio(
     content: dict,
     audio_items: list,
     video_items: list,
+    video_audio_cache: dict | None = None,
 ) -> 'dict | None':
     if track_type == "audio":
         return _resolve_multitrack_audio(content, audio_items)
     video = _resolve_multitrack_video(content, video_items)
     if video is None:
         return None
-    components = video.get_components()
-    return components.audio if isinstance(components.audio, dict) else None
+    # Many segments can point at the same source video (especially when a long
+    # video is split across the timeline). ``extract_video_audio`` (in
+    # ``utils.video``) dedupes by source path via ``video_audio_cache`` so we
+    # decode the file once and reuse the dict across segments.
+    return extract_video_audio(video, cache=video_audio_cache)
 
 
 def _project_shared_audio(
@@ -1429,12 +1436,17 @@ def prepare_multitrack_project_media(
         )
         if track.get("audio_locked") is True:
             resolved_segments: list[tuple[dict, dict]] = []
+            # Reuse extracted audio across segments that resolve to the same
+            # underlying video file — decoding the same long video once per
+            # segment is the dominant cost on the audio-locked path.
+            video_audio_cache: dict = {}
             for local_segment in multitrack_segments_in_window(
                 track, 0, timeline_end,
             ):
                 content = local_segment.get("content", {})
                 source_audio = _project_source_audio(
                     track_type, content, audio_items, video_items,
+                    video_audio_cache,
                 )
                 if source_audio is not None:
                     resolved_segments.append((local_segment, source_audio))

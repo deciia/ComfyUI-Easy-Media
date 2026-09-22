@@ -82,6 +82,7 @@ from ..utils.multitrack import (
     _video_stream_source,
     multitrack_runtime_cache,
 )
+from ..utils.video import extract_video_audio
 
 
 # ---------------------------------------------------------------------------
@@ -2818,6 +2819,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_full_timeline = requested_index == -1
         index = max(0, requested_index)
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
+        # Share ffmpeg-extracted audio across tracks inside the same execute
+        # call so a video referenced by many locked audio/video tracks (or by
+        # multiple iterations of the timeline loop below) decodes once.
+        video_audio_cache: dict = {}
         task_cache_key = (
             "multitrack_task_output",
             requested_index,
@@ -3053,7 +3058,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
                             and video_items[media_index] is not None
                             and lock_priority > locked_audio_priority
                         ):
-                            video_audio = video_items[media_index].get_components().audio
+                            video_audio = extract_video_audio(
+                                video_items[media_index],
+                                cache=video_audio_cache,
+                            )
                             if isinstance(video_audio, dict):
                                 locked_audio = video_audio
                                 locked_audio_priority = lock_priority
@@ -3214,7 +3222,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
                         )
                         selected_video.append(merged_video)
                         if locked_audio_priority < 1 and locked_audio_track:
-                            video_audio = merged_video.get_components().audio
+                            video_audio = extract_video_audio(
+                                merged_video,
+                                cache=video_audio_cache,
+                            )
                             if isinstance(video_audio, dict):
                                 locked_audio = _trim_track_audio(
                                     video_audio,
@@ -3240,7 +3251,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
                     track_video = video_items[media_index]
                     if locked_audio_priority < 1 and locked_audio_track:
-                        video_audio = track_video.get_components().audio
+                        video_audio = extract_video_audio(
+                            track_video,
+                            cache=video_audio_cache,
+                        )
                         if isinstance(video_audio, dict):
                             locked_audio = _trim_track_audio(
                                 video_audio,
