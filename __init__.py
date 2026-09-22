@@ -108,6 +108,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyH3ContextMediaTrim,
             EasyH3AudioContextLatent,
             EasyH3LockedAudioDurationAlign,
+            EasyH3LockedAudioSelect,
             EasyH3ProjectArtifact,
             EasyH3ProjectStaticPrepare,
             EasyMultiTrackProject,

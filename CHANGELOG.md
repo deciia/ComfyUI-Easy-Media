@@ -10,7 +10,7 @@
 
 ### 🐛 Bug Fixes
 
-- **Audio Lock**: Fixed redundant repeated encoding/loading when locking audio across multiple segments of long videos. Due to the multitrack project design, all audio locks are processed before the reference video generation node, so when video is present, ffmpeg is used to extract and cache the audio. This avoids wasted performance and loading time from repeatedly loading audio from the full video in multitrack projects and multitrack task outputs.
+- **Audio Lock**: Fixed redundant repeated encoding/loading when locking audio across multiple segments of long videos. Due to the multitrack project design, all audio locks are processed before the reference video generation node, so when video is present, ffmpeg is used to extract and cache the audio. Videos without audio and muted tracks no longer lock audio or repeat audio probing, while their video timeline timing remains unchanged.
 
 ## [1.3.2] - 2026-09-20
 

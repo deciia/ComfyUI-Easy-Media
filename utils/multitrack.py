@@ -218,6 +218,56 @@ def multitrack_segments_in_window(
         local_segment["content"] = dict(content)
         clipped.append(local_segment)
     return clipped
+
+
+def multitrack_audio_lock_is_effective(
+    info: dict,
+    track: dict,
+    start_frame: int,
+    end_frame: int,
+    *,
+    has_solo_track: bool | None = None,
+) -> bool:
+    """Return whether a locked track has audible media in a timeline window.
+
+    Video timing remains independent from this decision. This helper only
+    answers whether the track is allowed to provide lock audio.
+    """
+    if (
+        not isinstance(info, dict)
+        or not isinstance(track, dict)
+        or track.get("type") not in {"audio", "video"}
+        or track.get("audio_locked") is not True
+        or audio_is_muted(info)
+        or audio_is_muted(track)
+    ):
+        return False
+    if has_solo_track is None:
+        tracks = info.get("tracks", [])
+        has_solo_track = any(
+            isinstance(candidate, dict)
+            and candidate.get("type") in {"audio", "video"}
+            and candidate.get("solo") is True
+            for candidate in tracks if isinstance(tracks, list)
+        )
+    if has_solo_track and track.get("solo") is not True:
+        return False
+
+    track_type = track.get("type")
+    return any(
+        isinstance(segment, dict)
+        and isinstance(segment.get("content"), dict)
+        and segment["content"].get("media_type") == track_type
+        and not audio_is_muted(segment["content"])
+        and _multitrack_frame_value(segment.get("start_frame")) < end_frame
+        and _multitrack_frame_value(
+            segment.get("end_frame"),
+            _multitrack_frame_value(segment.get("start_frame")),
+        ) > start_frame
+        for segment in track.get("segments", [])
+    )
+
+
 def _slot_index(slot_name: str | None) -> int:
     if not slot_name:
         return 0

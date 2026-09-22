@@ -1192,7 +1192,7 @@ def extract_video_audio(
         return cache[cache_key]
 
     audio = _extract_video_audio_uncached(video, source_path)
-    if isinstance(audio, dict) and cache is not None:
+    if isinstance(cache, dict):
         cache[cache_key] = audio
     return audio
 
@@ -1200,6 +1200,8 @@ def extract_video_audio(
 def _extract_video_audio_uncached(video, source_path) -> "dict | None":
     ffmpeg_attempted = False
     if isinstance(source_path, str) and os.path.isfile(source_path):
+        if ffprobe_info(source_path).get("has_audio") is False:
+            return None
         ffmpeg_attempted = True
         try:
             audio = ffmpeg_extract_audio(source_path)

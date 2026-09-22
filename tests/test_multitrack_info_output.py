@@ -3852,6 +3852,11 @@ def test_prepare_multitrack_project_media_audio_lock_prefers_ffmpeg(monkeypatch)
     monkeypatch.setattr(
         sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
     )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
     monkeypatch.setattr(os.path, "isfile", lambda _path: True)
 
     tracks_info = {
@@ -3930,6 +3935,11 @@ def test_prepare_multitrack_project_media_audio_lock_falls_back_to_pyav(
     monkeypatch.setattr(
         sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
     )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
     # ``os.path.isfile`` would normally return False for ``"locked.mp4"`` in
     # this test environment. Patch it to True so the helper actually attempts
     # FFmpeg before falling back — that's the path we want to exercise.
@@ -3990,6 +4000,11 @@ def test_multitrack_task_output_audio_lock_prefers_ffmpeg(monkeypatch):
 
     monkeypatch.setattr(
         sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
+    )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
     )
     monkeypatch.setattr(os.path, "isfile", lambda _path: True)
 
@@ -4052,6 +4067,11 @@ def test_extract_video_audio_caches_by_source_path(monkeypatch):
         return audio
 
     monkeypatch.setattr(video_module, "ffmpeg_extract_audio", fake_ffmpeg)
+    monkeypatch.setattr(
+        video_module,
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
     monkeypatch.setattr(os.path, "isfile", lambda _path: True)
 
     # Two distinct _FakeVideo instances but same ``source`` path.
@@ -4075,6 +4095,71 @@ def test_extract_video_audio_caches_by_source_path(monkeypatch):
     # Neither wrapper paid the PyAV decode cost.
     assert video_a.components_calls == 0
     assert video_b.components_calls == 0
+
+
+def test_extract_video_audio_caches_missing_audio(monkeypatch):
+    """A source confirmed to have no audio must not be probed per segment."""
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), None, Fraction(2)),
+        source="silent.mp4",
+    )
+    ffmpeg_calls = []
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(video_module, "ffprobe_info", lambda _path: {"has_audio": False})
+    monkeypatch.setattr(
+        video_module,
+        "ffmpeg_extract_audio",
+        lambda path: ffmpeg_calls.append(path),
+    )
+
+    cache: dict = {}
+    assert video_module.extract_video_audio(video, cache=cache) is None
+    assert video_module.extract_video_audio(video, cache=cache) is None
+
+    assert cache == {"silent.mp4": None}
+    assert ffmpeg_calls == []
+    assert video.components_calls == 0
+
+
+def test_prepare_multitrack_project_media_muted_video_does_not_lock_audio(
+    monkeypatch,
+):
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    video = _FakeVideo(
+        _VideoComponents(
+            torch.zeros(4, 2, 2, 3),
+            {"waveform": torch.ones(1, 1, 4), "sample_rate": 2},
+            Fraction(2),
+        ),
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args, **_kwargs: video,
+    )
+
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 4,
+        "tracks": [{
+            "type": "video",
+            "audio_locked": True,
+            "muted": True,
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"media_type": "video"},
+            }],
+        }],
+    }
+
+    locked = project_module.prepare_multitrack_project_media(tracks_info)[-1]
+
+    assert locked is None
+    assert video.components_calls == 0
 
 
 def test_crop_multitrack_project_media_crops_reused_audio_and_video():

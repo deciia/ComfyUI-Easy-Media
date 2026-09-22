@@ -80,6 +80,7 @@ from ..utils.multitrack import (
     _resize_multitrack_video,
     _trim_track_audio,
     _video_stream_source,
+    multitrack_audio_lock_is_effective,
     multitrack_runtime_cache,
 )
 from ..utils.video import extract_video_audio
@@ -3038,7 +3039,13 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     if not isinstance(track, dict):
                         continue
                     media_index = _track_output_index(track)
-                    if track.get("audio_locked") is True:
+                    if multitrack_audio_lock_is_effective(
+                        info,
+                        track,
+                        0,
+                        _multitrack_timeline_end(info),
+                        has_solo_track=has_solo_track,
+                    ):
                         lock_priority = 2 if track.get("type") == "audio" else 1
                         if (
                             track.get("type") == "audio"
@@ -3079,10 +3086,6 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     continue
                 media_index = _track_output_index(track)
                 shared_segment = _shared_reference_segment(track) if not output_full_timeline else None
-                locked_audio_track = (
-                    track.get("type") in {"audio", "video"}
-                    and track.get("audio_locked") is True
-                )
                 if shared_segment is not None:
                     shared_content = shared_segment.get("content", {})
                     if track.get("type") == "audio":
@@ -3148,6 +3151,18 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     )
                     if track_media_duration_frames is not None and track_media_duration_frames <= 0:
                         continue
+                lock_duration = (
+                    track_media_duration_frames
+                    if is_minimax
+                    else duration_frames
+                )
+                locked_audio_track = multitrack_audio_lock_is_effective(
+                    info,
+                    track,
+                    start_frame,
+                    start_frame + max(0, int(lock_duration or 0)),
+                    has_solo_track=has_solo_track,
+                )
                 track_media_deferred = (
                     (track.get("type") == "audio" and deferred_audio)
                     or (track.get("type") == "video" and deferred_video)
@@ -4210,7 +4225,14 @@ class EasyMinimaxH3AudioLock(io.ComfyNode):
                     "latent", tooltip="MiniMax H3 joint audio/video latent."
                 ),
                 io.Vae.Input("audio_vae", tooltip="MiniMax H3 audio VAE."),
-                io.Audio.Input("audio", tooltip="Audio to lock into the H3 latent."),
+                io.Audio.Input(
+                    "audio",
+                    optional=True,
+                    tooltip=(
+                        "Audio to lock into the H3 latent. Missing audio leaves "
+                        "the generated audio latent unchanged."
+                    ),
+                ),
                 io.Float.Input(
                     "remix_strength",
                     default=1.0,
@@ -4251,13 +4273,15 @@ class EasyMinimaxH3AudioLock(io.ComfyNode):
         cls,
         latent: dict,
         audio_vae: object,
-        audio: dict,
+        audio: dict | None = None,
         remix_strength: float = 1.0,
         short_audio_mode: str = "silence",
         prepend_frames: int = 0,
         frame_rate: float = 24.0,
     ) -> io.NodeOutput:
         selected_latent = latent
+        if audio is None:
+            return io.NodeOutput(selected_latent)
         selected_audio_vae = audio_vae
         selected_strength = float(remix_strength)
         selected_short_audio_mode = str(short_audio_mode)

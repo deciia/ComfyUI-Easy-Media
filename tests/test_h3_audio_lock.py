@@ -52,6 +52,19 @@ def test_h3_audio_lock_uses_v3_schema():
     assert [port.name for port in schema.outputs] == ["latent"]
 
 
+def test_h3_audio_lock_missing_audio_keeps_generated_latent():
+    basic = _load_basic_module()
+    latent = _latent()
+
+    result = basic.EasyMinimaxH3AudioLock.execute(
+        latent,
+        _AudioVae(),
+        None,
+    )
+
+    assert result.values[0] is latent
+
+
 def test_h3_audio_lock_pads_waveform_and_hard_locks_audio():
     basic = _load_basic_module()
     _install_nested_tensor_module()
