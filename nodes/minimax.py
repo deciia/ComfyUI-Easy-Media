@@ -337,6 +337,26 @@ def _align_reference_video_frames(
     return torch.cat((frames, padding), dim=0)
 
 
+def _fit_reference_video_frames(
+    frames: torch.Tensor,
+    target_frame_count: int,
+) -> torch.Tensor:
+    """Spread a locked driving video uniformly across its generated timeline."""
+    source_frame_count = int(frames.shape[0])
+    if source_frame_count <= 0 or source_frame_count == target_frame_count:
+        return frames
+    if target_frame_count <= 0:
+        raise ValueError("target_frame_count must be greater than zero")
+    positions = torch.linspace(
+        0,
+        source_frame_count - 1,
+        target_frame_count,
+        device=frames.device,
+    )
+    indices = positions.round().to(dtype=torch.long)
+    return frames.index_select(0, indices).contiguous()
+
+
 def _prepare_reference_video_frames(
     frames: torch.Tensor,
     frame_count: int,
@@ -736,6 +756,14 @@ class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
                     step=32,
                 ),
                 io.Int.Input("length", default=124, min=5, max=3600, step=17),
+                io.Int.Input(
+                    "locked_video_timing_frames",
+                    default=0,
+                    min=0,
+                    max=3600,
+                    optional=True,
+                    advanced=True,
+                ),
                 io.Combo.Input(
                     "ref_image_size",
                     options=["match", "max"],
@@ -775,6 +803,7 @@ class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
         length: int,
         audio_vae: Any | None = None,
         ref_image_size: str = "match",
+        locked_video_timing_frames: int = 0,
         **reference_inputs: Any,
     ) -> io.NodeOutput:
         grouped_inputs: dict[str, dict[str, Any]] = {
@@ -801,8 +830,13 @@ class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
             grouped_inputs[destination][name] = value
 
         target_frame_count = _align_frame_count(max(5, int(length)))
+        locked_timing_frames = int(locked_video_timing_frames)
         grouped_inputs["ref_videos"] = {
-            name: _align_reference_video_frames(frames, target_frame_count)
+            name: (
+                _fit_reference_video_frames(frames, locked_timing_frames)
+                if locked_timing_frames > 0
+                else _align_reference_video_frames(frames, target_frame_count)
+            )
             for name, frames in grouped_inputs["ref_videos"].items()
         }
 
@@ -2286,6 +2320,55 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
         return io.NodeOutput({**audio, "waveform": aligned, "sample_rate": sample_rate})
 
 
+class EasyH3LockedAudioSelect(io.ComfyNode):
+    """Use effective locked audio, falling back to generated task audio."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3LockedAudioSelect",
+            display_name="H3 Locked Audio Select",
+            category="EasyUse/H3/dev",
+            description=(
+                "Internal selector that ignores missing locked audio while "
+                "preserving video timeline timing."
+            ),
+            inputs=[
+                io.Audio.Input("generated_audio"),
+                io.Audio.Input("locked_audio", optional=True),
+            ],
+            outputs=[io.Audio.Output("audio")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        generated_audio: dict[str, Any],
+        locked_audio: dict[str, Any] | None = None,
+    ) -> io.NodeOutput:
+        waveform = (
+            locked_audio.get("waveform")
+            if isinstance(locked_audio, dict)
+            else None
+        )
+        sample_rate = (
+            locked_audio.get("sample_rate")
+            if isinstance(locked_audio, dict)
+            else None
+        )
+        selected = (
+            locked_audio
+            if isinstance(waveform, torch.Tensor)
+            and waveform.ndim == 3
+            and waveform.shape[-1] > 0
+            and isinstance(sample_rate, int)
+            and sample_rate > 0
+            else generated_audio
+        )
+        return io.NodeOutput(selected)
+
+
 class EasyH3ProjectArtifact(io.ComfyNode):
     """Save one video or audio segment and its continuity latent."""
 
@@ -2597,6 +2680,18 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                     step=17,
                     tooltip="Frame count at 24 fps, snapped up to the model's 17k+5 grid (124 = ~5s; trained range is ~124-362, longer is untested)",
                 ),
+                io.Int.Input(
+                    "locked_video_timing_frames",
+                    default=0,
+                    min=0,
+                    max=3600,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "Internal locked-video driving span. When set, reference "
+                        "video frames are distributed uniformly over this timeline."
+                    ),
+                ),
                 io.Combo.Input(
                     "ref_image_size",
                     options=["match", "max"],
@@ -2624,6 +2719,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         width: list[int] | int = 1344,
         height: list[int] | int = 768,
         length: list[int] | int = 124,
+        locked_video_timing_frames: list[int] | int = 0,
         ref_image_size: list[str] | str = "match",
     ) -> io.NodeOutput:
         selected_mode = str(_first_input(mode, "reference"))
@@ -2640,6 +2736,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         target_width = int(_first_input(width, 1344))
         target_height = int(_first_input(height, 768))
         target_length = int(_first_input(length, 124))
+        locked_timing_frames = int(_first_input(locked_video_timing_frames, 0))
         expanded_images = expand_image_inputs(images)
         video_inputs = flatten_media_inputs(videos)
         standalone_audios = _audio_inputs(audios)
@@ -2711,6 +2808,8 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 "length": target_length,
                 "ref_image_size": str(_first_input(ref_image_size, "match")),
             }
+            if locked_timing_frames > 0:
+                node_inputs["locked_video_timing_frames"] = locked_timing_frames
             for index, image in enumerate(expanded_images):
                 node_inputs[f"ref_image_{index}"] = image
                 advance_progress()

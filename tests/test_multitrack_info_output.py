@@ -1,6 +1,8 @@
 import importlib.util
 import inspect
 import json
+import logging
+import os
 import sys
 import types
 from fractions import Fraction
@@ -236,6 +238,7 @@ def _load_basic_module():
         "merge_video_track_with_ffmpeg",
         "canonicalize_multitrack_slot_content",
         "multitrack_is_shared_reference",
+        "multitrack_is_muted_image",
         "multitrack_media_identity",
         "multitrack_shared_task_images",
         "multitrack_segments_in_window",
@@ -335,10 +338,31 @@ def _load_basic_module():
     multitrack_module = importlib.util.module_from_spec(multitrack_spec)
     sys.modules[multitrack_spec.name] = multitrack_module
     multitrack_spec.loader.exec_module(multitrack_module)
+    # Load the real ``utils/video.py`` so its public helpers (especially
+    # ``extract_video_audio`` and ``ffmpeg_extract_audio``) are reachable via
+    # ``from ..utils.video import …`` from h3_project.py and nodes/basic.py
+    # during the test. Without this, those imports would resolve to whatever
+    # SimpleNamespace stub we ship and the audio-lock tests couldn't exercise
+    # the real fallback / cache behaviour.
+    media_module = types.SimpleNamespace(
+        AUDIO_EXTENSIONS=frozenset({
+            ".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg",
+        }),
+    )
+    sys.modules["easy_media.utils.media"] = media_module
+    video_path = Path(__file__).parents[1] / "utils" / "video.py"
+    video_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.video",
+        video_path,
+    )
+    video_module = importlib.util.module_from_spec(video_spec)
+    sys.modules[video_spec.name] = video_module
+    video_spec.loader.exec_module(video_module)
     from contextlib import nullcontext
     utils_module.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     utils_module.canonicalize_multitrack_slot_content = multitrack_module.canonicalize_multitrack_slot_content
     utils_module.multitrack_is_shared_reference = multitrack_module.multitrack_is_shared_reference
+    utils_module.multitrack_is_muted_image = multitrack_module.multitrack_is_muted_image
     utils_module.multitrack_media_identity = multitrack_module.multitrack_media_identity
     utils_module.multitrack_shared_task_images = multitrack_module.multitrack_shared_task_images
     utils_module.multitrack_segments_in_window = multitrack_module.multitrack_segments_in_window
@@ -1096,6 +1120,40 @@ def test_multitrack_editor_outputs_task_images_as_unresized_list_items():
         for image in segment["content"]["images"]
     ]
     assert [image["media_index"] for image in task_images] == [0, 1]
+
+
+def test_multitrack_editor_keeps_muted_task_image_metadata_but_skips_reference_output():
+    module = _load_basic_module()
+    muted_image = torch.zeros(1, 10, 20, 3)
+    active_image = torch.ones(1, 10, 20, 3)
+    track_data = {
+        "tracks": [{
+            "id": "task-track",
+            "type": "task",
+            "segments": [{
+                "id": "task-1",
+                "content": {"media_type": "none", "images": [
+                    {"id": "muted", "source_type": "slot", "slot_name": "image1", "muted": True},
+                    {"id": "active", "source_type": "slot", "slot_name": "image2"},
+                ]},
+            }],
+        }],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "crop"},
+        "None",
+        track_data,
+        image=[muted_image, active_image],
+    )
+
+    tracks_info, images, _audio, _videos = result.values
+    image_items = tracks_info["tracks"][0]["segments"][0]["content"]["images"]
+    assert len(images) == 1
+    assert torch.equal(images[0], active_image)
+    assert image_items[0]["muted"] is True
+    assert "media_index" not in image_items[0]
+    assert image_items[1]["media_index"] == 0
 
 
 def test_multitrack_editor_passes_task_markers_through_tracks_info():
@@ -3728,6 +3786,417 @@ def test_prepare_multitrack_project_media_prefers_audio_lock_and_keeps_locked_vi
     assert task_result.values[5] == []
     assert task_result.values[6] == [video]
     assert video.trim_calls[-1] == (1.0, 2.0, False)
+
+
+def test_prepare_multitrack_project_media_audio_lock_dedupes_video_decode(monkeypatch):
+    """Many segments sharing one source video must not re-decode it per segment."""
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    video_audio = {
+        "waveform": torch.arange(16, dtype=torch.float32).reshape(1, 1, 16),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(16, 2, 2, 3), video_audio, Fraction(2)),
+        source="locked.mp4",
+    )
+
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args, **_kwargs: video,
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_audio",
+        lambda *_args, **_kwargs: None,
+    )
+
+    segments = []
+    for index in range(40):
+        start = index
+        end = index + 1
+        segments.append({
+            "id": f"seg-{index}",
+            "start_frame": start,
+            "end_frame": end,
+            "origin_start_frame": start,
+            "content": {
+                "media_type": "video",
+                "source_type": "input",
+                "file_path": "locked.mp4",
+            },
+        })
+
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 40,
+        "tracks": [
+            {"type": "video", "audio_locked": True, "segments": segments},
+        ],
+    }
+
+    _task_info, _images, _audios, _videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    # The whole point of the cache: decode the long video once, not 40 times.
+    assert video.components_calls == 1
+    assert locked is not None
+    # The merge step reshapes the audio to ``timeline_total_length *
+    # sample_rate / frame_rate`` samples, regardless of source length.
+    expected_samples = round(40 * 2 / 2)
+    assert locked["waveform"].shape[-1] == expected_samples
+    assert locked["sample_rate"] == video_audio["sample_rate"]
+
+
+def test_prepare_multitrack_project_media_audio_lock_prefers_ffmpeg(monkeypatch):
+    """When the locked video is file-backed, FFmpeg should extract the audio,
+    leaving PyAV's full-frame decode on the cold path."""
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    ffmpeg_audio = {
+        "waveform": torch.full((1, 1, 16), 3.0),
+        "sample_rate": 2,
+    }
+    pyav_audio = {
+        "waveform": torch.full((1, 1, 16), 9.0),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(16, 2, 2, 3), pyav_audio, Fraction(2)),
+        source="locked.mp4",
+    )
+
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args, **_kwargs: video,
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_audio",
+        lambda *_args, **_kwargs: None,
+    )
+
+    ffmpeg_calls = []
+
+    def fake_ffmpeg(source_path):
+        ffmpeg_calls.append(source_path)
+        return ffmpeg_audio
+
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
+    )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "tracks": [
+            {"type": "video", "audio_locked": True, "segments": [
+                {
+                    "id": "seg-0",
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "origin_start_frame": 0,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "locked.mp4",
+                    },
+                },
+                {
+                    "id": "seg-1",
+                    "start_frame": 4,
+                    "end_frame": 8,
+                    "origin_start_frame": 4,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "locked.mp4",
+                    },
+                },
+            ]},
+        ],
+    }
+
+    _task_info, _images, _audios, _videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    # FFmpeg wins and is hit once thanks to the cache; PyAV never gets called.
+    assert ffmpeg_calls == ["locked.mp4"]
+    assert video.components_calls == 0
+    assert locked is not None
+    assert locked["waveform"].flatten().tolist() == [3.0] * 8
+
+
+def test_prepare_multitrack_project_media_audio_lock_falls_back_to_pyav(
+    monkeypatch, caplog,
+):
+    """When FFmpeg cannot extract audio, the locked audio still resolves via
+    PyAV so the existing audio-locked workflow continues to function. The
+    fallback path should also emit a ``[Warning]`` log so users notice."""
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    pyav_audio = {
+        "waveform": torch.full((1, 1, 8), 4.0),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(8, 2, 2, 3), pyav_audio, Fraction(2)),
+        source="locked.mp4",
+    )
+
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args, **_kwargs: video,
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_audio",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_ffmpeg(_source_path):
+        return None
+
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
+    )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
+    # ``os.path.isfile`` would normally return False for ``"locked.mp4"`` in
+    # this test environment. Patch it to True so the helper actually attempts
+    # FFmpeg before falling back — that's the path we want to exercise.
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "tracks": [
+            {"type": "video", "audio_locked": True, "segments": [
+                {
+                    "id": "seg-0",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "origin_start_frame": 0,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "locked.mp4",
+                    },
+                },
+            ]},
+        ],
+    }
+
+    caplog.set_level(logging.WARNING, logger="utils.video")
+    _task_info, _images, _audios, _videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    assert video.components_calls == 1
+    assert locked is not None
+    assert locked["waveform"].flatten().tolist() == [4.0] * 8
+    assert "[extract_video_audio]" in caplog.text
+    assert "falling back to PyAV" in caplog.text
+
+
+def test_multitrack_task_output_audio_lock_prefers_ffmpeg(monkeypatch):
+    """``MultiTrackTaskOutput`` should route locked-audio video tracks through
+    the shared ``extract_video_audio`` helper, so file-backed sources go
+    straight to FFmpeg and never reach PyAV's full-frame decode."""
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(8, 2, 2, 3), source_audio, Fraction(2)),
+        source="locked.mp4",
+    )
+    module._resolve_multitrack_video = lambda content, video_input: video
+
+    ffmpeg_calls = []
+
+    def fake_ffmpeg(source_path):
+        ffmpeg_calls.append(source_path)
+        return source_audio
+
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"], "ffmpeg_extract_audio", fake_ffmpeg,
+    )
+    monkeypatch.setattr(
+        sys.modules["easy_media.utils.video"],
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+
+    # ``output_full_timeline=True`` routes through ``video_items[media_index]``
+    # (site 3056) instead of the per-track deferred branch.
+    tracks_info = {
+        "media_loading": "eager",
+        "format": "MiniMax",
+        "width": 2,
+        "height": 2,
+        "total_length": 8,
+        "frame_rate": 2,
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {"media_type": "none", "images": []},
+                }],
+            },
+            {
+                "type": "video",
+                "media_index": 0,
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-video",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "locked.mp4",
+                    },
+                }],
+            },
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        tracks_info, task_index=-1, video=[video],
+    )
+
+    assert ffmpeg_calls == ["locked.mp4"]
+    # FFmpeg-first path means PyAV is never reached for the locked audio.
+    assert video.components_calls == 0
+    assert result is not None
+
+
+def test_extract_video_audio_caches_by_source_path(monkeypatch):
+    """Two different ``VideoInput`` wrappers around the same source file must
+    share a single extraction via the cache dict the helper accepts."""
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+    audio = {
+        "waveform": torch.full((1, 1, 4), 5.0),
+        "sample_rate": 2,
+    }
+
+    def fake_ffmpeg(source_path):
+        return audio
+
+    monkeypatch.setattr(video_module, "ffmpeg_extract_audio", fake_ffmpeg)
+    monkeypatch.setattr(
+        video_module,
+        "ffprobe_info",
+        lambda _path: {"has_audio": True},
+    )
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+
+    # Two distinct _FakeVideo instances but same ``source`` path.
+    video_a = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), audio, Fraction(2)),
+        source="locked.mp4",
+    )
+    video_b = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), audio, Fraction(2)),
+        source="locked.mp4",
+    )
+
+    cache: dict = {}
+    first = video_module.extract_video_audio(video_a, cache=cache)
+    second = video_module.extract_video_audio(video_b, cache=cache)
+
+    assert first is audio
+    assert second is audio
+    # Cache key matches the source path so two distinct wrappers dedupe.
+    assert cache == {"locked.mp4": audio}
+    # Neither wrapper paid the PyAV decode cost.
+    assert video_a.components_calls == 0
+    assert video_b.components_calls == 0
+
+
+def test_extract_video_audio_caches_missing_audio(monkeypatch):
+    """A source confirmed to have no audio must not be probed per segment."""
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), None, Fraction(2)),
+        source="silent.mp4",
+    )
+    ffmpeg_calls = []
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(video_module, "ffprobe_info", lambda _path: {"has_audio": False})
+    monkeypatch.setattr(
+        video_module,
+        "ffmpeg_extract_audio",
+        lambda path: ffmpeg_calls.append(path),
+    )
+
+    cache: dict = {}
+    assert video_module.extract_video_audio(video, cache=cache) is None
+    assert video_module.extract_video_audio(video, cache=cache) is None
+
+    assert cache == {"silent.mp4": None}
+    assert ffmpeg_calls == []
+    assert video.components_calls == 0
+
+
+def test_prepare_multitrack_project_media_muted_video_does_not_lock_audio(
+    monkeypatch,
+):
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    video = _FakeVideo(
+        _VideoComponents(
+            torch.zeros(4, 2, 2, 3),
+            {"waveform": torch.ones(1, 1, 4), "sample_rate": 2},
+            Fraction(2),
+        ),
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args, **_kwargs: video,
+    )
+
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 4,
+        "tracks": [{
+            "type": "video",
+            "audio_locked": True,
+            "muted": True,
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"media_type": "video"},
+            }],
+        }],
+    }
+
+    locked = project_module.prepare_multitrack_project_media(tracks_info)[-1]
+
+    assert locked is None
+    assert video.components_calls == 0
 
 
 def test_crop_multitrack_project_media_crops_reused_audio_and_video():

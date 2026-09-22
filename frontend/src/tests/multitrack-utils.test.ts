@@ -22,6 +22,7 @@ import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
   MULTITRACK_TASK_MODES,
+  mergeSelectedTaskSegments,
   moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
   multiTrackDbToLinearGain,
@@ -41,6 +42,54 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('merges consecutive selected task segments using the first segment with prompt or active images', () => {
+    const data = createDefaultTrackData()
+    const taskTrack = data.tracks[0]
+    taskTrack.segments = [
+      {
+        id: 'empty', start_frame: 0, end_frame: 24, color: taskTrack.color,
+        content: { media_type: 'none', user_prompt: '', images: [{ id: 'muted', muted: true }] },
+      },
+      {
+        id: 'content', start_frame: 24, end_frame: 48, color: taskTrack.color,
+        content: { media_type: 'none', user_prompt: 'Keep me', images: [{ id: 'active' }] },
+      },
+      {
+        id: 'later', start_frame: 48, end_frame: 72, color: taskTrack.color,
+        content: { media_type: 'none', user_prompt: 'Later prompt', images: [] },
+      },
+    ]
+
+    const result = mergeSelectedTaskSegments(
+      data.tracks,
+      new Set(['empty', 'content', 'later']),
+    )
+
+    expect(result?.mergedSegmentId).toBe('empty')
+    expect(result?.tracks[0].segments).toEqual([
+      expect.objectContaining({
+        id: 'empty',
+        start_frame: 0,
+        end_frame: 72,
+        content: expect.objectContaining({ user_prompt: 'Keep me', images: [{ id: 'active' }] }),
+      }),
+    ])
+  })
+
+  it('does not merge non-consecutive task selections or selections across tracks', () => {
+    const data = createDefaultTrackData()
+    const taskTrack = data.tracks[0]
+    taskTrack.segments = ['first', 'middle', 'last'].map((id, index) => ({
+      id,
+      start_frame: index * 24,
+      end_frame: (index + 1) * 24,
+      color: taskTrack.color,
+      content: { media_type: 'none' as const },
+    }))
+
+    expect(mergeSelectedTaskSegments(data.tracks, new Set(['first', 'last']))).toBeNull()
+  })
+
   it('keeps video and audio locks independent while allowing one per type', () => {
     const data = createDefaultTrackData()
     const audioTrack = (id: string, audioLocked: boolean) => ({

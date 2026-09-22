@@ -22,6 +22,7 @@ import {
   getMultiTrackTrackHeight,
   getInheritedTaskSegmentContent,
   getSelectedMultiTrackSegment,
+  mergeSelectedTaskSegments,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_MEDIA_TRACK_LIMIT,
   MULTITRACK_TRACK_COLORS,
@@ -175,6 +176,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     : []
   const hasOnlySelectedTaskSegments = selectedTaskSegments.length === selectedSegmentIds.size
     && selectedTaskSegments.length > 1
+  const canMergeSelectedTaskSegments = mergeSelectedTaskSegments(data.tracks, selectedSegmentIds) !== null
   const previewSelectedSegment = selectedSegment ?? (hasOnlySelectedTaskSegments
     ? getSelectedMultiTrackSegment(data, selectedSegmentId)
     : null)
@@ -901,6 +903,17 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setSingleSelectedSegment(clonedSegmentId)
   }
 
+  function handleMergeSelectedTaskSegments() {
+    const result = mergeSelectedTaskSegments(data.tracks, selectedSegmentIds)
+    if (!result) return
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: result.tracks,
+      total_length: calculateTotalLength(result.tracks, data.frame_rate),
+    })
+    setSingleSelectedSegment(result.mergedSegmentId)
+  }
+
   function handleSplitTaskSegment(segmentId: string, targetFrames: number) {
     let splitSegmentIds: string[] = []
     const updatedTracks = data.tracks.map((track) => {
@@ -1474,6 +1487,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onSharedReferenceChange={handleSharedReferenceChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneSegment}
+                    canMergeSelectedTaskSegments={canMergeSelectedTaskSegments}
+                    onMergeSelectedTaskSegments={handleMergeSelectedTaskSegments}
                     onSplitTaskSegment={setSplittingTaskSegmentId}
                     onResizeSegment={handleResizeSegment}
                     onResizeSegmentPreview={handleResizeSegmentPreview}

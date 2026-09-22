@@ -14,6 +14,8 @@ from typing import Any
 
 import folder_paths
 import torch
+
+logger = logging.getLogger(__name__)
 from .audio_gain import (
     audio_db_to_gain,
     audio_is_muted,
@@ -31,10 +33,13 @@ from .multitrack import (
     _resolve_timeline_image_item,
     _resize_multitrack_video,
     _trim_track_audio,
+    multitrack_audio_lock_is_effective,
     multitrack_is_shared_reference,
+    multitrack_is_muted_image,
     multitrack_media_identity,
     multitrack_segments_in_window,
 )
+from .video import extract_video_audio
 
 
 H3_FRAME_STEP = 17
@@ -406,7 +411,16 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
 
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
-    image_count = len(content.get("images", [])) if isinstance(content.get("images"), list) else 0
+    images = content.get("images", [])
+    image_count = (
+        sum(
+            1
+            for image in images
+            if isinstance(image, dict) and not multitrack_is_muted_image(image)
+        )
+        if isinstance(images, list)
+        else 0
+    )
     has_video = any(
         isinstance(track, dict)
         and track.get("type") == "video"
@@ -435,6 +449,8 @@ def _h3_locked_track(
     entry: dict[str, Any],
     info: dict[str, Any],
     track_type: str,
+    *,
+    require_audible_audio: bool = True,
 ) -> dict[str, Any] | None:
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
@@ -443,6 +459,10 @@ def _h3_locked_track(
             not isinstance(track, dict)
             or track.get("type") != track_type
             or track.get("audio_locked") is not True
+        ):
+            continue
+        if require_audible_audio and not multitrack_audio_lock_is_effective(
+            info, track, start_frame, end_frame,
         ):
             continue
         if any(
@@ -470,7 +490,12 @@ def h3_locked_video_track(
     entry: dict[str, Any], info: dict[str, Any]
 ) -> dict[str, Any] | None:
     """Return the locked video track that controls the task's visual timeline."""
-    return _h3_locked_track(entry, info, "video")
+    return _h3_locked_track(
+        entry,
+        info,
+        "video",
+        require_audible_audio=False,
+    )
 
 
 def h3_generation_mode(task_type: str) -> str:
@@ -1310,14 +1335,18 @@ def _project_source_audio(
     content: dict,
     audio_items: list,
     video_items: list,
+    video_audio_cache: dict | None = None,
 ) -> 'dict | None':
     if track_type == "audio":
         return _resolve_multitrack_audio(content, audio_items)
     video = _resolve_multitrack_video(content, video_items)
     if video is None:
         return None
-    components = video.get_components()
-    return components.audio if isinstance(components.audio, dict) else None
+    # Many segments can point at the same source video (especially when a long
+    # video is split across the timeline). ``extract_video_audio`` (in
+    # ``utils.video``) dedupes by source path via ``video_audio_cache`` so we
+    # decode the file once and reuse the dict across segments.
+    return extract_video_audio(video, cache=video_audio_cache)
 
 
 def _project_shared_audio(
@@ -1385,6 +1414,7 @@ def prepare_multitrack_project_media(
     shared_audio_identities: set[tuple[str, str]] = set()
     shared_video_identities: set[tuple[str, str]] = set()
     resize_cache: dict[tuple, object] = {}
+    video_audio_cache: dict[object, dict | None] = {}
 
     for track in tracks:
         if not isinstance(track, dict):
@@ -1403,6 +1433,9 @@ def prepare_multitrack_project_media(
                 retained_images: list[dict] = []
                 for image_info in images if isinstance(images, list) else []:
                     if not isinstance(image_info, dict):
+                        continue
+                    if multitrack_is_muted_image(image_info):
+                        retained_images.append(image_info)
                         continue
                     identity = multitrack_media_identity(image_info)
                     if not multitrack_is_shared_reference(image_info):
@@ -1436,15 +1469,25 @@ def prepare_multitrack_project_media(
         )
         if track.get("audio_locked") is True:
             resolved_segments: list[tuple[dict, dict]] = []
-            for local_segment in multitrack_segments_in_window(
-                track, 0, timeline_end,
+            if multitrack_audio_lock_is_effective(
+                info,
+                track,
+                0,
+                timeline_end,
+                has_solo_track=has_solo_track,
             ):
-                content = local_segment.get("content", {})
-                source_audio = _project_source_audio(
-                    track_type, content, audio_items, video_items,
-                )
-                if source_audio is not None:
-                    resolved_segments.append((local_segment, source_audio))
+                for local_segment in multitrack_segments_in_window(
+                    track, 0, timeline_end,
+                ):
+                    content = local_segment.get("content", {})
+                    if audio_is_muted(content):
+                        continue
+                    source_audio = _project_source_audio(
+                        track_type, content, audio_items, video_items,
+                        video_audio_cache,
+                    )
+                    if source_audio is not None:
+                        resolved_segments.append((local_segment, source_audio))
             lock_priority = 2 if track_type == "audio" else 1
             if resolved_segments and lock_priority > locked_audio_priority:
                 locked_audio = _merge_audio_track(

@@ -88,6 +88,14 @@ def test_parse_tracks_info_extracts_dimensions_and_fps():
     assert len(h3_task_entries(result)) == 2
 
 
+def test_h3_task_type_ignores_muted_reference_images():
+    info = _tracks_info()
+    entry = h3_task_entries(info)[0]
+    entry["task"]["content"]["images"] = [{"muted": True}]
+
+    assert h3_task_type(entry, info) == "t2v"
+
+
 def test_parse_tracks_info_rejects_invalid_dimensions():
     with pytest.raises(ValueError, match="width and height"):
         parse_tracks_info({"width": 0, "height": 768, "tracks": []})
@@ -215,6 +223,18 @@ def test_locked_video_track_audio_applies_when_it_overlaps_the_task_range():
 
     assert h3_locked_audio_track(first, info) is None
     assert h3_locked_audio_track(second, info) is video_track
+
+
+def test_muted_locked_video_keeps_timing_without_locking_audio():
+    info = _tracks_info()
+    video_track = next(track for track in info["tracks"] if track["type"] == "video")
+    video_track["audio_locked"] = True
+    video_track["muted"] = True
+    video_track["segments"][0]["content"]["media_type"] = "video"
+    _, second = h3_task_entries(info)
+
+    assert h3_locked_audio_track(second, info) is None
+    assert h3_locked_video_track(second, info) is video_track
 
 
 def test_locked_audio_track_takes_priority_without_disabling_video_timing():

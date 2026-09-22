@@ -322,12 +322,12 @@ def _load_minimax_node(monkeypatch):
     utils_package.FFMPEG_RESIZE_METHODS = frozenset()
     for name in (
         "audio_db_to_gain",
-        "audio_is_muted",
         "audio_volume_db",
         "equirectangular_to_perspective",
         "load_audio_waveform",
         "load_image_tensor",
         "multitrack_is_shared_reference",
+        "multitrack_is_muted_image",
         "multitrack_media_identity",
         "multitrack_segments_in_window",
         "multitrack_slot_name",
@@ -336,6 +336,9 @@ def _load_minimax_node(monkeypatch):
         "resolve_video_path",
     ):
         setattr(utils_package, name, lambda *_args, **_kwargs: None)
+    utils_package.audio_is_muted = (
+        lambda settings: isinstance(settings, dict) and settings.get("muted") is True
+    )
     models_module = types.ModuleType("easy_media.utils.models")
     models_module.detect_turbo_model = lambda model: types.SimpleNamespace(
         is_turbo=False,
@@ -1185,6 +1188,7 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
         "width",
         "height",
         "length",
+        "locked_video_timing_frames",
         "ref_image_size",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
@@ -1631,7 +1635,11 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
     artifact = _graph_node(result, "easy h3ProjectArtifact")
     assert "locked_audio" not in artifact["inputs"]
     assert align["inputs"]["fps"] == 24.0
-    assert saved_video["inputs"]["input_mode.audio"] == {"prepared_locked_audio": True}
+    selector = _graph_node(result, "easy h3LockedAudioSelect")
+    assert selector["inputs"]["locked_audio"] == {"prepared_locked_audio": True}
+    assert saved_video["inputs"]["input_mode.audio"][0].endswith(
+        "locked_audio_select_0"
+    )
     assert not any(
         node["class_type"] == "easy multiTrackTaskOutput"
         and node["inputs"]["task_index"] == -1
@@ -1652,6 +1660,47 @@ def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
     saved_video = _graph_node(result, "easy saveVideo")
     audio_link = saved_video["inputs"]["input_mode.audio"]
     assert result.expand[audio_link[0]]["class_type"] == "VAEDecodeAudio"
+
+
+def test_muted_locked_video_preserves_timing_without_audio_lock(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs()
+    info = inputs["tracks_info"][0]
+    info["tracks"].append({
+        "type": "video",
+        "audio_locked": True,
+        "muted": True,
+        "segments": [{
+            "start_frame": 0,
+            "end_frame": 120,
+            "content": {"media_type": "video"},
+        }],
+    })
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+
+    assert not any(
+        node["class_type"] == "easy minimaxH3AudioLock"
+        for node in result.expand.values()
+    )
+    trim = _graph_node(result, "easy h3ContextMediaTrim")
+    assert trim["inputs"]["output_frames"] == 120
+    assert trim["inputs"]["fit_video_duration"] is True
+    assert trim["inputs"]["pad_audio"] is True
+    saved_video = _graph_node(result, "easy saveVideo")
+    audio_link = saved_video["inputs"]["input_mode.audio"]
+    assert result.expand[audio_link[0]]["class_type"] == "easy h3ContextMediaTrim"
+
+
+def test_locked_audio_select_falls_back_when_video_has_no_audio(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    generated = {"waveform": torch.ones(1, 1, 4), "sample_rate": 24}
+
+    missing = module.EasyH3LockedAudioSelect.execute(generated, None)
+    malformed = module.EasyH3LockedAudioSelect.execute(generated, {})
+
+    assert missing.values[0] is generated
+    assert malformed.values[0] is generated
 
 
 def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
@@ -3477,7 +3526,11 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
         and node["inputs"]["input_mode.images"] == [trim_id, 0]
     )
     # The task audio already excludes the context prefix; do not trim it again.
-    assert context_video["inputs"]["input_mode.audio"] == {
+    context_selector = result.expand[
+        context_video["inputs"]["input_mode.audio"][0]
+    ]
+    assert context_selector["class_type"] == "easy h3LockedAudioSelect"
+    assert context_selector["inputs"]["locked_audio"] == {
         "prepared_locked_audio": True,
     }
     artifacts = [
@@ -4820,6 +4873,22 @@ def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypat
     assert conditioning["inputs"]["ref_video_audio_0"] == [components_id, 1]
 
 
+def test_locked_video_timing_is_forwarded_to_reference_bridge(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["reference"],
+            videos=[object()],
+            locked_video_timing_frames=[56],
+        )
+    )
+
+    conditioning = _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
+    assert conditioning["inputs"]["locked_video_timing_frames"] == 56
+
+
 def test_easy_node_reports_progress_for_each_media_input(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -5010,6 +5079,56 @@ def test_reference_bridge_pads_video_tail_without_resizing(monkeypatch):
     assert aligned.shape == (124, 1, 1, 1)
     assert aligned[:120, 0, 0, 0].tolist() == list(map(float, range(120)))
     assert aligned[120:, 0, 0, 0].tolist() == [119.0] * 4
+
+
+@pytest.mark.parametrize("source_frame_count", [39, 40, 41, 55, 56, 57])
+def test_reference_bridge_uniformly_fits_locked_video_timing(
+    monkeypatch,
+    source_frame_count,
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    calls = []
+
+    class _NativeReferenceNode:
+        @classmethod
+        def execute(cls, **kwargs):
+            calls.append(kwargs)
+            return _NodeOutput("conditioning", "latent")
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[
+        "MiniMaxH3ReferenceToVideo"
+    ] = _NativeReferenceNode
+    target_frame_count = module._align_frame_count(source_frame_count)
+    frames = _image_values(*range(source_frame_count))
+
+    module.EasyMiniMaxH3ReferenceToVideoBridge.execute(
+        clip=_Clip(),
+        vae=_Vae(),
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=target_frame_count,
+        locked_video_timing_frames=target_frame_count,
+        ref_video_0=frames,
+    )
+
+    fitted = calls[0]["ref_videos"]["ref_video_0"]
+    expected_indexes = torch.linspace(
+        0,
+        source_frame_count - 1,
+        target_frame_count,
+    ).round().long()
+    assert fitted.shape == (target_frame_count, 1, 1, 1)
+    assert torch.equal(fitted[:, 0, 0, 0], expected_indexes.float())
+    restored_indexes = torch.linspace(
+        0,
+        target_frame_count - 1,
+        source_frame_count,
+    ).round().long()
+    assert fitted.index_select(0, restored_indexes)[:, 0, 0, 0].tolist() == list(
+        map(float, range(source_frame_count))
+    )
 
 
 def test_reference_fallback_pads_video_tail_instead_of_dropping_frames(monkeypatch):
@@ -5289,7 +5408,9 @@ def test_audio_only_project_saves_original_locked_audio(monkeypatch):
     })
     result = module.EasyMultiTrackProject.execute(**inputs)
     artifact = _graph_node(result, "easy h3ProjectArtifact")
-    assert artifact["inputs"]["audio"] == {"prepared_locked_audio": True}
+    selector = result.expand[artifact["inputs"]["audio"][0]]
+    assert selector["class_type"] == "easy h3LockedAudioSelect"
+    assert selector["inputs"]["locked_audio"] == {"prepared_locked_audio": True}
 
 
 def test_audio_only_context_trims_samples_and_retains_encoded_audio(monkeypatch):
@@ -5475,6 +5596,10 @@ def test_locked_media_preserves_source_span_in_both_passes(
             assert expression["expression"] == "a + 34"
         else:
             assert length == expected_generated
+        if track_type == "video":
+            assert node["inputs"]["locked_video_timing_frames"] == expected_generated
+        else:
+            assert "locked_video_timing_frames" not in node["inputs"]
     trims = [
         n for n in graph.values()
         if n["class_type"] == "easy h3ContextMediaTrim"
@@ -5491,7 +5616,9 @@ def test_locked_media_preserves_source_span_in_both_passes(
     for node in saves:
         trim = graph[node["inputs"]["input_mode.images"][0]]
         assert trim["inputs"]["output_frames"] == duration
-        assert node["inputs"]["input_mode.audio"] == {"prepared_locked_audio": True}
+        selector = graph[node["inputs"]["input_mode.audio"][0]]
+        assert selector["class_type"] == "easy h3LockedAudioSelect"
+        assert selector["inputs"]["locked_audio"] == {"prepared_locked_audio": True}
     # Every delivered segment, including the initial shot, supplies fresh context.
     encodes = [n for n in graph.values() if n["class_type"] == "VAEEncode"
                and "hires_context" in n["inputs"]["pixels"][0]]

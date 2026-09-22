@@ -1422,11 +1422,14 @@ class EasyMultiTrackProject(io.ComfyNode):
             uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
             uses_swap = continuity_mode == "context_swap"
             locked_audio_track = h3_locked_audio_track(entry, info)
+            locked_video_track = h3_locked_video_track(entry, info)
             has_task_locked_audio = locked_audio_track is not None
-            preserve_source_timing = not audio_only and has_task_locked_audio
+            preserve_source_timing = not audio_only and (
+                has_task_locked_audio or locked_video_track is not None
+            )
             fit_locked_video_timing = (
                 preserve_source_timing
-                and h3_locked_video_track(entry, info) is not None
+                and locked_video_track is not None
             )
 
             # ---- Deciia 本地新增：直通(passthrough)任务段 ------------------
@@ -1553,11 +1556,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                 base_task_length = task_output.out(3)
                 if preserve_source_timing:
                     base_task_length = task_duration_frames
-            task_length: Any = (
+            aligned_task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing
                 else base_task_length
             )
+            task_length: Any = aligned_task_length
             will_have_context_continuity = (
                 uses_context
                 and (previous_hires_context_latent is not None or task_index > 0)
@@ -1585,6 +1589,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "audios": task_output.out(5),
                     "videos": task_output.out(6),
                 })
+                if fit_locked_video_timing:
+                    conditioning_inputs["locked_video_timing_frames"] = (
+                        aligned_task_length
+                    )
             encoded_conditioning = graph.node(
                 "easy minimaxH3ToVideo",
                 id=f"conditioning_{task_index}",
@@ -2017,8 +2025,16 @@ class EasyMultiTrackProject(io.ComfyNode):
                         project_low_context_latent = project_hires_context_latent
 
                 report_segment_step(0.89)
+                saved_audio = output_audio
+                if has_task_locked_audio:
+                    saved_audio = graph.node(
+                        "easy h3LockedAudioSelect",
+                        id=f"locked_audio_select_{task_index}",
+                        generated_audio=output_audio,
+                        locked_audio=task_locked_audio,
+                    ).out(0)
                 saved_media_inputs = {
-                    "audio": task_locked_audio if has_task_locked_audio else output_audio,
+                    "audio": saved_audio,
                 }
             else:
                 report_segment_step(0.76)
@@ -2070,6 +2086,15 @@ class EasyMultiTrackProject(io.ComfyNode):
                         fps=fps,
                     )
                     output_audio = locked_audio_align.out(0)
+
+                saved_audio = output_audio
+                if has_task_locked_audio:
+                    saved_audio = graph.node(
+                        "easy h3LockedAudioSelect",
+                        id=f"locked_audio_select_{task_index}",
+                        generated_audio=output_audio,
+                        locked_audio=task_locked_audio,
+                    ).out(0)
 
                 project_hires_context_latent = final_latent
                 project_low_context_latent = low_stage_context_latent
@@ -2141,7 +2166,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     input_mode="images+audio",
                     **{
                         "input_mode.images": output_images,
-                        "input_mode.audio": task_locked_audio if has_task_locked_audio else output_audio,
+                        "input_mode.audio": saved_audio,
                         "input_mode.fps": fps,
                         "output_mode": "hide&save",
                     },
