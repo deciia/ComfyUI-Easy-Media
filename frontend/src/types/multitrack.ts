@@ -32,6 +32,7 @@ export interface MultiTrackTaskImage {
   panorama_view?: MultiTrackPanoramaView
   shared_reference?: boolean
   shared_reference_copy?: boolean
+  muted?: boolean
 }
 
 export interface MultiTrackSegmentContent {

@@ -9,6 +9,20 @@ export function taskImagesFromContent(images: MultiTrackTaskImage[] | undefined)
   return Array.isArray(images) ? images : []
 }
 
+export function activeTaskImages(images: MultiTrackTaskImage[] | undefined): MultiTrackTaskImage[] {
+  return taskImagesFromContent(images).filter((image) => image.muted !== true)
+}
+
+export function taskImageReferenceIndex(
+  images: MultiTrackTaskImage[],
+  imageId: string,
+  offset = 0,
+): number | null {
+  const imageIndex = images.findIndex((image) => image.id === imageId)
+  if (imageIndex < 0 || images[imageIndex].muted === true) return null
+  return offset + images.slice(0, imageIndex + 1).filter((image) => image.muted !== true).length - 1
+}
+
 export function taskImageSlotNumber(image: MultiTrackTaskImage, fallbackIndex: number): number {
   return mediaSlotNumber(image.slot_name, fallbackIndex)
 }

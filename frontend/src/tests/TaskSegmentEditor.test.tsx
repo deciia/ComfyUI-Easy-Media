@@ -447,8 +447,10 @@ describe('TaskSegmentEditor', () => {
     expect(firstImage.className).toContain('object-contain')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('opacity-0')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('group-hover/task-image:opacity-100')
-    expect(screen.getByTestId('task-image-actions-a').className).toContain('right-1')
+    expect(screen.getByTestId('task-image-actions-a').className).toContain('flex')
+    expect(screen.getByTestId('task-image-actions-a').className).toContain('right-0')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('top-1')
+    expect(screen.getByTestId('task-image-overlay-a').className).toContain('bg-black/30')
     expect(screen.getByTestId('task-image-index-a').textContent).toBe('0')
     expect(screen.getByTestId('task-image-index-a').className).toContain('bottom-0')
     expect(screen.getByTestId('task-image-index-b').textContent).toBe('1')
@@ -568,6 +570,75 @@ describe('TaskSegmentEditor', () => {
 
     expect(screen.getByTestId('task-image-index-a').textContent).toBe('1')
     expect(screen.getByTestId('task-image-index-b').textContent).toBe('2')
+  })
+
+  it('confirms before applying the selected prompt to both variants of every task segment', () => {
+    const first = taskSegment()
+    first.content.user_prompt = 'Prompt A'
+    first.content.user_prompt_b = 'Selected prompt B'
+    first.content.user_prompt_variant = 'b'
+    const second = secondTaskSegment()
+    second.content.user_prompt = 'Existing A'
+    second.content.user_prompt_b = 'Existing B'
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        onContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    const applyButton = screen.getByRole('button', { name: 'Apply to all' })
+    expect(applyButton.className).toContain('text-highlight')
+    expect(applyButton.className).toContain('hover:bg-highlight/10')
+    fireEvent.click(applyButton)
+
+    expect(screen.getByRole('heading', { name: 'Apply this prompt to every segment?' })).not.toBeNull()
+    expect(screen.getByText(/replace both prompt A and prompt B/)).not.toBeNull()
+    expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+      {
+        segmentId: first.id,
+        patch: { user_prompt: 'Selected prompt B', user_prompt_b: 'Selected prompt B' },
+      },
+      {
+        segmentId: second.id,
+        patch: { user_prompt: 'Selected prompt B', user_prompt_b: 'Selected prompt B' },
+      },
+    ])
+  })
+
+  it('bypasses an image, removes its sequence number, and renumbers active images', () => {
+    const onContentChange = vi.fn()
+    const segment = taskSegment()
+    segment.content.images![0].muted = true
+    render(
+      <TooltipProvider>
+        <TaskSegmentEditor
+          segment={segment}
+          imageIndexOffset={1}
+          onContentChange={onContentChange}
+        />
+      </TooltipProvider>,
+    )
+
+    expect(screen.queryByTestId('task-image-index-a')).toBeNull()
+    expect(screen.getByTestId('task-image-index-b').textContent).toBe('1')
+    expect(screen.getAllByRole('button', { name: 'Preview image' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Delete image' })).toHaveLength(2)
+
+    fireEvent.click(screen.getByTestId('task-image-muted-a'))
+    expect(onContentChange).toHaveBeenCalledWith({
+      images: [
+        expect.objectContaining({ id: 'a', muted: false }),
+        expect.objectContaining({ id: 'b' }),
+      ],
+    })
   })
 
   it('keeps the image grid responsive inside resizable image and prompt panels', () => {

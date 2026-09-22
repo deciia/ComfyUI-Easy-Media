@@ -1,6 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Share2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,11 +45,13 @@ import {
 import { cn } from '@/lib/utils'
 import {
   createTaskImage,
+  activeTaskImages,
   canEnableSharedTaskImage,
   MAX_TASK_IMAGES,
   sharedTaskImageUpdates,
   splitSelectedTaskMedia,
   taskImageIdentity,
+  taskImageReferenceIndex,
   taskImageSlotNumber,
   taskImagesFromContent,
   uploadTaskImageFile,
@@ -173,7 +183,7 @@ function getDefaultSystemPromptForSegment(
   videoSegments: MultiTrackSegment[],
   format?: string,
 ): string {
-  const images = taskImages(segment)
+  const images = activeTaskImages(segment.content.images)
   const taskType = getMultiTrackTaskType(
     segment.content.task_mode ?? 'default',
     images.length,
@@ -235,6 +245,7 @@ export function TaskSegmentEditor({
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
   const [reselectImageId, setReselectImageId] = useState<string | null>(null)
   const [isImageDragOver, setIsImageDragOver] = useState(false)
+  const [applyPromptToAllOpen, setApplyPromptToAllOpen] = useState(false)
   const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [isDurationEditing, setIsDurationEditing] = useState(false)
@@ -278,7 +289,7 @@ export function TaskSegmentEditor({
       )).join('|')
     : segment.content.system_prompt || systemPromptDefault
   const promptResources = useMemo<PromptReferenceResource[]>(() => {
-    const imageResources = images.map((image, index) => ({
+    const imageResources = activeTaskImages(images).map((image, index) => ({
       id: `image:${image.id}`,
       type: 'image' as const,
       index: index + 1,
@@ -525,6 +536,22 @@ export function TaskSegmentEditor({
     onContentChange({ system_prompt: value })
   }
 
+  function handleApplyPromptToAll() {
+    const patch = {
+      user_prompt: promptValue,
+      user_prompt_b: promptValue,
+    }
+    if (onTrackSegmentsContentChange) {
+      onTrackSegmentsContentChange(editableSegments.map((item) => ({
+        segmentId: item.id,
+        patch,
+      })))
+    } else {
+      onContentChange(patch)
+    }
+    setApplyPromptToAllOpen(false)
+  }
+
   function handleDropdownContentChange(patch: Partial<MultiTrackSegmentContent>) {
     if (!selectedSegments || selectedSegments.length <= 1 || !onTrackSegmentsContentChange) {
       onContentChange(patch)
@@ -571,14 +598,23 @@ export function TaskSegmentEditor({
     if (current) onContentChange({ images: current.images })
   }
 
+  function handleMutedImageChange(imageId: string, muted: boolean) {
+    onContentChange({
+      images: images.map((image) => image.id === imageId ? { ...image, muted } : image),
+    })
+  }
+
   const imageGridColumns = images.length > 0 && images.length < 4 ? 'grid-cols-2' : 'grid-cols-3'
   const imagePickerSurfaceClass = isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/20'
   const containerRef = useRef<HTMLDivElement>(null)
   const editorContentRef = useRef<HTMLDivElement>(null)
+  const imageGridRef = useRef<HTMLDivElement>(null)
+  const imageDropZoneRef = useRef<HTMLDivElement>(null)
   const panelGroupRef = useRef<ResizablePanelGroupHandle>(null)
   const panelDragRef = useRef<TaskEditorPanelDrag | null>(null)
   const [showEditModeToggle, setShowEditModeToggle] = useState(true)
   const [imagePanelDefaultSize, setImagePanelDefaultSize] = useState<string | number>('40%')
+  const [imageCellWidth, setImageCellWidth] = useState(120)
 
   useLayoutEffect(() => {
     const content = editorContentRef.current
@@ -602,6 +638,25 @@ export function TaskSegmentEditor({
       Math.min(innerHeight, maximumImageWidth),
     ))
   }, [])
+
+  useLayoutEffect(() => {
+    const target = imageDropZoneRef.current ?? imageGridRef.current
+    if (!target) return
+    const update = () => {
+      const width = target.clientWidth
+      if (width <= 0) return
+      setImageCellWidth((prev) => (Math.abs(prev - width) > 1 ? width : prev))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [images.length])
+
+  const actionSharedSize = Math.round(Math.max(14, Math.min(imageCellWidth * 0.07, 28)))
+  const actionNormalSize = Math.round(Math.max(14, Math.min(imageCellWidth * 0.08, 32)))
+  const svgIconSize = Math.round(Math.max(10, Math.min(imageCellWidth * 0.05, 20)))
+  const textIconSize = Math.round(Math.max(10, Math.min(imageCellWidth * 0.06, 18)))
 
   useEffect(() => {
     const container = containerRef.current
@@ -683,6 +738,7 @@ export function TaskSegmentEditor({
             maxSize={TASK_IMAGE_PANEL_MAX_SIZE}
           >
             <div
+              ref={imageDropZoneRef}
               data-testid="task-image-drop-zone"
               aria-label={t('multitrack.taskImageDropZone')}
               className={cn(
@@ -728,6 +784,7 @@ export function TaskSegmentEditor({
               ) : (
                 <PopoverAnchor asChild>
                   <div
+                    ref={imageGridRef}
                     data-testid="task-image-grid"
                     className={cn(
                       'task-image-grid relative grid h-full w-full auto-rows-max content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
@@ -745,6 +802,9 @@ export function TaskSegmentEditor({
                     })
                     const canShareImage = image.shared_reference === true
                       || canEnableSharedTaskImage(editableSegments, image)
+                    const actionSize = image.shared_reference ? actionSharedSize : actionNormalSize
+                    const iconSvgStyle = { width: `${svgIconSize}px`, height: `${svgIconSize}px` }
+                    const imageReferenceIndex = taskImageReferenceIndex(images, image.id, imageIndexOffset)
                     return (
                       <div
                         key={image.id}
@@ -784,13 +844,19 @@ export function TaskSegmentEditor({
                             imageUrl={imageUrl}
                             alt={imageDisplayName(image)}
                             view={image.panorama_view}
-                            className="absolute inset-0 m-auto"
+                            className={cn(
+                              'absolute inset-0 m-auto transition-opacity',
+                              image.muted === true && 'opacity-40',
+                            )}
                           />
                         ) : imageUrl ? (
                           <img
                             src={imageUrl}
                             alt={imageDisplayName(image)}
-                            className="absolute inset-0 h-full w-full object-contain"
+                            className={cn(
+                              'absolute inset-0 h-full w-full object-contain transition-opacity',
+                              image.muted === true && 'opacity-40',
+                            )}
                             draggable={false}
                           />
                         ) : (
@@ -801,8 +867,13 @@ export function TaskSegmentEditor({
                           </div>
                         )}
                         <div
+                          data-testid={`task-image-overlay-${image.id}`}
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-0 z-[5] bg-black/30 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100"
+                        />
+                        <div
                           data-testid={`task-image-actions-${image.id}`}
-                          className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100"
+                          className="absolute right-0.5 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100"
                         >
                           <TooltipProvider>
                             <Tooltip>
@@ -812,7 +883,8 @@ export function TaskSegmentEditor({
                                 size="icon"
                                 variant={image.shared_reference === true ? 'secondary' : 'ghost'}
                                 data-testid={`task-image-shared-${image.id}`}
-                                className={`h-6 w-6 cursor-pointer bg-background/70 hover:bg-background/90 [&_svg]:!size-3 ${image.shared_reference === true ? 'text-highlight' : 'text-muted-foreground'}`}
+                                className={`h-auto w-auto cursor-pointer bg-background/70 hover:bg-background/90 ${image.shared_reference === true ? 'text-highlight' : 'text-muted-foreground'}`}
+                                style={{ width: actionSize, height: actionSize }}
                                 aria-label={image.shared_reference === true
                                   ? t('multitrack.disableSharedReference')
                                   : t('multitrack.enableSharedReference')}
@@ -823,7 +895,7 @@ export function TaskSegmentEditor({
                                   handleSharedImageChange(image, image.shared_reference !== true)
                                 }}
                                 >
-                                  <Share2 />
+                                  <Share2 style={iconSvgStyle} />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent side="bottom" className="max-w-64">
@@ -833,40 +905,83 @@ export function TaskSegmentEditor({
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 cursor-pointer bg-background/70 text-foreground hover:bg-background/90 [&_svg]:!size-3"
-                            aria-label={t('multitrack.previewImage')}
-                            disabled={!imageUrl}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              onOpenImagePreview?.(image.id)
-                            }}
-                          >
-                            <Eye />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
-                            aria-label={t('multitrack.deleteImage')}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleDeleteImage(image.id)
-                            }}
-                          >
-                            <Trash2 />
-                          </Button>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant={image.muted === true ? 'secondary' : 'ghost'}
+                                  data-testid={`task-image-muted-${image.id}`}
+                                  className="h-auto w-auto cursor-pointer bg-background/70 font-bold text-muted-foreground hover:bg-background/90"
+                                  style={{ width: actionSize, height: actionSize, fontSize: textIconSize }}
+                                  aria-label={image.muted === true ? t('multitrack.includeImage') : t('multitrack.bypassImage')}
+                                  aria-pressed={image.muted === true}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleMutedImageChange(image.id, image.muted !== true)
+                                  }}
+                                >
+                                  M
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">
+                                {image.muted === true ? t('multitrack.includeImageTooltip') : t('multitrack.bypassImageTooltip')}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-auto w-auto cursor-pointer bg-background/70 text-muted-foreground font-bold hover:bg-background/90"
+                                  style={{ width: actionSize, height: actionSize }}
+                                  aria-label={t('multitrack.previewImage')}
+                                  disabled={!imageUrl}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    onOpenImagePreview?.(image.id)
+                                  }}
+                                >
+                                  <Eye style={iconSvgStyle} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">{t('multitrack.previewImage')}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-auto w-auto cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive"
+                                  style={{ width: actionSize, height: actionSize }}
+                                  aria-label={t('multitrack.deleteImage')}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleDeleteImage(image.id)
+                                  }}
+                                >
+                                  <Trash2 style={iconSvgStyle} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom">{t('multitrack.deleteImage')}</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </div>
-                        <span
-                          data-testid={`task-image-index-${image.id}`}
-                          className="absolute bottom-0 left-0 z-10 min-w-5 rounded-sm bg-black/50 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-none text-white"
-                        >
-                          {index + imageIndexOffset}
-                        </span>
+                        {imageReferenceIndex !== null ? (
+                          <span
+                            data-testid={`task-image-index-${image.id}`}
+                            className="absolute bottom-0 left-0 z-10 min-w-5 rounded-sm bg-black/50 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-none text-white"
+                          >
+                            {imageReferenceIndex}
+                          </span>
+                        ) : null}
                       </div>
                     )
                   })}
@@ -954,28 +1069,38 @@ export function TaskSegmentEditor({
                 </Button>
               </div>
               {promptTab === 'user' ? (
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div aria-label={t('multitrack.userPromptVariantTooltip')}>
-                        <Tabs
-                          value={promptVariant}
-                          onValueChange={(value) => onContentChange({
-                            user_prompt_variant: value as MultiTrackUserPromptVariant,
-                          })}
-                        >
-                          <TabsList className="h-7 bg-card p-1">
-                            <TabsTrigger value="a" className="h-full min-w-7 px-2 text-[10px]">A</TabsTrigger>
-                            <TabsTrigger value="b" className="h-full min-w-7 px-2 text-[10px]">B</TabsTrigger>
-                          </TabsList>
-                        </Tabs>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-72">
-                      {t('multitrack.userPromptVariantTooltip')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-7 px-2 text-[10px] text-highlight hover:bg-highlight/10 hover:text-highlight cursor-pointer hover:opacity-70"
+                    onClick={() => setApplyPromptToAllOpen(true)}
+                  >
+                    {t('multitrack.applyPromptToAll')}
+                  </Button>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div aria-label={t('multitrack.userPromptVariantTooltip')}>
+                          <Tabs
+                            value={promptVariant}
+                            onValueChange={(value) => onContentChange({
+                              user_prompt_variant: value as MultiTrackUserPromptVariant,
+                            })}
+                          >
+                            <TabsList className="h-7 bg-card p-1">
+                              <TabsTrigger value="a" className="h-full min-w-7 px-2 text-[10px]">A</TabsTrigger>
+                              <TabsTrigger value="b" className="h-full min-w-7 px-2 text-[10px]">B</TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-72">
+                        {t('multitrack.userPromptVariantTooltip')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
               ) : Boolean(segment.content.system_prompt) && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1179,6 +1304,24 @@ export function TaskSegmentEditor({
           </Select>
         </div>
       </div>
+      <Dialog open={applyPromptToAllOpen} onOpenChange={setApplyPromptToAllOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('multitrack.applyPromptToAllTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('multitrack.applyPromptToAllDescription')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setApplyPromptToAllOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="button" onClick={handleApplyPromptToAll}>
+              {t('multitrack.applyPromptToAllConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

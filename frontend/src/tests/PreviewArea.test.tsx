@@ -539,6 +539,7 @@ describe('PreviewArea', () => {
     expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('w-auto')
     expect(screen.getByTestId('task-preview-image-first').className).toContain('h-40')
     expect(screen.getByTestId('task-preview-image-first').className).toContain('group/task-image')
+    expect(screen.getByTestId('task-preview-image-first').className).not.toContain('container-type')
     expect(screen.getByTestId('task-preview-image-second').className).toContain('h-40')
     expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
     expect(screen.queryByLabelText('720° panorama preview')).toBeNull()
@@ -1008,8 +1009,9 @@ describe('PreviewArea', () => {
     const deleteButton = screen.getByRole('button', { name: 'Delete image first.png' })
     expect(firstImage.contains(deleteButton)).toBe(true)
     expect(deleteButton.parentElement?.className).toContain('group-hover/task-image:opacity-100')
-    expect(deleteButton.parentElement?.className).toContain('right-1')
-    expect(deleteButton.className).toContain('h-5')
+    expect(deleteButton.parentElement?.className).toContain('right-0')
+    expect(deleteButton.parentElement?.className).toContain('flex')
+    expect(deleteButton.style.width).toBe('18px')
     expect(deleteButton.className).toContain('text-destructive')
 
     fireEvent.click(deleteButton)
@@ -1018,6 +1020,42 @@ describe('PreviewArea', () => {
       segmentId: 'active-task',
       patch: {
         images: [expect.objectContaining({ id: 'second' })],
+      },
+    }])
+  })
+
+  it('bypasses an active task image from the global preview', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const muteButton = screen.getByTestId('task-preview-image-muted-first')
+    expect(muteButton.textContent).toBe('M')
+    expect(muteButton.parentElement?.className).toContain('right-0')
+    expect(muteButton.parentElement?.className).toContain('top-1')
+    fireEvent.click(muteButton)
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ id: 'first', muted: true }),
+          expect.objectContaining({ id: 'second' }),
+        ],
       },
     }])
   })
