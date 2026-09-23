@@ -117,6 +117,41 @@ def _release_saved_outputs(execution_list: Any, owner: str, state: dict[str, Any
     return removed
 
 
+def _release_on_prompt_error(execution_list: Any, failed_node_id: str | None) -> None:
+    """Error path: evict outputs of already-saved segments after a run fails.
+
+    ComfyUI's ``handle_execution_error`` only notifies the frontend; every
+    expanded segment graph executed before the failure stays referenced by
+    the prompt's output cache until the process dies.  On a project run that
+    aborts mid-way (validation error, node exception, interrupt) those
+    resident latents/decoded frames of *already saved* segments can add tens
+    of GiB of commit and eventually crash the process with 0xc0000005 when
+    later runs stack on top.  Saved segments are safe to drop: their media
+    and context latents are already on disk; only outputs of segments that
+    never reached their artifact node are kept for a possible retry.
+    """
+    prompt = execution_list.dynprompt
+    states = getattr(execution_list, "_easy_media_memory", None)
+    if not states:
+        return
+    removed = 0
+    for owner, state in list(states.items()):
+        # _release_saved_outputs evicts only segments that already reached
+        # their artifact node (segment <= saved): their media and context
+        # latents are on disk.  Outputs of the failed/unsaved segment stay
+        # resident so a retry can reuse cached conditioning.
+        removed += _release_saved_outputs(execution_list, owner, state)
+    if removed:
+        gc.collect()
+        from comfy import model_management
+
+        model_management.soft_empty_cache()
+        LOGGER.info(
+            "[Easy Media][Project] Run failed at %s: released %s cache references of saved segments",
+            failed_node_id, removed,
+        )
+
+
 def _after_project_node(execution_list: Any, node_id: str) -> None:
     scope = _segment_scope(execution_list.dynprompt, node_id)
     if scope is None:
@@ -158,6 +193,7 @@ def install_project_memory_cleanup() -> None:
     @wraps(original)
     def complete(execution_list: Any, *args: Any, **kwargs: Any) -> Any:
         node_id = execution_list.staged_node_id
+        complete._easy_media_last_execution_list = execution_list
         result = original(execution_list, *args, **kwargs)
         try:
             _after_project_node(execution_list, node_id)
@@ -168,4 +204,42 @@ def install_project_memory_cleanup() -> None:
         return result
 
     complete._easy_media_memory_cleanup = True
+    # Snapshot each live ExecutionList so the error-path hook below can find
+    # the current one (PromptExecutor keeps no handle to it).
+    complete._easy_media_last_execution_list = None
     ExecutionList.complete_node_execution = complete
+
+    # Error path: PromptExecutor.handle_execution_error only reports to the
+    # frontend.  Wrap it so aborted project runs also release the outputs of
+    # already-saved segments instead of leaving them resident until restart.
+    # complete_node_execution fires before any error handler aborts the loop,
+    # so the snapshot above is current whenever an error arrives.
+    try:
+        import execution as comfy_execution_module
+    except ImportError:  # headless/test runtimes without the server module
+        return
+
+    handle_error = comfy_execution_module.PromptExecutor.handle_execution_error
+    if getattr(handle_error, "_easy_media_memory_cleanup", False):
+        return
+
+    @wraps(handle_error)
+    def handle_error_with_cleanup(self, prompt_id, prompt, current_outputs, executed, error, ex):
+        result = handle_error(self, prompt_id, prompt, current_outputs, executed, error, ex)
+        try:
+            execution_list = getattr(
+                ExecutionList.complete_node_execution,
+                "_easy_media_last_execution_list",
+                None,
+            )
+            if execution_list is not None:
+                _release_on_prompt_error(
+                    execution_list,
+                    error.get("node_id") if isinstance(error, dict) else None,
+                )
+        except Exception:
+            LOGGER.exception("[Easy Media][Project] Unable to release segment cache after error")
+        return result
+
+    handle_error_with_cleanup._easy_media_memory_cleanup = True
+    comfy_execution_module.PromptExecutor.handle_execution_error = handle_error_with_cleanup
