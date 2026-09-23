@@ -3071,6 +3071,30 @@ def test_shared_task_images_are_prefixed_deduplicated_and_reused():
     assert torch.equal(task_result.values[4][1], second_local)
 
 
+def test_muted_shared_task_image_does_not_mute_other_tasks():
+    module = _load_basic_module()
+    shared_image = torch.ones(1, 2, 2, 3)
+    track_data = {"tracks": [{"type": "task", "segments": [
+        {"content": {"images": [{
+            "source_type": "slot", "slot_name": "image1",
+            "shared_reference": True, "muted": True,
+        }]}},
+        {"content": {"images": []}},
+    ]}]}
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "2 x 2 (1:1)"}, "MiniMax", track_data,
+        image=[shared_image],
+    )
+    tracks_info, images = result.values[0], result.values[1]
+    first, second = tracks_info["tracks"][0]["segments"]
+
+    assert first["content"]["images"][0]["muted"] is True
+    assert second["content"]["images"][0].get("muted") is not True
+    assert len(images) == 1
+    assert torch.equal(images[0], shared_image)
+
+
 def test_shared_video_is_available_to_a_non_overlapping_task():
     module = _load_basic_module()
     source_video = _FakeVideo(
@@ -3776,6 +3800,48 @@ def test_prepare_multitrack_project_media_extracts_shared_and_locked_audio(monke
     assert task_info["tracks"][0]["segments"][0]["content"]["images"] == []
     assert task_info["tracks"][1]["segments"] == []
     assert task_info["tracks"][2]["segments"] == []
+
+
+def test_project_shared_image_respects_each_task_image_mute(monkeypatch):
+    module = _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    shared_image = torch.ones(1, 2, 2, 3)
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_timeline_image_item",
+        lambda *_args: shared_image,
+    )
+    tracks_info = {
+        "frame_rate": 1,
+        "format": "MiniMax",
+        "tracks": [{"type": "task", "segments": [
+            {"start_frame": 0, "end_frame": 4, "content": {"images": [{
+                "file_path": "shared.png", "shared_reference": True, "muted": True,
+            }]}},
+            {"start_frame": 4, "end_frame": 8, "content": {"images": [{
+                "file_path": "shared.png", "shared_reference": True,
+            }]}},
+            {"start_frame": 8, "end_frame": 12, "content": {"images": []}},
+        ]}],
+    }
+
+    task_base, shared_images, _audio, _video, _locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+    assert shared_images == [shared_image]
+    assert task_base["tracks"][0]["segments"][0]["content"]["images"][0]["muted"] is True
+
+    entries = project_module.h3_task_entries(task_base)
+    outputs = []
+    for index, entry in enumerate(entries):
+        task_info = project_module.prepare_multitrack_project_task_info(
+            task_base, shared_images, [], [], task_entry=entry,
+        )
+        outputs.append(module.MultiTrackTaskOutput.execute(task_info, task_index=index).values[4])
+
+    assert outputs[0] == []
+    assert outputs[1] == [shared_image]
+    assert outputs[2] == [shared_image]
 
 
 def test_prepare_multitrack_project_media_prefers_audio_lock_and_keeps_locked_video_reference(
