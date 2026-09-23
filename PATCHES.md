@@ -51,6 +51,24 @@
 E2E 验证: API 提交 Stage(shot)→Artifact success; manifest context_cut=True; 占位latent 127KB
 注意: 测试中 task_mode=None 因测试tracks_info无task轨段; 真实链路(P3)不受影响
 
+## 修复: 错误路径释放已保存段缓存 (2026-09-23, commit ec94794)
+
+背景: 多轨项目 run 报错中断(节点异常/手动中断/校验错误)后, 已展开段子图的输出
+(latent/解码帧/conditioning)全部驻留进程 commit 内存不释放。多次报错叠加后
+顶穿 Windows commit 上限 → 0xc0000005 进程崩溃(09-23 16:40 实录 78.1GiB)。
+普通工作流无此问题(单图缓存量级小), 唯多轨项目一图建全项目受影响。
+
+| # | 文件 | 改动 | 状态 |
+|---|------|------|------|
+| 23 | utils/project_memory.py | +_release_on_prompt_error(): 失败时驱逐已保存段输出(媒体已落盘), 失败段 conditioning 保留供重试 | ✅ |
+| 24 | utils/project_memory.py | install 时追加包装 PromptExecutor.handle_execution_error(ComfyUI 错误路径原本零清理) | ✅ |
+| 25 | utils/project_memory.py | complete 包装器快照当前 ExecutionList 供错误钩子定位现场; headless 无 execution 模块时跳过 | ✅ |
+
+验证: 独立最小复现测试(scratch/test_error_path_release.py, 模拟段0/1保存+段2异常):
+已保存段张量全部释放 ✅ 失败段 latent 驻留保留 ✅ py_compile ✅
+仓库自带 pytest 套件在改动前即坏(conftest 依赖 PromptServer.instance), 与本改动无关。
+生效标志: run 报错后日志出现 "[Easy Media][Project] Run failed at ...: released N cache references"
+
 ## 待做
 - 阶段3: P3 实弹(直通段×manifest 登记×尾段context续接)
 - 直通段 shot 的 P3 实弹验证(下一段独立开场)
