@@ -652,6 +652,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     tooltip="Optional dependency on the previous saved segment.",
                 ),
                 io.Int.Input("task_start_frame", default=0, min=0, optional=True),
+                io.Int.Input("task_index", default=0, min=0, optional=True),
                 io.Int.Input("task_duration_frames", default=1, min=1, optional=True),
                 io.Float.Input("fps", default=24.0, min=0.001, optional=True),
                 io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
@@ -687,6 +688,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
         project_static: Any | None = None,
         previous: Any | None = None,
         task_start_frame: int = 0,
+        task_index: int = 0,
         task_duration_frames: int = 1,
         fps: float = 24.0,
         generation_mode: str = "multi_frames",
@@ -709,6 +711,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 segment_cache_key = (
                     "h3_project_segment",
                     int(task_start_frame),
+                    int(task_index),
                     int(task_duration_frames),
                     float(fps),
                     str(generation_mode),
@@ -743,6 +746,11 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     project_static["task_tracks_info_base"], project_static["shared_images"],
                     task_audio if generation_mode == "reference" else [],
                     task_video if generation_mode == "reference" else [],
+                    task_entry=next(
+                        (entry for index, entry in enumerate(h3_task_entries(project_static["task_tracks_info_base"]))
+                         if index == int(task_index)),
+                        None,
+                    ),
                 )
                 multitrack_runtime_cache(task_info, create=True)
                 task_info["_easy_media_cache_status"] = {
@@ -780,9 +788,14 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     }
                 else:
                     info = parse_tracks_info(tracks_info)
+                    log_node_info(
+                        "H3 Project Static Prepare",
+                        "开始加载项目媒体（包括锁定视频原声）",
+                    )
                     task_base, images, audio, video, locked = (
                         prepare_multitrack_project_media(info)
                     )
+                    log_node_info("H3 Project Static Prepare", "项目媒体加载完成")
                     task_base.pop(MULTITRACK_RUNTIME_CACHE_KEY, None)
                     media_data = {
                         "task_tracks_info_base": task_base,
@@ -1518,6 +1531,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 segment_static = graph.node(
                     "easy h3ProjectStaticPrepare", id=f"segment_static_prepare_{task_index}",
                     project_static=project_media_static.out(0), task_start_frame=task_start_frame,
+                    task_index=task_index,
                     task_duration_frames=task_duration_frames, fps=fps,
                     generation_mode=generation_mode,
                     **(
@@ -1546,6 +1560,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     task_tracks_info_base, shared_images,
                     task_shared_audio if generation_mode == "reference" else [],
                     task_shared_video if generation_mode == "reference" else [],
+                    task_entry=entry,
                 )
                 task_output = graph.node(
                     "easy multiTrackTaskOutput", id=f"task_{task_index}",
