@@ -690,7 +690,7 @@ export function PreviewArea({
     if (!activeTaskImages) return null
     const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.slot_name ?? image.id
     const borderClass = image.shared_reference
-      ? 'border-highlight'
+      ? (image.muted === true ? 'border-highlight opacity-50' : 'border-highlight')
       : selected
         ? 'border-primary'
         : 'border-border'
@@ -962,7 +962,7 @@ export function PreviewArea({
                   size="icon"
                   variant={image.muted === true ? 'secondary' : 'ghost'}
                   data-testid={`task-preview-image-muted-${image.id}`}
-                  className={`${controlClassName} cursor-pointer bg-background/70 text-[14px] font-bold text-muted-foreground hover:bg-background/90`}
+                  className={`${controlClassName} cursor-pointer bg-background/70 text-[14px] font-bold hover:bg-background/90 ${image.muted === true ? 'text-destructive hover:text-destructive' : 'text-muted-foreground'}`}
                   style={{ width: actionSize, height: actionSize }}
                   aria-label={image.muted === true ? t('multitrack.includeImage') : t('multitrack.bypassImage')}
                   aria-pressed={image.muted === true}
@@ -1445,6 +1445,7 @@ export function PreviewArea({
                 playbackNonce={playbackNonce}
                 muted
                 volume={0}
+                frameRate={data.frame_rate}
                 className={selectedSubtitleStyle ? 'absolute inset-0 h-full w-full' : undefined}
               >
                 {activeSubtitleSegments.map((segment) => (

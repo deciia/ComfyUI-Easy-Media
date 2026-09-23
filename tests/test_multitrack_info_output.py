@@ -1,8 +1,11 @@
 import importlib.util
 import inspect
+import io as stdlib_io
 import json
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import types
 from fractions import Fraction
@@ -10,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from PIL import Image
 
 
 class _Port:
@@ -2023,6 +2027,69 @@ def test_multitrack_task_output_passes_task_window_to_deferred_file_video_merge(
         "audio_volume_db": 0.0,
         "audio_muted": False,
     }], 4)]
+
+
+def test_paused_multitrack_preview_uses_output_frame_sampling(tmp_path, monkeypatch):
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("FFmpeg is unavailable")
+    source = tmp_path / "30fps.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30:d=0.566667",
+        "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=30:d=0.433333",
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+        "-map", "[v]", "-an", "-c:v", "mpeg4", str(source),
+    ], check=True)
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+    before = Image.open(stdlib_io.BytesIO(
+        video_module.decode_multitrack_preview_frame(source, 13, 24)
+    )).convert("RGB").getpixel((32, 32))
+    after = Image.open(stdlib_io.BytesIO(
+        video_module.decode_multitrack_preview_frame(source, 14, 24)
+    )).convert("RGB").getpixel((32, 32))
+    assert before[0] > before[2]
+    assert after[2] > after[0]
+
+    monkeypatch.setattr(sys.modules["folder_paths"], "models_dir", str(tmp_path), raising=False)
+    monkeypatch.setitem(sys.modules, "easy_media.utils.models", types.SimpleNamespace(
+        require_model_path=lambda _name: source,
+    ))
+    omnishotcut_path = Path(__file__).parents[1] / "modules" / "omnishotcut" / "__init__.py"
+    spec = importlib.util.spec_from_file_location(
+        "easy_media.modules.omnishotcut", omnishotcut_path,
+        submodule_search_locations=[str(omnishotcut_path.parent)],
+    )
+    omnishotcut = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, omnishotcut)
+    spec.loader.exec_module(omnishotcut)
+    sampled = omnishotcut._read_video(source, 16, 16, 24)
+    assert sampled[13, 8, 8, 0] > sampled[13, 8, 8, 2]
+    assert sampled[14, 8, 8, 2] > sampled[14, 8, 8, 0]
+
+
+def test_paused_multitrack_preview_seek_matches_full_decode(tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("FFmpeg is unavailable")
+    source = tmp_path / "30fps-offset.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=6",
+        "-an", "-c:v", "mpeg4", "-output_ts_offset", "5", str(source),
+    ], check=True)
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+
+    for frame in (96, 97, 120):
+        expected = subprocess.run([
+            ffmpeg, "-v", "error", "-i", str(source),
+            "-vf", f"setpts=PTS-STARTPTS,fps=fps=24:start_time=0,"
+                   f"select=eq(n\\,{frame}),scale=w='min(960,iw)':h=-2",
+            "-frames:v", "1", "-an", "-f", "image2pipe", "-vcodec", "mjpeg", "-",
+        ], capture_output=True, check=True, timeout=60).stdout
+        assert video_module.decode_multitrack_preview_frame(source, frame, 24) == expected
 
 
 def test_multitrack_task_output_reports_media_processing_progress():
