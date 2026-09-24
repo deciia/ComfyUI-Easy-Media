@@ -5,6 +5,7 @@ import { preserveMultiImagesLoaderNodeSize } from '@/lib/multi-images-loader-nod
 import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import { installTrackDataRealignment } from '@/lib/track-data-realign';
+import { installDynamicComboRuntimeRebuild } from '@/lib/dynamic-combo-runtime-rebuild';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
@@ -64,7 +65,8 @@ comfyApp.registerExtension({
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
     installProjectSamplingPreview(nodeType, nodeData, comfyApp)
-    installTrackDataRealignment(nodeType, nodeData, comfyApp)
+    installTrackDataRealignment(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
+    installDynamicComboRuntimeRebuild(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
   },
 
   getNodeMenuItems(node) {

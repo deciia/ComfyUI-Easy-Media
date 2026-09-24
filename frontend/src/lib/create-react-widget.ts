@@ -1,7 +1,6 @@
 import React from 'react'
 import { createRoot, Root } from 'react-dom/client'
 import { CUSTOM_NODE_CLASS } from './constants'
-import { scheduleInitialRender } from './staggered-mount'
 import type {
   ComfyApp,
   DOMWidget,
