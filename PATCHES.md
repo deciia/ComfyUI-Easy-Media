@@ -69,6 +69,33 @@ E2E 验证: API 提交 Stage(shot)→Artifact success; manifest context_cut=True
 仓库自带 pytest 套件在改动前即坏(conftest 依赖 PromptServer.instance), 与本改动无关。
 生效标志: run 报错后日志出现 "[Easy Media][Project] Run failed at ...: released N cache references"
 
+## 修复: 多轨编辑器前端空白 + React #185 (2026-09-24, commit 905c32d)
+
+背景: ComfyUI 前端 1.53+/React 19 下, 多轨编辑器(easy multiTrackEditor)加载后
+React 树被 "Maximum update depth exceeded"(#185) 中止 → widget 空白; 且
+DYNAMICCOMBO_V3 子widget重建导致 widgets_values 错位, track_data 拿到 format
+combo 字符串, JSON 解析失败 → 编辑器永久空白。两个独立 bug 叠加。
+
+| # | 文件 | 改动 | 状态 |
+|---|------|------|------|
+| 26 | frontend/package.json + bun.lock | radix 全家升最新; overrides+resolutions 钉 react-compose-refs=1.1.5 / react-presence=1.1.10, 清除嵌套旧副本 | ✅ |
+| 27 | frontend/src/components/ui/tooltip.tsx | Radix Tooltip → 同 API 轻量实现(无 Presence/Portal, 纯展示层) | ✅ |
+| 28 | frontend/src/lib/create-react-widget.ts | onChange 稳定身份 + parseValue 引用缓存 + 同值短路 + 微任务合并渲染 | ✅ |
+| 29 | frontend/src/components/widgets/multitrack/PreviewArea.tsx | 四个派生值(activeVideo/audioSources/taskImages/taskPrompt)useMemo 化(原每 render 新引用, effect 链重火) | ✅ |
+| 30 | frontend/src/lib/project-sampling-preview-node.tsx | root.unmount() 延迟到 idle(原在 fireNodeRemovalLifecycle 提交中途同步执行); syncHostBounds 永续 rAF 自激循环剪除; nodeId prop 稳定化 | ✅ |
+| 31 | frontend/src/lib/track-data-realign.ts (新) | onConfigure 后 track_data 值非合法 JSON 时, 从工作流自身 widgets_values 找回真 JSON 回填(setValue 需带 {} 上下文参数, 1.54 DOMWidgetImpl 强制) | ✅ |
+| 32 | frontend/src/hooks/use-canvas-scale.ts | 模块级单例 + useSyncExternalStore(原每 widget 各自 patch canvas.onDrawForeground + 绘制回调里同步 setState) | ✅ |
+
+验证(Edge CDP 无头): 单editor/单project/editor+project组合/完整33节点工作流 全部
+#185=0; node14 track_data 渲染 444 元素/73KB HTML, 截图确认时间轴/轨道/预览/参数
+面板完整, 内容为真实项目数据。构建: bun run build:release。
+
+上游同步指引(若作者后续更新导致冲突, 按此重放):
+- 依赖锁定看 package.json 的 overrides/resolutions 两个键
+- 其余补丁均为独立小文件或在既有文件上的局部改动, git diff 905c32d^..905c32d
+  -- frontend/src 即为完整指纹清单
+- 若上游官方修复了 DYNAMICCOMBO_V3 加载重建(子widget缺失→值错位), #31 可移除
+
 ## 待做
 - 阶段3: P3 实弹(直通段×manifest 登记×尾段context续接)
 - 直通段 shot 的 P3 实弹验证(下一段独立开场)
