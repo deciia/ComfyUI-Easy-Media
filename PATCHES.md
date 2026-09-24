@@ -87,6 +87,7 @@ combo 字符串, JSON 解析失败 → 编辑器永久空白。两个独立 bug 
 | 32 | frontend/src/hooks/use-canvas-scale.ts | 模块级单例 + useSyncExternalStore(原每 widget 各自 patch canvas.onDrawForeground + 绘制回调里同步 setState) | ✅ |
 | 33 | nodes/basic.py | _resolve_configured_dimensions megapixels 分支: aspect_ratio 缺失且 resize_method 持 AspectRatio 枚举标签(前端错位脏值, 如 "9:16 (Portrait Widescreen)")时回填, 恢复 9:16@0.5MP≈768x1376; 非枚举脏值不误伤. 修复前端不重建 DYNAMICCOMBO_V3 子widget导致分辨率塌缩成 1024x1024 方形 | ✅ |
 | 34 | frontend/src/lib/track-data-realign.ts | Step2 追加: 无合法候选的 combo(如 resize_method 持 AspectRatio 脏值)重置为第一合法选项, 消除红框; Step3(延迟120ms 避开 ComfyUI 异步值重放): megapixels 模式补建 resolution.aspect_ratio combo + resolution.megapixels number widget, 从保存值恢复 9:16/0.5, 提交 inputs 含全部 4 个 resolution.* 键 | ✅ |
+| 35 | frontend/src/lib/dynamic-combo-runtime-rebuild.ts (新) | 运行时切换 DYNAMICCOMBO_V3 主选项(如 resolution 切 megapixels)时按 schema 重建子 widget: 删旧键子widget→按新键 inputs.required 建新→回填保存值; setValue 包装+300ms 轮询兜底+onConfigure 初始对账. 修复 1.53+ 前端切换后子选项不出现/旧子widget残留(官方 upstream 同样未处理, 见 issue #108) | ✅ 无头验证: 往返切换 auto↔megapixels 子widget增删正确; 9:16+0.5 保存序列化完整五元组 |
 
 验证(Edge CDP 无头): 单editor/单project/editor+project组合/完整33节点工作流 全部
 #185=0; node14 track_data 渲染 444 元素/73KB HTML, 截图确认时间轴/轨道/预览/参数
