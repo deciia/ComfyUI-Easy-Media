@@ -296,12 +296,32 @@ export function PreviewArea({
     })
   }, [videoSegments])
   const previewSelectedSegment = selectedSegment?.trackType === 'audio' ? null : selectedSegment
-  const activeVideo = previewSelectedSegment?.trackType === 'task'
-    ? null
-    : getActivePreviewVideoSegment(data, currentTime, previewSelectedSegment?.trackType === 'video' ? previewSelectedSegment.segment.id : null)
-  const activeAudioSources = getActivePreviewAudioSources(data, currentTime, previewSelectedSegment)
-  const activeTaskImages = previewSelectedSegment === null ? getActiveTaskImages(data, currentTime) : null
-  const activeTaskPrompt = previewSelectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null
+  // Memoize the derived preview values: they feed effect dependency arrays
+  // (e.g. the active-task-image effect), and recomputing them on every render
+  // handed those effects a fresh object reference each time, re-running them,
+  // scheduling more state updates, and snowballing into React #185
+  // (Maximum update depth exceeded) on ComfyUI frontend >= 1.53 / React 19.
+  // The computations themselves are unchanged — only their identity is now
+  // stable across renders.
+  const activeVideoSegmentId = previewSelectedSegment?.trackType === 'video' ? previewSelectedSegment.segment.id : null
+  const activeVideo = useMemo(
+    () => previewSelectedSegment?.trackType === 'task'
+      ? null
+      : getActivePreviewVideoSegment(data, currentTime, activeVideoSegmentId),
+    [data, currentTime, previewSelectedSegment?.trackType, activeVideoSegmentId],
+  )
+  const activeAudioSources = useMemo(
+    () => getActivePreviewAudioSources(data, currentTime, previewSelectedSegment),
+    [data, currentTime, previewSelectedSegment],
+  )
+  const activeTaskImages = useMemo(
+    () => previewSelectedSegment === null ? getActiveTaskImages(data, currentTime) : null,
+    [data, currentTime, previewSelectedSegment],
+  )
+  const activeTaskPrompt = useMemo(
+    () => previewSelectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null,
+    [data, currentTime, previewSelectedSegment],
+  )
   const activeSubtitleSegments = useMemo(() => {
     if (previewSelectedSegment?.trackType === 'task') return []
     const segments = getActiveSubtitleSegments(data, currentTime)

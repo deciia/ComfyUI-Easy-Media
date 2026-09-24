@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot, Root } from 'react-dom/client'
 import { CUSTOM_NODE_CLASS } from './constants'
+import { scheduleInitialRender } from './staggered-mount'
 import type {
   ComfyApp,
   DOMWidget,
@@ -109,23 +110,61 @@ export function createReactWidget<T extends object | string = object>(
 
     const comfyNode = node as ComfyNode
 
+    // Stable value identity: cache the parsed object and reuse it while
+    // currentValue is unchanged. A fresh JSON.parse per render gave React a
+    // new object reference every time, defeating memo/effect deps.
+    let parsedValue: T
+    let parsedFrom: string | undefined
+
     function parseValue(): T {
-      try {
-        return JSON.parse(currentValue) as T
-      } catch {
-        return currentValue as unknown as T
+      if (parsedFrom !== currentValue) {
+        try {
+          parsedValue = JSON.parse(currentValue) as T
+        } catch {
+          parsedValue = currentValue as unknown as T
+        }
+        parsedFrom = currentValue
       }
+      return parsedValue
+    }
+
+    // Stable onChange identity across renders. MultiTrackWidget and friends
+    // keep effects/callbacks keyed on [onChange]; a fresh arrow function per
+    // render made those effects re-fire every render -> React #185
+    // (Maximum update depth exceeded) on ComfyUI frontend >= 1.53.
+    //
+    // The value-equality short-circuit and microtask coalescing below matter
+    // just as much: a child that reported an unchanged value used to trigger
+    // a full root.render() from inside its own effect. Radix ref callbacks
+    // then ran during React's commit/deletion pass (safelyDetachRef ->
+    // composed ref -> setState), which React 19 counts as nested updates and
+    // aborts at 50 with #185, blanking the widget.
+    let renderScheduled = false
+
+    function scheduleRender() {
+      if (renderScheduled) return
+      renderScheduled = true
+      const flush = () => {
+        renderScheduled = false
+        render()
+      }
+      if (typeof queueMicrotask === 'function') queueMicrotask(flush)
+      else Promise.resolve().then(flush)
+    }
+
+    function handleChange(v: T) {
+      const next = typeof v === 'string' ? v : JSON.stringify(v)
+      if (next === currentValue) return
+      currentValue = next
+      comfyNode.setDirtyCanvas(true, true)
+      scheduleRender()
     }
 
     function render() {
       root?.render(
         React.createElement(Component, {
           value: parseValue(),
-          onChange: (v: T) => {
-            currentValue = typeof v === 'string' ? v : JSON.stringify(v)
-            comfyNode.setDirtyCanvas(true, true)
-            render()
-          },
+          onChange: handleChange,
           inputName,
           widget,
           node: comfyNode,
@@ -163,6 +202,10 @@ export function createReactWidget<T extends object | string = object>(
     // serializeValue is called by ComfyUI when building the API prompt payload
     widget.serializeValue = () => currentValue
     root = createRoot(container)
+    // Stagger the first paint of each widget root across frames: several
+    // roots mounting in one synchronous batch compound their ref-attach
+    // cascades into React #185 (nested update cap). Subsequent renders
+    // stay synchronous via render().
     render()
 
     return { widget }

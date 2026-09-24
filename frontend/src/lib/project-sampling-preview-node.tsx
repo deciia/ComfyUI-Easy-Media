@@ -2,6 +2,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import { SamplingPreviewWidget } from '@/components/widgets/SamplingPreviewWidget'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
+import { scheduleInitialRender } from '@/lib/staggered-mount'
 
 const NODE_NAME = 'easy multitrackProject'
 const WIDGET_NAME = 'easy-media-sampling-preview'
@@ -45,6 +46,11 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
   let hostObserver: MutationObserver | null = null
   let hostStyleObserver: MutationObserver | null = null
   let trackedHost: HTMLElement | null = null
+  // Stable identity for the nodeId accessor: an inline arrow here created a
+  // new prop on every render, re-running child effects and churning
+  // mount/unmount of Radix subtrees (whose ref cleanup calls setState during
+  // React's commit pass -> React #185).
+  const getNodeId = () => node.id
   const container = document.createElement('div')
   container.classList.add('comfyui-react-widget', CUSTOM_NODE_CLASS)
   container.hidden = true
@@ -79,9 +85,22 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
     }
     const height = visible ? PREVIEW_HEIGHT : COLLAPSED_HEIGHT
     const pointerEvents = visible ? 'auto' : 'none'
-    if (host.style.maxHeight !== `${height}px`) host.style.maxHeight = `${height}px`
-    if (host.style.overflow !== 'hidden') host.style.overflow = 'hidden'
-    if (host.style.pointerEvents !== pointerEvents) host.style.pointerEvents = pointerEvents
+    let changed = false
+    if (host.style.maxHeight !== `${height}px`) { host.style.maxHeight = `${height}px`; changed = true }
+    if (host.style.overflow !== 'hidden') { host.style.overflow = 'hidden'; changed = true }
+    if (host.style.pointerEvents !== pointerEvents) { host.style.pointerEvents = pointerEvents; changed = true }
+    // LiteGraph rewrites host styles on every canvas draw, so the style
+    // MutationObserver + an unconditional trailing rAF here fed a perpetual
+    // redraw loop (syncHostBounds -> setDirtyCanvas -> LiteGraph style write
+    // -> observer -> syncHostBounds ...). Only propagate when we actually
+    // wrote something, and only then schedule one follow-up frame; this
+    // broke into React #185 (nested update storm) as soon as a second
+    // EasyMedia React widget (ResizeObserver-driven) shared the graph.
+    if (changed) {
+      node.onResize?.(node.size)
+      node.graph?.setDirtyCanvas?.(true, true)
+      globalThis.requestAnimationFrame?.(syncHostBounds)
+    }
   }
   hostObserver = new MutationObserver(syncHostBounds)
   if (document.body) hostObserver.observe(document.body, { childList: true, subtree: true })
@@ -110,14 +129,14 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
   const render = () => root?.render(
     <SamplingPreviewWidget
       app={app}
-      nodeId={() => node.id}
+      nodeId={getNodeId}
       executionRevision={executionRevision}
       onVisibilityChange={setVisible}
     />,
   )
 
   root = createRoot(container)
-  render()
+  scheduleInitialRender(render)
 
   return {
     reset: () => {
@@ -127,9 +146,21 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
     cleanup: () => {
       hostObserver?.disconnect()
       hostStyleObserver?.disconnect()
-      root?.unmount()
-      container.remove()
+      // Defer the React unmount out of the removal lifecycle: ComfyUI calls
+      // onRemoved synchronously while a previous commit may still be flushing
+      // (fireNodeRemovalLifecycle during loadGraphData). React 19 counts a
+      // synchronous root.unmount() + subsequent sibling-tree setState as
+      // nested updates and aborts with #185, blanking the widgets. One idle
+      // frame later the tree is gone just the same.
+      const r = root
       root = null
+      const finish = () => {
+        r?.unmount()
+        container.remove()
+      }
+      const idle = (globalThis as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+      if (typeof idle === 'function') idle(() => finish())
+      else globalThis.setTimeout?.(finish, 0)
     },
   }
 }

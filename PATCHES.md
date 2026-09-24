@@ -73,3 +73,7 @@ E2E 验证: API 提交 Stage(shot)→Artifact success; manifest context_cut=True
 - 阶段3: P3 实弹(直通段×manifest 登记×尾段context续接)
 - 直通段 shot 的 P3 实弹验证(下一段独立开场)
 - "回"字截断根因深挖(已列必查项)
+- [挂起-0924] 二采 tiled forward 832x1440 偶发 0xc0000005(c10.dll 写已释放显存映射, 16:40/19:35 两录, dump已解析)。
+  异恒决定: 不降二采倍率/不弃二采/不降驱动/不做大改源码。根因方向: torch 2.13.0+cu130 线程池与
+  nvcuda64 交互的内存生命周期竞态。候选小改(未批准, 等拍板): h3_tiling 每 tile .cpu() 前加
+  torch.cuda.synchronize(); 上游 yolain/ComfyUI-Easy-Media 亦未修(4 commit 未见触及)。
