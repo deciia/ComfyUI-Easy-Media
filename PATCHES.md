@@ -86,6 +86,7 @@ combo 字符串, JSON 解析失败 → 编辑器永久空白。两个独立 bug 
 | 31 | frontend/src/lib/track-data-realign.ts (新) | onConfigure 后 track_data 值非合法 JSON 时, 从工作流自身 widgets_values 找回真 JSON 回填(setValue 需带 {} 上下文参数, 1.54 DOMWidgetImpl 强制); +Step2 combo 归位: format 收到 megapixels 浮点时按合法选项归回 "MiniMax"; setValue ctx 须含 canvas.graph_mouse | ✅ |
 | 32 | frontend/src/hooks/use-canvas-scale.ts | 模块级单例 + useSyncExternalStore(原每 widget 各自 patch canvas.onDrawForeground + 绘制回调里同步 setState) | ✅ |
 | 33 | nodes/basic.py | _resolve_configured_dimensions megapixels 分支: aspect_ratio 缺失且 resize_method 持 AspectRatio 枚举标签(前端错位脏值, 如 "9:16 (Portrait Widescreen)")时回填, 恢复 9:16@0.5MP≈768x1376; 非枚举脏值不误伤. 修复前端不重建 DYNAMICCOMBO_V3 子widget导致分辨率塌缩成 1024x1024 方形 | ✅ |
+| 34 | frontend/src/lib/track-data-realign.ts | Step2 追加: 无合法候选的 combo(如 resize_method 持 AspectRatio 脏值)重置为第一合法选项, 消除红框; Step3(延迟120ms 避开 ComfyUI 异步值重放): megapixels 模式补建 resolution.aspect_ratio combo + resolution.megapixels number widget, 从保存值恢复 9:16/0.5, 提交 inputs 含全部 4 个 resolution.* 键 | ✅ |
 
 验证(Edge CDP 无头): 单editor/单project/editor+project组合/完整33节点工作流 全部
 #185=0; node14 track_data 渲染 444 元素/73KB HTML, 截图确认时间轴/轨道/预览/参数
