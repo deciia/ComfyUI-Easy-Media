@@ -439,6 +439,18 @@ def _resolve_configured_dimensions(
     normalized_resolution = resolution_text.lower()
     divisor = _video_format_dimension_multiple(format_name)
     if "megapixels" in normalized_resolution:
+        # ComfyUI frontend 1.53+ fails to rebuild COMFY_DYNAMICCOMBO_V3 sub
+        # widgets when loading a saved workflow (aspect_ratio/megapixels
+        # widgets are not recreated; positional widgets_values then land the
+        # aspect-ratio preset string on resolution.resize_method). Recover:
+        # if aspect_ratio is missing, extract the ratio from the resize_method
+        # field, which in that misaligned state holds an AspectRatio label
+        # such as "9:16 (Portrait Widescreen)".
+        if not aspect_ratio_value and isinstance(resolution, dict):
+            stale = resolution.get("resize_method")
+            stale_label = str(stale[0] if isinstance(stale, list) and stale else (stale or ""))
+            if stale_label in ASPECT_RATIOS:
+                aspect_ratio_value = stale_label
         width, height = _resolve_megapixel_dimensions(
             aspect_ratio_value,
             megapixels_value,
