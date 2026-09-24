@@ -88,6 +88,30 @@ function flattenWidgetsValues(raw: unknown): string[] {
   return out
 }
 
+function flattenNumberValues(raw: unknown): number[] {
+  const out: number[] = []
+  const walk = (v: unknown) => {
+    if (typeof v === 'number') out.push(v)
+    else if (Array.isArray(v)) v.forEach(walk)
+    else if (isPlainObject(v)) {
+      if ('widgets_values' in v) walk((v as { widgets_values?: unknown }).widgets_values)
+    }
+  }
+  walk(raw)
+  return out
+}
+
+const ASPECT_RATIO_LABELS = new Set([
+  '1:1 (Square)',
+  '2:3 (Portrait Photo)',
+  '3:2 (Photo)',
+  '3:4 (Portrait Standard)',
+  '4:3 (Standard)',
+  '9:16 (Portrait Widescreen)',
+  '16:9 (Widescreen)',
+  '21:9 (Ultrawide)',
+])
+
 export function installTrackDataRealignment(nodeType: { prototype: NodeLike }, nodeData: { name?: string }, _app: ComfyApp) {
   const NODE_NAMES = new Set(['easy multiTrackEditor', 'easy multitrackProject', 'easy multitrackProjectVideoC'])
   if (!NODE_NAMES.has(nodeData.name || '')) return
@@ -142,6 +166,56 @@ export function installTrackDataRealignment(nodeType: { prototype: NodeLike }, n
         if (match !== undefined && match !== current) {
           applyValue(widget, match)
         }
+        // Nothing in the saved values fits this combo (frontend 1.53+ never
+        // rebuilt the DYNAMICCOMBO_V3 sub-widget set, so the slot that should
+        // hold resize_method received the aspect-ratio preset string instead).
+        // Reset it to its first option — never leave an invalid value behind
+        // (ComfyUI paints those with the "bad value" red outline).
+        const fallback = opts[0]
+        if (match === undefined && fallback !== undefined) {
+          applyValue(widget, String(fallback))
+        }
+      }
+
+      // Step 3: the megapixels sub-value (a float like 0.5) was dropped by
+      // the positional shift; reseat it so the backend receives the saved
+      // resolution instead of the schema default. Deferred: ComfyUI 1.54
+      // re-applies widgets_values asynchronously after onConfigure, which
+      // would clobber a widget created synchronously here.
+      const savedNumbers = flattenNumberValues(serialised.widgets_values)
+      const resolutionWidget = (this.widgets ?? []).find((w) => w.name === 'resolution')
+      const resolutionKey = typeof resolutionWidget?.value === 'string' ? resolutionWidget.value : ''
+      if (resolutionKey.includes('megapixels')) {
+        const self = this
+        const applyDeferred = () => {
+          try {
+            const widgets = self.widgets ?? []
+            let aspectWidget = widgets.find((w) => w.name === 'resolution.aspect_ratio')
+            let megaWidget = widgets.find((w) => w.name === 'resolution.megapixels')
+            // Recover the aspect ratio from the saved preset string (it was
+            // squatted on resize_method before Step 2 reset it).
+            const aspect = candidates.find((c) => ASPECT_RATIO_LABELS.has(c))
+            if (!aspectWidget && aspect && typeof (self as unknown as { addWidget?: unknown }).addWidget === 'function') {
+              const addWidget = (self as unknown as { addWidget: (t: string, n: string, v: string, opts?: unknown) => SerializedWidgetLike }).addWidget
+              aspectWidget = addWidget.call(self, 'combo', 'resolution.aspect_ratio', aspect, { values: [...ASPECT_RATIO_LABELS] }) as ComboWidgetLike | undefined
+            }
+            if (!megaWidget && typeof (self as unknown as { addWidget?: unknown }).addWidget === 'function') {
+              const addWidget = (self as unknown as { addWidget: (t: string, n: string, v: number, opts?: unknown) => SerializedWidgetLike }).addWidget
+              megaWidget = addWidget.call(self, 'number', 'resolution.megapixels', 1.0, {})
+            }
+            if (aspect && aspectWidget && aspectWidget.value !== aspect) {
+              applyValue(aspectWidget, aspect)
+            }
+            if (megaWidget) {
+              const megaValue = savedNumbers.find((n) => n > 0 && n <= 16)
+              const want = megaValue !== undefined ? megaValue : 1.0
+              if (megaWidget.value !== want) applyValue(megaWidget, String(want))
+            }
+          } catch (error) {
+            console.error('[easymedia] deferred megapixels restore failed:', error)
+          }
+        }
+        setTimeout(applyDeferred, 120)
       }
     } catch (error) {
       console.error('[easymedia] widget value realignment failed:', error)
