@@ -23,9 +23,14 @@ interface SerializedWidgetLike {
   name: string
   type?: string
   value?: unknown
-  setValue?: (v: string) => void
+  setValue?: (v: string, ctx?: unknown) => void
   serializeValue?: () => unknown
   element?: HTMLElement
+}
+
+interface ComboWidgetLike extends SerializedWidgetLike {
+  type: 'combo'
+  options?: { values?: unknown[] }
 }
 
 interface NodeLike {
@@ -97,14 +102,45 @@ export function installTrackDataRealignment(nodeType: { prototype: NodeLike }, n
       const candidates = flattenWidgetsValues(serialised.widgets_values)
       if (candidates.length === 0) return
 
+      // ComfyUI 1.54's DOMWidgetImpl.setValue(value, ctx) destructures
+      // { e, node, canvas } and reads canvas.graph_mouse + node callbacks —
+      // an empty ctx throws. Build a minimal load-time context once.
+      const setValueCtx = { e: undefined, node: this as unknown, canvas: { graph_mouse: [0, 0] } }
+      const applyValue = (widget: SerializedWidgetLike, v: string) => {
+        if (typeof widget.setValue === 'function') widget.setValue(v, setValueCtx)
+        else widget.value = v
+      }
+
+      // Step 1: recover the JSON widget (TRACK_DATA/TIMELINE payload) into
+      // whichever serialized JSON widget currently holds a non-JSON value.
       for (const widget of this.widgets ?? []) {
         if (!looksMisaligned(widget)) continue
         const recovered = candidates.find(looksLikeTrackDataJson)
         if (recovered !== undefined && recovered !== widget.value) {
-          // ComfyUI 1.54's DOMWidgetImpl.setValue(value, { e, node, canvas })
-          // destructures the second argument — always pass a context object.
-          if (typeof widget.setValue === 'function') widget.setValue(recovered, {})
-          else widget.value = recovered
+          applyValue(widget, recovered)
+        }
+      }
+
+      // Step 2: positional re-alignment for combo widgets that received a
+      // value that is not one of their options (e.g. `format` got the
+      // megapixels float 0.5, `resolution.resize_method` got the resolution
+      // preset string). Walk the saved values in order and re-seat each
+      // non-option value onto the first combo widget that does offer it.
+      const combos = (this.widgets ?? []).filter(
+        (w) => w.type === 'combo' && Array.isArray((w as ComboWidgetLike).options?.values),
+      ) as ComboWidgetLike[]
+      for (const widget of combos) {
+        const opts: unknown[] = widget.options?.values ?? []
+        const current = widget.value
+        const currentOk = current === undefined || current === null
+          ? false
+          : (typeof current === 'string' ? opts.includes(current) : opts.includes(current as never))
+        if (currentOk) continue
+        // Find a saved value that is a valid option for this widget and is
+        // not already correctly seated on an earlier combo.
+        const match = candidates.find((c) => opts.includes(c as never) && !combos.some((o) => o.value === c))
+        if (match !== undefined && match !== current) {
+          applyValue(widget, match)
         }
       }
     } catch (error) {
