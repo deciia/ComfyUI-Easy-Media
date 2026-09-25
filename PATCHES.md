@@ -298,3 +298,26 @@ max_tokens 给小了会出现"正文为空"；自定义通道默认 4096，够�
 
 **验证**（无头 Edge 载入 P3）：存档 510x1011 → 载入 510x1012（Δ1px）；设 460x520 → 重载保持 460x520；
 新建节点默认 400x256；面板高度始终 = 节点高 - 238，无溢出。
+
+## 2026-09-25 同步上游 bd4ebf2 (#110) — reference 双模式跳过冗余 TE
+
+**上游改动**：`nodes/project.py` 的二采条件加 `generation_mode != "reference"`（reference 模式没有画布尺寸关键帧，
+两次采样分辨率必然一致，可以共用文本/媒体嵌入，不必为二采再跑一遍 TE）；`tests/test_minimax_node.py` +26（新增 dual+ref 图结构断言）；两个 CHANGELOG。
+
+**合并安全性判定（针对本 fork 已重构的前提）**：
+- `git merge-tree` 退出码 0 → 无文本冲突；实际改动面仅 4 个上游文件
+- 未涉及 `dist/` 与前端源码 → **不需要 `bun run build:release`**（本 fork dist 带补丁，撞上就得重建，这次绕开）
+- 本 fork 在同文件（`nodes/project.py`）的改动集中在直通段与 saveVideo 平键化，与上游那处 hunk 无重叠；上游 hunk 的上下文行（`base_positive = second_pass_positive = conditioning.out(0)` 一线）本地未动
+
+**验证**：
+- 树级核对：`deciiaPassthroughStage` / `_deciiapass_entries` / `_h3_manifest_context_cut` / `easy saveVideo` / `PromptStudio` 挂点全在；`input_mode.` 动态键残留 0；上游新条件落地 1 处
+- `py_compile` 全绿；merge commit 第二父节点 = 上游 `bd4ebf2`（真合并，非 origin/main 的假合并）
+- **上游新增测试 headless 实跑：`1 passed`**（配方见下）；同文件基线其余 247 条仍因 `routes.py: PromptServer.instance` 缺失而 ERROR —— 环境性断裂，与本次合并无关
+- 重启后 `/object_info`：5113 个节点类型，自有节点 `easy saveVideo` / `easy promptStudio` / `easy multitrackProject` / `easy deciiaPassthroughStage` 均在
+- `git ls-remote origin refs/heads/main` 与本地 HEAD 一致
+
+**headless 跑本仓 pytest 的桩件配方**（`pytest -p <plugin>`，插件置于 PYTHONPATH）：
+1. `sys.modules["server"]` 装宽松桩件：`PromptServer.instance` 必须带 `routes`（get/post/delete/patch，返回装饰器）、`sockets={}`、`app.middlewares=[]`，其余属性用 `__getattr__` 兜底（`test_easy_save_video.py` 里只有 `routes`，上游那条还需要 `app`）
+2. 本 fork 新增模块（如 `easy_media.nodes.deciiapassthrough`）不在上游测试的桩件表里 → 预注册，并给出 `PASSTHROUGH_CONTEXT_FRAMES=22` 与 `is_passthrough_task` / `passthrough_continuity_mode` 两个函数；**兜底切勿返回类对象**，否则 `inspect.getsourcefile` 会崩
+3. 命令：`cd <ComfyUI 根> && PYTHONPATH=<scratch> python -m pytest custom_nodes/ComfyUI_Deciia_EasyMedia/tests/test_minimax_node.py -k <测试名> -q -p <插件模块名>`
+4. 报 "ERROR at setup ... PromptServer" 属基线断裂，先按第 1 条补齐桩件再判断是不是真失败
