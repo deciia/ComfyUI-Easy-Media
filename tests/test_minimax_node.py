@@ -1637,7 +1637,7 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
     assert align["inputs"]["fps"] == 24.0
     selector = _graph_node(result, "easy h3LockedAudioSelect")
     assert selector["inputs"]["locked_audio"] == {"prepared_locked_audio": True}
-    assert saved_video["inputs"]["input_mode.audio"][0].endswith(
+    assert saved_video["inputs"]["audio"][0].endswith(
         "locked_audio_select_0"
     )
     assert not any(
@@ -1658,7 +1658,7 @@ def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
         for node in result.expand.values()
     )
     saved_video = _graph_node(result, "easy saveVideo")
-    audio_link = saved_video["inputs"]["input_mode.audio"]
+    audio_link = saved_video["inputs"]["audio"]
     assert result.expand[audio_link[0]]["class_type"] == "VAEDecodeAudio"
 
 
@@ -1688,7 +1688,7 @@ def test_muted_locked_video_preserves_timing_without_audio_lock(monkeypatch):
     assert trim["inputs"]["fit_video_duration"] is True
     assert trim["inputs"]["pad_audio"] is True
     saved_video = _graph_node(result, "easy saveVideo")
-    audio_link = saved_video["inputs"]["input_mode.audio"]
+    audio_link = saved_video["inputs"]["audio"]
     assert result.expand[audio_link[0]]["class_type"] == "easy h3ContextMediaTrim"
 
 
@@ -2223,9 +2223,9 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     save_inputs = nodes_by_type["easy saveVideo"]["inputs"]
     assert save_inputs["input_mode"] == "images+audio"
     assert save_inputs["output_mode"] == "hide&save"
-    assert "input_mode.images" in save_inputs
-    assert "input_mode.audio" in save_inputs
-    assert save_inputs["input_mode.fps"] == 24.0
+    assert "images" in save_inputs
+    assert "audio" in save_inputs
+    assert save_inputs["fps"] == 24.0
     assert "easy h3ProjectArtifact" in nodes_by_type
     save_video_id = next(
         node_id
@@ -3523,11 +3523,11 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     context_video = next(
         node for node in nodes
         if node["class_type"] == "easy saveVideo"
-        and node["inputs"]["input_mode.images"] == [trim_id, 0]
+        and node["inputs"]["images"] == [trim_id, 0]
     )
     # The task audio already excludes the context prefix; do not trim it again.
     context_selector = result.expand[
-        context_video["inputs"]["input_mode.audio"][0]
+        context_video["inputs"]["audio"][0]
     ]
     assert context_selector["class_type"] == "easy h3LockedAudioSelect"
     assert context_selector["inputs"]["locked_audio"] == {
@@ -5614,9 +5614,9 @@ def test_locked_media_preserves_source_span_in_both_passes(
     saves = [n for n in graph.values() if n["class_type"] == "easy saveVideo"]
     assert len(saves) == 2
     for node in saves:
-        trim = graph[node["inputs"]["input_mode.images"][0]]
+        trim = graph[node["inputs"]["images"][0]]
         assert trim["inputs"]["output_frames"] == duration
-        selector = graph[node["inputs"]["input_mode.audio"][0]]
+        selector = graph[node["inputs"]["audio"][0]]
         assert selector["class_type"] == "easy h3LockedAudioSelect"
         assert selector["inputs"]["locked_audio"] == {"prepared_locked_audio": True}
     # Every delivered segment, including the initial shot, supplies fresh context.

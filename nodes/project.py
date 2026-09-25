@@ -2179,12 +2179,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "easy saveVideo",
                     id=f"save_video_{task_index}",
                     input_mode="images+audio",
-                    **{
-                        "input_mode.images": output_images,
-                        "input_mode.audio": saved_audio,
-                        "input_mode.fps": fps,
-                        "output_mode": "hide&save",
-                    },
+                    images=output_images,
+                    audio=saved_audio,
+                    fps=fps,
+                    output_mode="hide&save",
                     filename_prefix=(
                         f"easy_media/projects/{safe_project_name}/"
                         f".staging_video_{task_index}"

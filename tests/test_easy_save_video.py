@@ -245,8 +245,17 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
         "comfy.utils",
         types.SimpleNamespace(ProgressBar=_FakeProgressBar),
     )
+    _noop_route = lambda *args, **kwargs: (lambda fn: fn)
     fake_prompt_server = types.SimpleNamespace(
-        instance=types.SimpleNamespace(send_progress_text=lambda *args, **kwargs: None)
+        instance=types.SimpleNamespace(
+            send_progress_text=lambda *args, **kwargs: None,
+            # routes.py 在 import 期就用 @PromptServer.instance.routes.* 注册端点，
+            # 桩件必须提供 routes（get/post/delete/patch）与 sockets。
+            routes=types.SimpleNamespace(
+                get=_noop_route, post=_noop_route, delete=_noop_route, patch=_noop_route
+            ),
+            sockets={},
+        )
     )
     monkeypatch.setitem(
         sys.modules,
@@ -290,13 +299,14 @@ def test_hide_save_writes_output_without_preview(monkeypatch, tmp_path):
     video_module = _load_video_module(monkeypatch, tmp_path)
     source_video = _FakeVideo()
 
-    mode_names = [option.name for option in video_module._OUTPUT_MODE_OPTIONS]
+    mode_names = list(video_module._OUTPUT_MODE_OPTIONS)
     assert "hide&save" in mode_names
     assert mode_names.index("hide") < mode_names.index("hide&save")
 
     result = video_module.EasySaveVideo.execute(
-        input_mode={"input_mode": "video", "video": source_video},
-        output_mode={"output_mode": "hide&save"},
+        input_mode="video",
+        video=source_video,
+        output_mode="hide&save",
         filename_prefix="clip",
     )
 
@@ -315,8 +325,9 @@ def test_hide_save_normalizes_windows_relative_path(monkeypatch, tmp_path):
     )
 
     result = video_module.EasySaveVideo.execute(
-        input_mode={"input_mode": "video", "video": source_video},
-        output_mode={"output_mode": "hide&save"},
+        input_mode="video",
+        video=source_video,
+        output_mode="hide&save",
         filename_prefix="clip",
     )
 
@@ -331,8 +342,9 @@ def test_hide_writes_temp_without_preview(monkeypatch, tmp_path):
     source_video = _FakeVideo()
 
     result = video_module.EasySaveVideo.execute(
-        input_mode={"input_mode": "video", "video": source_video},
-        output_mode={"output_mode": "hide"},
+        input_mode="video",
+        video=source_video,
+        output_mode="hide",
         filename_prefix="clip",
     )
 

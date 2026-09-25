@@ -24,39 +24,11 @@ logger = logging.getLogger(__name__)
 CATEGORY_VIDEO = "EasyUse/Video"
 TYPE_COMPARE_VIDEO = io.Custom(io_type="EASY_COMPARE_VIDEO")
 
-_OUTPUT_MODE_OPTIONS = [
-    io.DynamicCombo.Option(
-        "save",
-        [
-            io.Boolean.Input(
-                "save_metadata",
-                default=False,
-                tooltip="Write ComfyUI prompt/workflow metadata into the saved file.",
-            ),
-        ],
-    ),
-    io.DynamicCombo.Option("preview_only", []),
-    io.DynamicCombo.Option("hide", []),
-    io.DynamicCombo.Option("hide&save", []),
-]
+_OUTPUT_MODE_OPTIONS = ["save", "preview_only", "hide", "hide&save"]
 
-_INPUT_MODE_OPTIONS = [
-    io.DynamicCombo.Option(
-        "images+audio",
-        [
-            io.Image.Input("images" ,optional=True),
-            io.Float.Input("fps", default=24.0, min=1.0, max=120.0, step=1.0),
-            io.Audio.Input("audio", optional=True),
-        ],
-    ),
-    io.DynamicCombo.Option(
-        "video",
-        [
-            io.Video.Input("video"),
-            io.Audio.Input("audio", optional=True),
-        ],
-    ),
-]
+# 用普通下拉 + 固定输入，避免 DynamicCombo 切换子输入导致
+# 存档按位置还原时整体串位（重启后 input_mode/output_mode/filename_prefix 错位）。
+_INPUT_MODE_OPTIONS = ["images+audio", "video"]
 
 
 class MakeVideoList(io.ComfyNode):
@@ -149,8 +121,52 @@ class EasySaveVideo(io.ComfyNode):
                 "Returns the VIDEO for downstream use and the full written file path."
             ),
             inputs=[
-                io.DynamicCombo.Input("input_mode", options=_INPUT_MODE_OPTIONS),
-                io.DynamicCombo.Input("output_mode", options=_OUTPUT_MODE_OPTIONS),
+                io.Combo.Input(
+                    "input_mode",
+                    options=list(_INPUT_MODE_OPTIONS),
+                    default="images+audio",
+                    tooltip=(
+                        "images+audio：把 IMAGES（可带 AUDIO）按 fps 编码成视频。"
+                        "video：直接保存 VIDEO（接了 AUDIO 则替换其音轨）。"
+                    ),
+                ),
+                io.Image.Input(
+                    "images",
+                    optional=True,
+                    tooltip="images+audio 模式使用：待编码的图像序列。",
+                ),
+                io.Float.Input(
+                    "fps",
+                    default=24.0,
+                    min=1.0,
+                    max=120.0,
+                    step=1.0,
+                    tooltip="images+audio 模式的帧率；video 模式忽略。",
+                ),
+                io.Video.Input(
+                    "video",
+                    optional=True,
+                    tooltip="video 模式使用：直接保存/透传的视频。",
+                ),
+                io.Audio.Input(
+                    "audio",
+                    optional=True,
+                    tooltip="可选音轨：images+audio 模式作为视频音轨；video 模式替换原音轨。",
+                ),
+                io.Combo.Input(
+                    "output_mode",
+                    options=list(_OUTPUT_MODE_OPTIONS),
+                    default="save",
+                    tooltip=(
+                        "save：写入 output；preview_only：只写 temp 并预览；"
+                        "hide：只写 temp 不预览；hide&save：写 output 不预览。"
+                    ),
+                ),
+                io.Boolean.Input(
+                    "save_metadata",
+                    default=False,
+                    tooltip="Write ComfyUI prompt/workflow metadata into the saved file.",
+                ),
                 io.String.Input("filename_prefix", default="ComfyUI"),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
@@ -164,29 +180,52 @@ class EasySaveVideo(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        input_mode: dict,
-        output_mode: dict,
-        filename_prefix:str,
+        input_mode: str = "images+audio",
+        fps: float = 24.0,
+        output_mode: str = "save",
+        filename_prefix: str = "ComfyUI",
+        images=None,
+        video=None,
+        audio=None,
+        save_metadata: bool = False,
     ) -> io.NodeOutput:
-        input_mode_key: str = input_mode.get("input_mode", "images+audio")
-        output_mode_key: str = output_mode.get("output_mode", "save")
+        # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
+        if isinstance(input_mode, dict):
+            payload = input_mode
+            input_mode = str(payload.get("input_mode") or "images+audio")
+            if images is None:
+                images = payload.get("images")
+            if video is None:
+                video = payload.get("video")
+            if audio is None:
+                audio = payload.get("audio")
+            if payload.get("fps") is not None:
+                fps = payload["fps"]
+        if isinstance(output_mode, dict):
+            payload_out = output_mode
+            output_mode = str(payload_out.get("output_mode") or "save")
+            save_metadata = bool(payload_out.get("save_metadata", save_metadata))
+
+        input_mode_key: str = str(input_mode or "images+audio")
+        output_mode_key: str = str(output_mode or "save")
         hide_preview = output_mode_key in {"hide", "hide&save"}
         write_temp = output_mode_key in {"preview_only", "hide"}
-        save_metadata: bool = output_mode.get("save_metadata", False)
 
         if input_mode_key == "video":
-            source_video = input_mode.get("video")
+            source_video = video
             if source_video is None:
-                raise ValueError("A VIDEO input is required when input_mode is 'video'.")
-            audio = input_mode.get("audio", None)
+                raise ValueError(
+                    "A VIDEO input is required when input_mode is 'video': "
+                    "接上 video 端口，或把 input_mode 改回 'images+audio'。"
+                )
             if audio is not None:
                 source_video = _replace_video_audio(source_video, audio)
         else:
-            images = input_mode.get("images", None)
             if images is None:
-                raise ValueError("An IMAGES input is required when input_mode is 'images+audio'.")
-            fps: float = input_mode.get("fps", 24.0)
-            audio = input_mode.get("audio", None)
+                raise ValueError(
+                    "An IMAGES input is required when input_mode is 'images+audio': "
+                    "接上 images 端口，或把 input_mode 改成 'video'。"
+                )
             normalized, changed = normalize_video_images(images)
             if changed:
                 logger.info(
