@@ -7,6 +7,7 @@ from .ltx import *
 from .ltxv import *
 from .minimax import *
 from .project import *
+from .prompt_studio import *
 from .video import *
 from .subtitle import *
 from .wan import *

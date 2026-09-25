@@ -55,9 +55,6 @@
       "save_metadata": {
         "name": "保存元数据",
         "tooltip": "将 ComfyUI 提示词/工作流元数据写入保存的文件。"
-      },
-      "audio": {
-        "name": "音频"
       }
     },
     "outputs": {
@@ -298,13 +295,23 @@
     "display_name": "模型加载器打包",
     "description": "将模型组件组合为兼容 FastUse 节点的 FAST_MODEL_LOADER。",
     "inputs": {
-      "model": { "name": "模型" },
-      "clip": { "name": "CLIP" },
-      "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频 VAE" }
+      "model": {
+        "name": "模型"
+      },
+      "clip": {
+        "name": "CLIP"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      }
     },
     "outputs": {
-      "0": { "name": "模型加载器" }
+      "0": {
+        "name": "模型加载器"
+      }
     }
   },
   "easy matchLine": {
@@ -410,16 +417,36 @@
       }
     },
     "outputs": {
-      "0": { "name": "图像 0" },
-      "1": { "name": "图像 1" },
-      "2": { "name": "图像 2" },
-      "3": { "name": "图像 3" },
-      "4": { "name": "图像 4" },
-      "5": { "name": "图像 5" },
-      "6": { "name": "图像 6" },
-      "7": { "name": "图像 7" },
-      "8": { "name": "图像 8" },
-      "9": { "name": "图像 9" }
+      "0": {
+        "name": "图像 0"
+      },
+      "1": {
+        "name": "图像 1"
+      },
+      "2": {
+        "name": "图像 2"
+      },
+      "3": {
+        "name": "图像 3"
+      },
+      "4": {
+        "name": "图像 4"
+      },
+      "5": {
+        "name": "图像 5"
+      },
+      "6": {
+        "name": "图像 6"
+      },
+      "7": {
+        "name": "图像 7"
+      },
+      "8": {
+        "name": "图像 8"
+      },
+      "9": {
+        "name": "图像 9"
+      }
     }
   },
   "easy makeAudioList": {
@@ -485,19 +512,41 @@
     "display_name": "音频拆分",
     "description": "将音频列表拆分为最多 10 个独立音频输出。",
     "inputs": {
-      "audios": { "name": "音频列表" }
+      "audios": {
+        "name": "音频列表"
+      }
     },
     "outputs": {
-      "0": { "name": "音频 0" },
-      "1": { "name": "音频 1" },
-      "2": { "name": "音频 2" },
-      "3": { "name": "音频 3" },
-      "4": { "name": "音频 4" },
-      "5": { "name": "音频 5" },
-      "6": { "name": "音频 6" },
-      "7": { "name": "音频 7" },
-      "8": { "name": "音频 8" },
-      "9": { "name": "音频 9" }
+      "0": {
+        "name": "音频 0"
+      },
+      "1": {
+        "name": "音频 1"
+      },
+      "2": {
+        "name": "音频 2"
+      },
+      "3": {
+        "name": "音频 3"
+      },
+      "4": {
+        "name": "音频 4"
+      },
+      "5": {
+        "name": "音频 5"
+      },
+      "6": {
+        "name": "音频 6"
+      },
+      "7": {
+        "name": "音频 7"
+      },
+      "8": {
+        "name": "音频 8"
+      },
+      "9": {
+        "name": "音频 9"
+      }
     }
   },
   "easy audioMerge": {
@@ -538,16 +587,36 @@
           "false": "填充"
         }
       },
-      "video1": { "name": "视频 1" },
-      "video2": { "name": "视频 2" },
-      "video3": { "name": "视频 3" },
-      "video4": { "name": "视频 4" },
-      "video5": { "name": "视频 5" },
-      "video6": { "name": "视频 6" },
-      "video7": { "name": "视频 7" },
-      "video8": { "name": "视频 8" },
-      "video9": { "name": "视频 9" },
-      "video10": { "name": "视频 10" }
+      "video1": {
+        "name": "视频 1"
+      },
+      "video2": {
+        "name": "视频 2"
+      },
+      "video3": {
+        "name": "视频 3"
+      },
+      "video4": {
+        "name": "视频 4"
+      },
+      "video5": {
+        "name": "视频 5"
+      },
+      "video6": {
+        "name": "视频 6"
+      },
+      "video7": {
+        "name": "视频 7"
+      },
+      "video8": {
+        "name": "视频 8"
+      },
+      "video9": {
+        "name": "视频 9"
+      },
+      "video10": {
+        "name": "视频 10"
+      }
     },
     "outputs": {
       "0": {
@@ -559,19 +628,41 @@
     "display_name": "视频拆分",
     "description": "将视频列表拆分为最多 10 个独立视频输出。",
     "inputs": {
-      "videos": { "name": "视频列表" }
+      "videos": {
+        "name": "视频列表"
+      }
     },
     "outputs": {
-      "0": { "name": "视频 0" },
-      "1": { "name": "视频 1" },
-      "2": { "name": "视频 2" },
-      "3": { "name": "视频 3" },
-      "4": { "name": "视频 4" },
-      "5": { "name": "视频 5" },
-      "6": { "name": "视频 6" },
-      "7": { "name": "视频 7" },
-      "8": { "name": "视频 8" },
-      "9": { "name": "视频 9" }
+      "0": {
+        "name": "视频 0"
+      },
+      "1": {
+        "name": "视频 1"
+      },
+      "2": {
+        "name": "视频 2"
+      },
+      "3": {
+        "name": "视频 3"
+      },
+      "4": {
+        "name": "视频 4"
+      },
+      "5": {
+        "name": "视频 5"
+      },
+      "6": {
+        "name": "视频 6"
+      },
+      "7": {
+        "name": "视频 7"
+      },
+      "8": {
+        "name": "视频 8"
+      },
+      "9": {
+        "name": "视频 9"
+      }
     }
   },
   "LTXVAddGuidesFromBatchIndexes": {
@@ -627,53 +718,106 @@
     "display_name": "多图像加载器",
     "description": "加载最多 25 张图像，按所选分辨率处理后输出图像列表。",
     "inputs": {
-      "resolution": { "name": "分辨率" },
-      "max_limit": { "name": "输出数量上限", "tooltip": "最终输出的图像数量，-1 表示不限制（输出所有加载的图像）。" },
-      "image_data": { "name": "图像数据" }
+      "resolution": {
+        "name": "分辨率"
+      },
+      "max_limit": {
+        "name": "输出数量上限",
+        "tooltip": "最终输出的图像数量，-1 表示不限制（输出所有加载的图像）。"
+      },
+      "image_data": {
+        "name": "图像数据"
+      }
     },
     "outputs": {
-      "0": { "name": "图像列表" }
+      "0": {
+        "name": "图像列表"
+      }
     }
   },
   "easy multiTrackEditor": {
     "display_name": "多轨编辑器",
     "description": "编辑多轨媒体数据，并输出轨道信息以及图像、音频和视频媒体列表。",
     "inputs": {
-      "resolution": { "name": "分辨率", "tooltip": "选择输出分辨率，或选择自定义宽高。" },
-      "format": { "name": "视频格式", "tooltip": "选择视频格式以自动设置分辨率和帧率。" },
-      "track_data": { "name": "多轨数据" },
-      "prompt_override": { "name": "提示词覆盖", "tooltip": "覆盖多轨任务片段中的提示词。" },
-      "image": { "name": "图像列表", "tooltip": "多轨任务片段使用的可选图像列表。" },
-      "audio": { "name": "音频列表", "tooltip": "多轨音频片段使用的可选音频列表。" },
-      "video": { "name": "视频列表", "tooltip": "多轨视频片段使用的可选视频列表。" }
+      "resolution": {
+        "name": "分辨率",
+        "tooltip": "选择输出分辨率，或选择自定义宽高。"
+      },
+      "format": {
+        "name": "视频格式",
+        "tooltip": "选择视频格式以自动设置分辨率和帧率。"
+      },
+      "track_data": {
+        "name": "多轨数据"
+      },
+      "prompt_override": {
+        "name": "提示词覆盖",
+        "tooltip": "覆盖多轨任务片段中的提示词。"
+      },
+      "image": {
+        "name": "图像列表",
+        "tooltip": "多轨任务片段使用的可选图像列表。"
+      },
+      "audio": {
+        "name": "音频列表",
+        "tooltip": "多轨音频片段使用的可选音频列表。"
+      },
+      "video": {
+        "name": "视频列表",
+        "tooltip": "多轨视频片段使用的可选视频列表。"
+      }
     },
     "outputs": {
-      "0": { "name": "轨道信息" },
-      "1": { "name": "图像" },
-      "2": { "name": "音频" },
-      "3": { "name": "视频" }
+      "0": {
+        "name": "轨道信息"
+      },
+      "1": {
+        "name": "图像"
+      },
+      "2": {
+        "name": "音频"
+      },
+      "3": {
+        "name": "视频"
+      }
     }
   },
   "easy multiTrackInfoOutput": {
     "display_name": "多轨信息输出",
     "description": "输出多轨项目的尺寸、总帧数、帧率和任务数量。",
     "inputs": {
-      "tracks_info": { "name": "轨道信息" }
+      "tracks_info": {
+        "name": "轨道信息"
+      }
     },
     "outputs": {
-      "0": { "name": "宽度" },
-      "1": { "name": "高度" },
-      "2": { "name": "总帧数" },
-      "3": { "name": "帧率" },
-      "4": { "name": "任务数量" }
+      "0": {
+        "name": "宽度"
+      },
+      "1": {
+        "name": "高度"
+      },
+      "2": {
+        "name": "总帧数"
+      },
+      "3": {
+        "name": "帧率"
+      },
+      "4": {
+        "name": "任务数量"
+      }
     }
   },
   "easy multiTrackAudioOutput": {
     "display_name": "多轨音频输出",
     "description": "合并全部音频，并以完整轨道或 S2V 裁剪模式输出前两条音频轨。",
     "inputs": {
-      "tracks_info": { "name": "轨道信息" },
-      "audio": { "name": "音频" },
+      "tracks_info": {
+        "name": "轨道信息"
+      },
+      "audio": {
+        "name": "音频"
+      },
       "mode": {
         "name": "模式",
         "options": {
@@ -687,11 +831,21 @@
       }
     },
     "outputs": {
-      "0": { "name": "合并音频" },
-      "1": { "name": "音频 0" },
-      "2": { "name": "音频 0 起始帧" },
-      "3": { "name": "音频 1" },
-      "4": { "name": "音频 1 起始帧" }
+      "0": {
+        "name": "合并音频"
+      },
+      "1": {
+        "name": "音频 0"
+      },
+      "2": {
+        "name": "音频 0 起始帧"
+      },
+      "3": {
+        "name": "音频 1"
+      },
+      "4": {
+        "name": "音频 1 起始帧"
+      }
     }
   },
   "easy recognizeSubtitle": {
@@ -731,7 +885,9 @@
       }
     },
     "outputs": {
-      "0": { "name": "字幕文本" }
+      "0": {
+        "name": "字幕文本"
+      }
     }
   },
   "easy addSubtitleToVideo": {
@@ -742,7 +898,9 @@
         "name": "字幕文本",
         "tooltip": "支持标准 SRT、行内时间戳和括号格式，例如 [00:01.000 --> 00:03.000] 字幕。"
       },
-      "video": { "name": "视频" },
+      "video": {
+        "name": "视频"
+      },
       "font_size": {
         "name": "字体大小",
         "tooltip": "设置烧录字幕的字体大小。"
@@ -757,15 +915,21 @@
       }
     },
     "outputs": {
-      "0": { "name": "视频" }
+      "0": {
+        "name": "视频"
+      }
     }
   },
   "easy multiTrackAddSubtitleToVIdeo": {
     "display_name": "多轨字幕烧录到视频",
     "description": "将轨道信息中的所有字幕轨片段烧录到视频中，并保存 SRT 字幕文件。",
     "inputs": {
-      "tracks_info": { "name": "轨道信息" },
-      "video": { "name": "视频" },
+      "tracks_info": {
+        "name": "轨道信息"
+      },
+      "video": {
+        "name": "视频"
+      },
       "srt_save": {
         "name": "SRT 保存位置",
         "tooltip": "将生成的 SRT 保存到临时目录或 output/srt。",
@@ -776,106 +940,303 @@
       }
     },
     "outputs": {
-      "0": { "name": "视频" }
+      "0": {
+        "name": "视频"
+      }
     }
   },
   "easy multiTrackTaskOutput": {
     "display_name": "多轨任务输出",
     "description": "输出指定多轨任务片段的提示词和对应时间范围内的媒体。",
     "inputs": {
-      "tracks_info": { "name": "轨道信息" },
-      "images": { "name": "图像" },
-      "audio": { "name": "音频" },
-      "video": { "name": "视频" },
-      "task_index": { "name": "任务片段索引" },
-      "prompt_format": { "name": "提示词格式", "tooltip": "选择任务提示词的输出格式。" }
+      "tracks_info": {
+        "name": "轨道信息"
+      },
+      "images": {
+        "name": "图像"
+      },
+      "audio": {
+        "name": "音频"
+      },
+      "video": {
+        "name": "视频"
+      },
+      "task_index": {
+        "name": "任务片段索引"
+      },
+      "prompt_format": {
+        "name": "提示词格式",
+        "tooltip": "选择任务提示词的输出格式。"
+      }
     },
     "outputs": {
-      "0": { "name": "系统提示词" },
-      "1": { "name": "用户提示词" },
-      "2": { "name": "类型" },
-      "3": { "name": "帧数" },
-      "4": { "name": "图像" },
-      "5": { "name": "音频" },
-      "6": { "name": "视频" },
-      "7": { "name": "图像索引" }
+      "0": {
+        "name": "系统提示词"
+      },
+      "1": {
+        "name": "用户提示词"
+      },
+      "2": {
+        "name": "类型"
+      },
+      "3": {
+        "name": "帧数"
+      },
+      "4": {
+        "name": "图像"
+      },
+      "5": {
+        "name": "音频"
+      },
+      "6": {
+        "name": "视频"
+      },
+      "7": {
+        "name": "图像索引"
+      }
     }
   },
   "easy multiTrackPromptEnhancer": {
     "display_name": "多轨提示词增强器",
     "description": "调用 MiniMax H3-Context-IR、第三方多模态大模型或本地 llama.cpp 模型，根据多轨任务提示词和参考媒体反推并增强视频提示词。",
     "inputs": {
-      "system_prompt": { "name": "系统提示词", "tooltip": "可选的系统指令输入；MiniMax H3 会忽略此输入。" },
-      "user_prompt": { "name": "用户提示词", "tooltip": "用户提示词输入；MiniMax H3 要求内容非空。" },
-      "type": { "name": "类型", "tooltip": "用于选择 H3 的 t2va、i2va 或 r2va 请求格式，并拼接各服务的媒体角色。" },
-      "length": { "name": "帧数", "tooltip": "MiniMax 对齐帧数，将按最近整数换算为 4–15 秒。" },
-      "images": { "name": "图像", "tooltip": "支持单张图像、图像批次或列表。H3 会逐张上传；第三方模型输入会限制在 200 万像素以内。" },
-      "video": { "name": "视频", "tooltip": "支持视频或视频列表。厂商支持当前来源时优先传入公网视频 URL 或本地视频数据；不支持时才对每个视频最多均匀抽取 24 帧。原生视频上传最多保留 15 秒，RunningHub 视频还会限制为 10MB。" },
-      "audio": { "name": "音频", "tooltip": "用于 H3 r2va 的音频或音频列表，逐个上传至 MiniMax；第三方模型不会传入音频。" },
-      "files": { "name": "文件", "tooltip": "预留文件输入口，等待后续服务接入。" },
-      "llama_model": { "name": "llama.cpp 模型", "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm" },
-      "model": { "name": "模型", "tooltip": "选择用于增强提示词的服务厂商与模型。" },
-      "inference_mode": { "name": "推理模式", "tooltip": "one by one：逐项处理输入列表，同一项内的多图批次会一起推理；images：把所有列表项中的全部图片合并到一次提示中；video：把每个图片列表项分别视为一个视频片段。" },
-      "force_offload": { "name": "强制卸载", "tooltip": "推理完成后卸载本地 llama.cpp 模型以释放内存。" },
-      "ratio": { "name": "宽高比", "tooltip": "海螺官方接口；纯文本 adaptive 请求使用 16:9。" },
-      "return_async": { "name": "异步返回", "tooltip": "当前仅在 h3-context-ir 有效；开启时不进行任务查询。" },
-      "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
-      "max_size": { "name": "图片或视频最大尺寸", "tooltip": "本地 llama.cpp 模型会将其作为 max_size，限制所有推理模式的输入图片尺寸。" },
-      "max_tokens": { "name": "最大令牌数", "tooltip": "第三方模型最多生成的输出令牌数。" },
-      "seed": { "name": "随机种", "tooltip": "ComfyUI 常规随机种，由兼容的第三方大模型接口使用。" },
-      "enabled": { "name": "启用", "tooltip": "开启时增强提示词；关闭时不调用所选模型，直接原样输出用户提示词。" },
-      "api_account": { "name": "API 账户", "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。" }
+      "system_prompt": {
+        "name": "系统提示词",
+        "tooltip": "可选的系统指令输入；MiniMax H3 会忽略此输入。"
+      },
+      "user_prompt": {
+        "name": "用户提示词",
+        "tooltip": "用户提示词输入；MiniMax H3 要求内容非空。"
+      },
+      "type": {
+        "name": "类型",
+        "tooltip": "用于选择 H3 的 t2va、i2va 或 r2va 请求格式，并拼接各服务的媒体角色。"
+      },
+      "length": {
+        "name": "帧数",
+        "tooltip": "MiniMax 对齐帧数，将按最近整数换算为 4–15 秒。"
+      },
+      "images": {
+        "name": "图像",
+        "tooltip": "支持单张图像、图像批次或列表。H3 会逐张上传；第三方模型输入会限制在 200 万像素以内。"
+      },
+      "video": {
+        "name": "视频",
+        "tooltip": "支持视频或视频列表。厂商支持当前来源时优先传入公网视频 URL 或本地视频数据；不支持时才对每个视频最多均匀抽取 24 帧。原生视频上传最多保留 15 秒，RunningHub 视频还会限制为 10MB。"
+      },
+      "audio": {
+        "name": "音频",
+        "tooltip": "用于 H3 r2va 的音频或音频列表，逐个上传至 MiniMax；第三方模型不会传入音频。"
+      },
+      "files": {
+        "name": "文件",
+        "tooltip": "预留文件输入口，等待后续服务接入。"
+      },
+      "llama_model": {
+        "name": "llama.cpp 模型",
+        "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm"
+      },
+      "model": {
+        "name": "模型",
+        "tooltip": "选择用于增强提示词的服务厂商与模型。"
+      },
+      "inference_mode": {
+        "name": "推理模式",
+        "tooltip": "one by one：逐项处理输入列表，同一项内的多图批次会一起推理；images：把所有列表项中的全部图片合并到一次提示中；video：把每个图片列表项分别视为一个视频片段。"
+      },
+      "force_offload": {
+        "name": "强制卸载",
+        "tooltip": "推理完成后卸载本地 llama.cpp 模型以释放内存。"
+      },
+      "ratio": {
+        "name": "宽高比",
+        "tooltip": "海螺官方接口；纯文本 adaptive 请求使用 16:9。"
+      },
+      "return_async": {
+        "name": "异步返回",
+        "tooltip": "当前仅在 h3-context-ir 有效；开启时不进行任务查询。"
+      },
+      "apikey": {
+        "name": "API 密钥",
+        "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。"
+      },
+      "max_size": {
+        "name": "图片或视频最大尺寸",
+        "tooltip": "本地 llama.cpp 模型会将其作为 max_size，限制所有推理模式的输入图片尺寸。"
+      },
+      "max_tokens": {
+        "name": "最大令牌数",
+        "tooltip": "第三方模型最多生成的输出令牌数。"
+      },
+      "preset": {
+        "name": "提示词预设",
+        "tooltip": "参考 🤖 AI 全能生成 的风格预设机制，叠加到系统指令之前；只对有系统指令位的第三方/自定义模型生效。"
+      },
+      "endpoint": {
+        "name": "自定义地址",
+        "tooltip": "完整的 OpenAI 兼容对话补全地址，例如 https://api.deepseek.com/v1/chat/completions；本地服务如 http://127.0.0.1:11434/v1/chat/completions。"
+      },
+      "api_model_name": {
+        "name": "模型名称",
+        "tooltip": "发送给该地址的模型名，例如 deepseek-chat、qwen-plus、glm-4.5-flash、llama3.2；本地服务可不填 API 密钥。"
+      },
+      "temperature": {
+        "name": "采样温度",
+        "tooltip": "发送给 OpenAI 兼容厂商的采样温度；-1 表示保持服务商默认（不发送该参数）。"
+      },
+      "seed": {
+        "name": "随机种",
+        "tooltip": "ComfyUI 常规随机种，由兼容的第三方大模型接口使用。"
+      },
+      "enabled": {
+        "name": "启用",
+        "tooltip": "开启时增强提示词；关闭时不调用所选模型，直接原样输出用户提示词。"
+      },
+      "api_account": {
+        "name": "API 账户",
+        "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。"
+      }
     },
     "outputs": {
-      "0": { "name": "提示词", "tooltip": "增强后的视频提示词。" },
-      "1": { "name": "任务 ID", "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。" },
-      "2": { "name": "文件 ID", "tooltip": "MiniMax 已上传图像、视频和音频的文件 ID，多个 ID 使用英文逗号分隔；没有上传媒体时返回空字符串。" }
+      "0": {
+        "name": "提示词",
+        "tooltip": "增强后的视频提示词。"
+      },
+      "1": {
+        "name": "任务 ID",
+        "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。"
+      },
+      "2": {
+        "name": "文件 ID",
+        "tooltip": "MiniMax 已上传图像、视频和音频的文件 ID，多个 ID 使用英文逗号分隔；没有上传媒体时返回空字符串。"
+      }
     }
   },
   "easy multitrackPromptEnhanceToProject": {
     "display_name": "多轨提示词增强到项目",
     "description": "使用每个任务时间范围内的媒体逐个增强轨道信息中的任务片段提示词，将结果写回对应片段，并输出更新后的项目数据与分段提示词列表。",
     "inputs": {
-      "tracks_info": { "name": "轨道信息", "tooltip": "需要逐片段增强任务提示词的多轨项目数据。" },
-      "llama_model": { "name": "llama.cpp 模型", "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm" },
-      "model": { "name": "模型", "tooltip": "选择用于增强每个任务片段提示词的服务厂商与模型。" },
-      "inference_mode": { "name": "推理模式", "tooltip": "设置本地 llama.cpp 如何处理当前任务时间范围内的图片和视频媒体。" },
-      "force_offload": { "name": "强制卸载", "tooltip": "每次本地推理完成后卸载 llama.cpp 模型以释放内存。" },
-      "ratio": { "name": "宽高比", "tooltip": "海螺官方接口的输出宽高比。" },
-      "return_async": { "name": "异步返回", "tooltip": "为保证增强文本可以写回项目，本节点始终等待每个任务完成。" },
-      "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
-      "max_size": { "name": "最大尺寸", "tooltip": "本地 llama.cpp 视觉推理前使用的图片长边上限。" },
-      "max_tokens": { "name": "最大令牌数", "tooltip": "第三方模型最多生成的输出令牌数。" },
-      "seed": { "name": "随机种", "tooltip": "对每个任务片段使用的 ComfyUI 随机种。" },
-      "enabled": { "name": "启用", "tooltip": "开启时增强并覆盖全部任务提示词；关闭时返回未修改的项目副本及当前提示词列表。" },
-      "api_account": { "name": "API 账户", "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。" }
+      "tracks_info": {
+        "name": "轨道信息",
+        "tooltip": "需要逐片段增强任务提示词的多轨项目数据。"
+      },
+      "llama_model": {
+        "name": "llama.cpp 模型",
+        "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm"
+      },
+      "model": {
+        "name": "模型",
+        "tooltip": "选择用于增强每个任务片段提示词的服务厂商与模型。"
+      },
+      "inference_mode": {
+        "name": "推理模式",
+        "tooltip": "设置本地 llama.cpp 如何处理当前任务时间范围内的图片和视频媒体。"
+      },
+      "force_offload": {
+        "name": "强制卸载",
+        "tooltip": "每次本地推理完成后卸载 llama.cpp 模型以释放内存。"
+      },
+      "ratio": {
+        "name": "宽高比",
+        "tooltip": "海螺官方接口的输出宽高比。"
+      },
+      "return_async": {
+        "name": "异步返回",
+        "tooltip": "为保证增强文本可以写回项目，本节点始终等待每个任务完成。"
+      },
+      "apikey": {
+        "name": "API 密钥",
+        "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。"
+      },
+      "max_size": {
+        "name": "最大尺寸",
+        "tooltip": "本地 llama.cpp 视觉推理前使用的图片长边上限。"
+      },
+      "max_tokens": {
+        "name": "最大令牌数",
+        "tooltip": "第三方模型最多生成的输出令牌数。"
+      },
+      "preset": {
+        "name": "提示词预设",
+        "tooltip": "参考 🤖 AI 全能生成 的风格预设机制，叠加到系统指令之前；只对有系统指令位的第三方/自定义模型生效。"
+      },
+      "endpoint": {
+        "name": "自定义地址",
+        "tooltip": "完整的 OpenAI 兼容对话补全地址，例如 https://api.deepseek.com/v1/chat/completions；本地服务如 http://127.0.0.1:11434/v1/chat/completions。"
+      },
+      "api_model_name": {
+        "name": "模型名称",
+        "tooltip": "发送给该地址的模型名，例如 deepseek-chat、qwen-plus、glm-4.5-flash、llama3.2；本地服务可不填 API 密钥。"
+      },
+      "temperature": {
+        "name": "采样温度",
+        "tooltip": "发送给 OpenAI 兼容厂商的采样温度；-1 表示保持服务商默认（不发送该参数）。"
+      },
+      "seed": {
+        "name": "随机种",
+        "tooltip": "对每个任务片段使用的 ComfyUI 随机种。"
+      },
+      "enabled": {
+        "name": "启用",
+        "tooltip": "开启时增强并覆盖全部任务提示词；关闭时返回未修改的项目副本及当前提示词列表。"
+      },
+      "api_account": {
+        "name": "API 账户",
+        "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。"
+      }
     },
     "outputs": {
-      "0": { "name": "轨道信息", "tooltip": "已将增强提示词写回任务片段的项目数据。" },
-      "1": { "name": "分段提示词", "tooltip": "按任务片段时间顺序排列的增强提示词列表。" }
+      "0": {
+        "name": "轨道信息",
+        "tooltip": "已将增强提示词写回任务片段的项目数据。"
+      },
+      "1": {
+        "name": "分段提示词",
+        "tooltip": "按任务片段时间顺序排列的增强提示词列表。"
+      }
     }
   },
   "easy multiTrackPromptEnhanceToProjectApply": {
     "display_name": "多轨提示词增强到项目写回",
     "inputs": {
-      "tracks_info": { "name": "轨道信息" },
-      "prompt_count": { "name": "提示词数量" }
+      "tracks_info": {
+        "name": "轨道信息"
+      },
+      "prompt_count": {
+        "name": "提示词数量"
+      }
     },
     "outputs": {
-      "0": { "name": "轨道信息" },
-      "1": { "name": "分段提示词" }
+      "0": {
+        "name": "轨道信息"
+      },
+      "1": {
+        "name": "分段提示词"
+      }
     }
   },
   "easy multiTrackPromptEnhancerImageListBridge": {
     "display_name": "多轨提示词增强器图片列表桥接",
     "description": "内部节点，用于在本地 llama.cpp 展开子图中保持图片列表语义。",
     "inputs": {
-      "images": { "name": "图像", "tooltip": "由多轨提示词增强器转发的图片数据。" },
-      "max_size": { "name": "最大尺寸", "tooltip": "送入本地 llama.cpp 视觉推理前使用的图片长边上限，硬上限为 768。" },
-      "inference_mode": { "name": "推理模式", "tooltip": "保留独立参考图，并按同一次推理中的图片或采样帧数量分摊视觉尺寸预算。" }
+      "images": {
+        "name": "图像",
+        "tooltip": "由多轨提示词增强器转发的图片数据。"
+      },
+      "max_size": {
+        "name": "最大尺寸",
+        "tooltip": "送入本地 llama.cpp 视觉推理前使用的图片长边上限，硬上限为 768。"
+      },
+      "inference_mode": {
+        "name": "推理模式",
+        "tooltip": "保留独立参考图，并按同一次推理中的图片或采样帧数量分摊视觉尺寸预算。"
+      }
     },
     "outputs": {
-      "0": { "name": "图像", "tooltip": "以 ComfyUI 输出列表形式转发的图片。" }
+      "0": {
+        "name": "图像",
+        "tooltip": "以 ComfyUI 输出列表形式转发的图片。"
+      }
     }
   },
   "LTXVMakeRefVideo": {
@@ -956,40 +1317,76 @@
     "display_name": "LTX 多轨编码",
     "description": "生成提示词条件以及 LTX 视频和音频潜空间。",
     "inputs": {
-      "model": { "name": "模型" },
-      "clip": { "name": "CLIP" },
-      "audio_vae": { "name": "音频 VAE" },
-      "audio": { "name": "音频" },
-      "local_prompt": { "name": "局部提示词" },
-      "global_prompt": { "name": "全局提示词" },
-      "epsilon": { "name": "Epsilon" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "frame_rate": { "name": "帧率" },
-      "video_length": { "name": "视频帧数" },
+      "model": {
+        "name": "模型"
+      },
+      "clip": {
+        "name": "CLIP"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      },
+      "audio": {
+        "name": "音频"
+      },
+      "local_prompt": {
+        "name": "局部提示词"
+      },
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "epsilon": {
+        "name": "Epsilon"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "frame_rate": {
+        "name": "帧率"
+      },
+      "video_length": {
+        "name": "视频帧数"
+      },
       "half_latent_size": {
         "name": "潜空间尺寸减半",
         "tooltip": "创建视频潜空间时将输入宽高减半。"
       }
     },
     "outputs": {
-      "0": { "name": "模型" },
-      "1": { "name": "正向条件" },
-      "2": { "name": "负向条件" },
-      "3": { "name": "视频潜空间" },
-      "4": { "name": "音频潜空间" }
+      "0": {
+        "name": "模型"
+      },
+      "1": {
+        "name": "正向条件"
+      },
+      "2": {
+        "name": "负向条件"
+      },
+      "3": {
+        "name": "视频潜空间"
+      },
+      "4": {
+        "name": "音频潜空间"
+      }
     }
   },
   "easy ltxI2VInplaceAndUpsample": {
     "display_name": "LTX 图生视频原位处理与放大",
     "description": "可选使用潜空间放大模型，并将指定图像作为 LTX 视频潜空间的原位引导。",
     "inputs": {
-      "vae": { "name": "VAE" },
+      "vae": {
+        "name": "VAE"
+      },
       "image": {
         "name": "图像",
         "tooltip": "可选。未连接图像时自动跳过图生视频原位引导。"
       },
-      "video_latent": { "name": "视频潜空间" },
+      "video_latent": {
+        "name": "视频潜空间"
+      },
       "upscale_models": {
         "name": "潜空间放大模型",
         "tooltip": "可选。连接多个模型时将按顺序依次放大视频潜空间。"
@@ -998,7 +1395,9 @@
         "name": "图像索引",
         "tooltip": "从图像列表或批次中选择用于引导的图像，索引从 0 开始。"
       },
-      "strength": { "name": "强度" },
+      "strength": {
+        "name": "强度"
+      },
       "img_compression": {
         "name": "图像压缩",
         "tooltip": "传入图生视频原位处理前应用的图像压缩量。"
@@ -1009,51 +1408,97 @@
       }
     },
     "outputs": {
-      "0": { "name": "视频潜空间" }
+      "0": {
+        "name": "视频潜空间"
+      }
     }
   },
   "easy ltxSamplerSimple": {
     "display_name": "LTX 简易采样器",
     "description": "合并 LTX 视频和音频潜空间进行采样，并分离最终的视频与音频潜空间。",
     "inputs": {
-      "model": { "name": "模型" },
-      "positive": { "name": "正向条件" },
-      "negative": { "name": "负向条件" },
-      "video_latent": { "name": "视频潜空间" },
-      "audio_latent": { "name": "音频潜空间" },
-      "sampler_name": { "name": "采样器" },
-      "sigmas": { "name": "Sigma 序列" },
-      "cfg": { "name": "CFG" },
-      "seed": { "name": "种子" }
+      "model": {
+        "name": "模型"
+      },
+      "positive": {
+        "name": "正向条件"
+      },
+      "negative": {
+        "name": "负向条件"
+      },
+      "video_latent": {
+        "name": "视频潜空间"
+      },
+      "audio_latent": {
+        "name": "音频潜空间"
+      },
+      "sampler_name": {
+        "name": "采样器"
+      },
+      "sigmas": {
+        "name": "Sigma 序列"
+      },
+      "cfg": {
+        "name": "CFG"
+      },
+      "seed": {
+        "name": "种子"
+      }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "负向条件" },
-      "2": { "name": "视频潜空间" },
-      "3": { "name": "音频潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "负向条件"
+      },
+      "2": {
+        "name": "视频潜空间"
+      },
+      "3": {
+        "name": "音频潜空间"
+      }
     }
   },
   "BerniniModelPatch": {
     "display_name": "Bernini 模型补丁",
     "description": "使用 ComfyUI 模型包装器为 Wan 模型添加 Bernini 上下文潜空间支持。",
     "inputs": {
-      "model": { "name": "模型" }
+      "model": {
+        "name": "模型"
+      }
     },
     "outputs": {
-      "0": { "name": "模型" }
+      "0": {
+        "name": "模型"
+      }
     }
   },
   "BerniniConditioning": {
     "display_name": "Bernini 条件",
     "description": "为 Bernini 上下文视频与图像生成条件，将源视频和参考图像编码后附加到正向与负向条件中。",
     "inputs": {
-      "positive": { "name": "正向条件" },
-      "negative": { "name": "负向条件" },
-      "vae": { "name": "VAE" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "length": { "name": "帧数" },
-      "batch_size": { "name": "批次大小" },
+      "positive": {
+        "name": "正向条件"
+      },
+      "negative": {
+        "name": "负向条件"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "length": {
+        "name": "帧数"
+      },
+      "batch_size": {
+        "name": "批次大小"
+      },
       "source_video": {
         "name": "源视频",
         "tooltip": "要编辑或重绘的源视频（v2v 或 rv2v 任务）。将调整至指定宽高并裁剪到指定帧数，作为编辑底图或画布。"
@@ -1072,22 +1517,42 @@
       }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "负向条件" },
-      "2": { "name": "潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "负向条件"
+      },
+      "2": {
+        "name": "潜空间"
+      }
     }
   },
   "easy berniniS2VConditioning": {
     "display_name": "简易 Bernini S2V 条件",
     "description": "统一 Bernini 上下文与 Wan S2V 音频条件。单路音频不连接遮罩时保留原版全画面单人逻辑；连接遮罩后启用空间注入，并可选第二位音频。",
     "inputs": {
-      "positive": { "name": "正向条件" },
-      "negative": { "name": "负向条件" },
-      "vae": { "name": "VAE" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "length": { "name": "帧数" },
-      "batch_size": { "name": "批次大小" },
+      "positive": {
+        "name": "正向条件"
+      },
+      "negative": {
+        "name": "负向条件"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "length": {
+        "name": "帧数"
+      },
+      "batch_size": {
+        "name": "批次大小"
+      },
       "audio_0": {
         "name": "音频 0 音频",
         "tooltip": "可选。未连接音频 0 遮罩时，使用原版全画面单人音频注入。"
@@ -1108,51 +1573,101 @@
         "name": "音频 1 起始帧",
         "tooltip": "-1 表示在音频 0 音频结束后自动开始；其他值表示指定输出视频帧。"
       },
-      "source_video": { "name": "源视频" },
-      "reference_video": { "name": "参考视频" },
-      "reference_images": { "name": "参考图像" },
-      "ref_max_size": { "name": "参考最大尺寸" },
+      "source_video": {
+        "name": "源视频"
+      },
+      "reference_video": {
+        "name": "参考视频"
+      },
+      "reference_images": {
+        "name": "参考图像"
+      },
+      "ref_max_size": {
+        "name": "参考最大尺寸"
+      },
       "mask_crossfade_frames": {
         "name": "遮罩交叉淡化帧数",
         "tooltip": "平滑两位音频的遮罩切换；0 表示硬切。"
       },
-      "audio_inject_scale": { "name": "音频注入强度" }
+      "audio_inject_scale": {
+        "name": "音频注入强度"
+      }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "负向条件" },
-      "2": { "name": "潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "负向条件"
+      },
+      "2": {
+        "name": "潜空间"
+      }
     }
   },
   "MiniMaxH3ImageToVideo": {
     "display_name": "MiniMax H3 图像生成视频",
     "description": "创建 MiniMax H3 文生视频或首尾帧生视频条件，并生成联合音视频潜空间。",
     "inputs": {
-      "clip": { "name": "CLIP" },
-      "vae": { "name": "VAE" },
-      "prompt": { "name": "提示词" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "length": { "name": "视频帧数" },
-      "first_frame": { "name": "首帧" },
-      "last_frame": { "name": "尾帧" }
+      "clip": {
+        "name": "CLIP"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "prompt": {
+        "name": "提示词"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "length": {
+        "name": "视频帧数"
+      },
+      "first_frame": {
+        "name": "首帧"
+      },
+      "last_frame": {
+        "name": "尾帧"
+      }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "潜空间"
+      }
     }
   },
   "MiniMaxH3ReferenceToVideo": {
     "display_name": "MiniMax H3 参考生成视频",
     "description": "使用图像、视频和音频创建 MiniMax H3 参考条件；提示词可通过 <Picture i>、<Video i> 和 <Audio i> 标签引用媒体。",
     "inputs": {
-      "clip": { "name": "CLIP" },
-      "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "prompt": { "name": "提示词" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "length": { "name": "视频帧数" },
+      "clip": {
+        "name": "CLIP"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      },
+      "prompt": {
+        "name": "提示词"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "length": {
+        "name": "视频帧数"
+      },
       "ref_image_size": {
         "name": "参考图像尺寸",
         "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”的短边上限为 2048 像素（仅缩小，不放大），以实现最佳的身份保真度。参考词元会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
@@ -1161,14 +1676,26 @@
           "max": "最大参考尺寸"
         }
       },
-      "ref_images": { "name": "参考图像" },
-      "ref_videos": { "name": "参考视频帧" },
-      "ref_video_audios": { "name": "参考视频音频" },
-      "ref_audios": { "name": "独立参考音频" }
+      "ref_images": {
+        "name": "参考图像"
+      },
+      "ref_videos": {
+        "name": "参考视频帧"
+      },
+      "ref_video_audios": {
+        "name": "参考视频音频"
+      },
+      "ref_audios": {
+        "name": "独立参考音频"
+      }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "潜空间"
+      }
     }
   },
   "easy removeH3MotionContextLatent": {
@@ -1179,65 +1706,119 @@
         "name": "文件路径前缀",
         "tooltip": "相对于 ComfyUI 输出目录的安全文件前缀。"
       },
-      "input": { "name": "输入" }
+      "input": {
+        "name": "输入"
+      }
     },
     "outputs": {
-      "0": { "name": "输出" },
-      "1": { "name": "已删除数量" }
+      "0": {
+        "name": "输出"
+      },
+      "1": {
+        "name": "已删除数量"
+      }
     }
   },
   "easy MiniMaxH3MotionContextHard": {
     "display_name": "简易 MiniMax H3 硬上下文",
     "description": "保留 Motion Context 0.4 原生视频与音频关键帧，同时只硬锁定最后 5 帧视频；音频保持生成，使锁定语音能够驱动新的口型。",
     "inputs": {
-      "conditioning": { "name": "条件" },
-      "vae": { "name": "VAE" },
-      "latent": { "name": "当前潜空间" },
-      "context_latent": { "name": "上一片段上下文潜空间" },
-      "context_length": { "name": "视频上下文长度" },
-      "video_transition_steps": { "name": "视频过渡步数" },
-      "audio_transition_steps": { "name": "音频过渡步数" },
-      "video_anchor_only": { "name": "仅视频锚点" }
+      "conditioning": {
+        "name": "条件"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "latent": {
+        "name": "当前潜空间"
+      },
+      "context_latent": {
+        "name": "上一片段上下文潜空间"
+      },
+      "context_length": {
+        "name": "视频上下文长度"
+      },
+      "video_transition_steps": {
+        "name": "视频过渡步数"
+      },
+      "audio_transition_steps": {
+        "name": "音频过渡步数"
+      },
+      "video_anchor_only": {
+        "name": "仅视频锚点"
+      }
     },
     "outputs": {
-      "0": { "name": "条件" },
-      "1": { "name": "裁剪帧数" },
-      "2": { "name": "潜空间" }
+      "0": {
+        "name": "条件"
+      },
+      "1": {
+        "name": "裁剪帧数"
+      },
+      "2": {
+        "name": "潜空间"
+      }
     }
   },
   "easy MiniMaxH3ContextSwap": {
     "display_name": "简易 MiniMax H3 局部替换上下文",
     "description": "为局部替换创建一次性上下文，音频保持不变。",
     "inputs": {
-      "context_latent": { "name": "上下文潜空间" },
-      "context_length": { "name": "上下文长度" },
-      "seed": { "name": "噪声种子" }
+      "context_latent": {
+        "name": "上下文潜空间"
+      },
+      "context_length": {
+        "name": "上下文长度"
+      },
+      "seed": {
+        "name": "噪声种子"
+      }
     },
     "outputs": {
-      "0": { "name": "临时上下文潜空间" }
+      "0": {
+        "name": "临时上下文潜空间"
+      }
     }
   },
   "easy MiniMaxH3HiResContinuity": {
     "display_name": "简易 MiniMax H3 高分辨率连续性",
     "description": "用于二采上下文衔接：硬锁定上一片段最后 5 帧视频边界，并冻结当前音频。",
     "inputs": {
-      "current_hires_latent": { "name": "当前高分辨率潜空间" },
-      "previous_hires_latent": { "name": "上一片段高分辨率潜空间" },
-      "context_length": { "name": "上下文长度" },
-      "video_transition_steps": { "name": "视频过渡步数" },
-      "video_anchor_only": { "name": "仅视频锚点" }
+      "current_hires_latent": {
+        "name": "当前高分辨率潜空间"
+      },
+      "previous_hires_latent": {
+        "name": "上一片段高分辨率潜空间"
+      },
+      "context_length": {
+        "name": "上下文长度"
+      },
+      "video_transition_steps": {
+        "name": "视频过渡步数"
+      },
+      "video_anchor_only": {
+        "name": "仅视频锚点"
+      }
     },
     "outputs": {
-      "0": { "name": "潜空间" },
-      "1": { "name": "裁剪帧数" }
+      "0": {
+        "name": "潜空间"
+      },
+      "1": {
+        "name": "裁剪帧数"
+      }
     }
   },
   "easy minimaxH3LatentUpscaler": {
     "display_name": "MiniMax H3 潜空间放大",
     "description": "使用 Easy Media 内置的 3D 推理实现放大 MiniMax H3 视频潜空间；嵌套 AV 输入会保留音频流。",
     "inputs": {
-      "latent": { "name": "潜空间" },
-      "model_name": { "name": "放大模型" },
+      "latent": {
+        "name": "潜空间"
+      },
+      "model_name": {
+        "name": "放大模型"
+      },
       "mode": {
         "name": "尺寸模式",
         "options": {
@@ -1246,11 +1827,21 @@
           "megapixels": "指定百万像素"
         }
       },
-      "scale": { "name": "放大倍率" },
-      "width": { "name": "目标宽度" },
-      "height": { "name": "目标高度" },
-      "megapixels": { "name": "目标百万像素" },
-      "align": { "name": "像素对齐" },
+      "scale": {
+        "name": "放大倍率"
+      },
+      "width": {
+        "name": "目标宽度"
+      },
+      "height": {
+        "name": "目标高度"
+      },
+      "megapixels": {
+        "name": "目标百万像素"
+      },
+      "align": {
+        "name": "像素对齐"
+      },
       "enable_temporal_chunking": {
         "name": "启用时序分块",
         "tooltip": "以带重叠的时序分块处理长视频潜空间，降低峰值显存占用。"
@@ -1261,19 +1852,33 @@
       }
     },
     "outputs": {
-      "0": { "name": "潜空间" }
+      "0": {
+        "name": "潜空间"
+      }
     }
   },
   "easy minimaxH3SelfLiftSampler": {
     "display_name": "MiniMax H3 SelfLift 渐进采样器",
     "description": "先在低分辨率执行前段去噪评估，再提升干净端点，并在目标分辨率继续同一条 Euler 调度；可复用上一段保存的低分辨率上下文。",
     "inputs": {
-      "model": { "name": "模型" },
-      "positive": { "name": "正向条件" },
-      "vae": { "name": "VAE" },
-      "latent_image": { "name": "目标潜空间" },
-      "sigmas": { "name": "Sigma 序列" },
-      "seed": { "name": "种子" },
+      "model": {
+        "name": "模型"
+      },
+      "positive": {
+        "name": "正向条件"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "latent_image": {
+        "name": "目标潜空间"
+      },
+      "sigmas": {
+        "name": "Sigma 序列"
+      },
+      "seed": {
+        "name": "种子"
+      },
       "transition_ratio": {
         "name": "步数过渡比例",
         "tooltip": "在低分辨率执行的去噪评估比例；这是步数比例，不是 sigma 数值阈值。"
@@ -1306,12 +1911,20 @@
         "name": "高分辨率分块（兼容）",
         "tooltip": "enabled_tiling 的旧版兼容选项。"
       },
-      "tile_count": { "name": "分块数量" },
-      "low_context_latent": { "name": "低分上下文潜空间" }
+      "tile_count": {
+        "name": "分块数量"
+      },
+      "low_context_latent": {
+        "name": "低分上下文潜空间"
+      }
     },
     "outputs": {
-      "0": { "name": "潜空间" },
-      "1": { "name": "低分上下文潜空间" }
+      "0": {
+        "name": "潜空间"
+      },
+      "1": {
+        "name": "低分上下文潜空间"
+      }
     }
   },
   "easy multitrackProject": {
@@ -1326,8 +1939,12 @@
         "name": "多轨信息",
         "tooltip": "多轨编辑器输出的完整项目数据。"
       },
-      "sampler": { "name": "采样器" },
-      "sigmas": { "name": "Sigmas" },
+      "sampler": {
+        "name": "采样器"
+      },
+      "sigmas": {
+        "name": "Sigmas"
+      },
       "project_name": {
         "name": "项目名称",
         "tooltip": "项目目录位于 output/easy_media/projects/{项目名}/；留空时使用 default 项目目录。"
@@ -1340,7 +1957,6 @@
           "override": "覆盖"
         }
       },
-
       "sampling_plan": {
         "name": "采样方案",
         "tooltip": "选择采样调度方案，默认；外接采样器或 Sigmas 后，执行阶段会自动采用 custom。",
@@ -1369,15 +1985,17 @@
         "name": "启用分块",
         "tooltip": "为 Dual 二采或 SelfLift 高分辨率阶段启用空间分块。"
       },
-      "tile_count": { "name": "分块数量" },
+      "tile_count": {
+        "name": "分块数量"
+      },
       "model_loader_2nd": {
         "name": "模型加载器(二采)",
         "tooltip": "可选；仅替换二采模型，编码与 VAE 保持一采配置以确保 latent 兼容。"
       },
-      "sampler_2nd":{
+      "sampler_2nd": {
         "name": "采样器(二采)"
       },
-      "sigmas_2nd":{
+      "sigmas_2nd": {
         "name": "Sigmas(二采)"
       },
       "1st_pass_only": {
@@ -1392,8 +2010,12 @@
         "name": "二采放大倍率",
         "tooltip": "dual 模式下用于计算二采目标分辨率。"
       },
-      "upscale_model": { "name": "放大模型" },
-      "segment_start_number": { "name": "片段开始编号" },
+      "upscale_model": {
+        "name": "放大模型"
+      },
+      "segment_start_number": {
+        "name": "片段开始编号"
+      },
       "segment_count": {
         "name": "片段最大数量",
         "tooltip": "从片段开始索引起处理的片段数。-1 表示处理剩余全部片段；仅 override 模式会在执行前删除开始索引及其后的旧片段和产物，new 模式会保留它们；超出时自动在末尾停止。"
@@ -1404,8 +2026,12 @@
       }
     },
     "outputs": {
-      "0": { "name": "项目名称" },
-      "1": { "name": "锁定音频" }
+      "0": {
+        "name": "项目名称"
+      },
+      "1": {
+        "name": "锁定音频"
+      }
     }
   },
   "easy multitrackProjectVideoCombine": {
@@ -1416,28 +2042,53 @@
         "name": "项目名称",
         "tooltip": "连接多轨项目节点输出的项目名称。"
       },
-      "project_data": { "name": "项目数据" }
+      "project_data": {
+        "name": "项目数据"
+      }
     },
     "outputs": {
-      "0": { "name": "视频" },
-      "1": { "name": "文件名前缀" }
+      "0": {
+        "name": "视频"
+      },
+      "1": {
+        "name": "文件名前缀"
+      }
     }
   },
   "easy minimaxH3AudioLock": {
     "display_name": "简易 MiniMax H3 音频锁定",
     "description": "将原音频锁定或混合到 MiniMax H3 音视频联合潜空间中，并通过分流噪声遮罩控制音频保留强度。",
     "inputs": {
-      "latent": { "name": "潜空间", "tooltip": "MiniMax H3 音视频联合潜空间。" },
-      "audio_vae": { "name": "音频 VAE", "tooltip": "MiniMax H3 音频 VAE。" },
-      "audio": { "name": "音频", "tooltip": "要锁定到 H3 潜空间的原音频，支持音频列表。" },
-      "remix_strength": { "name": "锁定强度", "tooltip": "0 表示完全重新生成音频；1 表示完整锁定原音频。" },
+      "latent": {
+        "name": "潜空间",
+        "tooltip": "MiniMax H3 音视频联合潜空间。"
+      },
+      "audio_vae": {
+        "name": "音频 VAE",
+        "tooltip": "MiniMax H3 音频 VAE。"
+      },
+      "audio": {
+        "name": "音频",
+        "tooltip": "要锁定到 H3 潜空间的原音频，支持音频列表。"
+      },
+      "remix_strength": {
+        "name": "锁定强度",
+        "tooltip": "0 表示完全重新生成音频；1 表示完整锁定原音频。"
+      },
       "short_audio_mode": {
         "name": "短音频处理",
         "tooltip": "编码前使用静音补齐或循环方式补足短音频。",
-        "options": { "silence": "静音补齐", "loop": "循环" }
+        "options": {
+          "silence": "静音补齐",
+          "loop": "循环"
+        }
       }
     },
-    "outputs": { "0": { "name": "潜空间" } }
+    "outputs": {
+      "0": {
+        "name": "潜空间"
+      }
+    }
   },
   "easy minimaxPromptOverride": {
     "display_name": "MiniMax 提示词覆盖",
@@ -1473,7 +2124,9 @@
       }
     },
     "outputs": {
-      "0": { "name": "提示词覆盖" }
+      "0": {
+        "name": "提示词覆盖"
+      }
     }
   },
   "easy minimaxH3ToVideo": {
@@ -1539,8 +2192,72 @@
       }
     },
     "outputs": {
-      "0": { "name": "正向条件" },
-      "1": { "name": "潜空间" }
+      "0": {
+        "name": "正向条件"
+      },
+      "1": {
+        "name": "潜空间"
+      }
+    }
+  },
+  "easy promptStudio": {
+    "display_name": "提示词工作台",
+    "description": "提示词工作台：接轨道信息与媒体，直接展示当前片段素材架；在提示词3里打 @ 选素材，以缩略图插入正文，输出规范标记提示词。素材编号与多轨编辑器一致。只读，不回写项目。",
+    "inputs": {
+      "tracks_info": {
+        "name": "轨道信息",
+        "tooltip": "轨道信息：接多轨编辑器或多轨任务输出，用于列出当前片段素材与编号。"
+      },
+      "images": {
+        "name": "图像",
+        "tooltip": "图像素材（接多轨任务输出的 IMAGES）：透传到输出，并作为素材架编号兜底。"
+      },
+      "audio": {
+        "name": "音频",
+        "tooltip": "音频素材：透传到输出，并作为素材架编号兜底。"
+      },
+      "video": {
+        "name": "视频",
+        "tooltip": "视频素材：透传到输出，并作为素材架编号兜底。"
+      },
+      "system_prompt": {
+        "name": "系统提示词1",
+        "tooltip": "来自多轨编辑器 / 任务输出，面板只读展示，本节点不改写。"
+      },
+      "user_prompt": {
+        "name": "用户提示词2（基线）",
+        "tooltip": "需要改写的原文。改写模式下留空时，输出回退使用它。"
+      },
+      "previous": {
+        "name": "前序依赖",
+        "tooltip": "链式依赖，仅用于排序执行位置。"
+      },
+      "task_index": {
+        "name": "片段索引",
+        "tooltip": "片段索引（0 起）。-1 表示整条时间线，素材架不可用。"
+      },
+      "mode": {
+        "name": "模式",
+        "tooltip": "改写：以提示词3为准，空则回退用户提示词2；生成：只用提示词3。"
+      },
+      "prompt": {
+        "name": "提示词3",
+        "tooltip": "提示词3（正文）：在节点面板上输入，打 @ 选素材；原生输入框已被面板接管。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "提示词"
+      },
+      "1": {
+        "name": "图像"
+      },
+      "2": {
+        "name": "音频"
+      },
+      "3": {
+        "name": "视频"
+      }
     }
   }
 }

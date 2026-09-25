@@ -119,6 +119,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyRemoveH3MotionContextLatent,
             # Deciia 本地新增
             DeciiaPassthroughStage,
+            PromptStudio,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,
