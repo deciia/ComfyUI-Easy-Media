@@ -36,9 +36,13 @@ from ..utils import (
     audio_data_uris,
     image_tensor_data_uris,
     LLAMACPP_MODEL,
+    CUSTOM_OPENAI_MODEL,
     MINIMAX_MODEL,
     PROMPT_ENHANCER_MAX_TOKENS,
     PROMPT_ENHANCER_MODELS,
+    PROMPT_ENHANCER_PRESET_NONE,
+    PROMPT_ENHANCER_PRESETS,
+    prompt_enhancer_preset_text,
     PromptEnhancerApiError,
     PromptEnhancerClient,
     prompt_enhancer_video_inputs,
@@ -3626,6 +3630,42 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                         "account status only and does not affect prompt enhancement."
                     ),
                 ),
+                io.Combo.Input(
+                    "preset",
+                    options=list(PROMPT_ENHANCER_PRESETS),
+                    default=PROMPT_ENHANCER_PRESET_NONE,
+                    tooltip=(
+                        "提示词风格预设（与 🤖 AI 全能生成 同一机制），叠加到系统指令之前。"
+                        "只对有系统指令位的第三方/自定义模型生效；H3 官方接口没有系统指令位。"
+                    ),
+                ),
+                io.String.Input(
+                    "endpoint",
+                    default="",
+                    tooltip=(
+                        "自定义 OpenAI 兼容地址，仅在选择「自定义 (OpenAI 兼容)」时使用。"
+                        "例如 https://api.deepseek.com/v1/chat/completions、"
+                        "http://127.0.0.1:11434/v1/chat/completions。"
+                    ),
+                ),
+                io.String.Input(
+                    "api_model_name",
+                    default="",
+                    tooltip=(
+                        "发送给该地址的模型名，仅自定义模型使用。例如 deepseek-chat、"
+                        "qwen-plus、glm-4.5-flash、llama3.2；本地服务可不填 API 密钥。"
+                    ),
+                ),
+                io.Float.Input(
+                    "temperature",
+                    default=-1.0,
+                    min=-1.0,
+                    max=2.0,
+                    step=0.05,
+                    tooltip=(
+                        "OpenAI 兼容厂商的采样温度；-1 表示保持服务商默认（不发送该参数）。"
+                    ),
+                ),
             ],
             outputs=[
                 io.String.Output("PROMPT", tooltip="Enhanced video prompt."),
@@ -3659,6 +3699,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         seed: list[int] | int | None = None,
         enabled: list[bool] | bool | None = None,
         api_account: list[str] | str | None = None,
+        preset: list[str] | str | None = None,
+        endpoint: list[str] | str | None = None,
+        api_model_name: list[str] | str | None = None,
+        temperature: list[float] | float | None = None,
     ) -> io.NodeOutput:
         system_text = str(_unwrap_list_scalar(system_prompt, ""))
         user_text = str(_unwrap_list_scalar(user_prompt, ""))
@@ -3682,6 +3726,28 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         selected_force_offload = model_config.get("force_offload", True)
         selected_ratio_value = model_config.get("ratio", "adaptive")
         selected_return_async = model_config.get("return_async", False)
+        selected_endpoint = str(_unwrap_list_scalar(endpoint, "") or "")
+        selected_api_model_name = str(
+            _unwrap_list_scalar(api_model_name, "") or ""
+        )
+        selected_preset = str(
+            _unwrap_list_scalar(preset, PROMPT_ENHANCER_PRESET_NONE)
+            or PROMPT_ENHANCER_PRESET_NONE
+        )
+        preset_text = prompt_enhancer_preset_text(selected_preset)
+        if preset_text:
+            system_text = f"{preset_text}\n\n{system_text}".strip()
+        selected_temperature: float | None = None
+        temperature_value = _unwrap_list_scalar(temperature, -1.0)
+        if temperature_value is not None:
+            try:
+                parsed_temperature = float(
+                    _unwrap_list_scalar(temperature_value, -1.0)
+                )
+            except (TypeError, ValueError):
+                parsed_temperature = -1.0
+            if parsed_temperature >= 0.0:
+                selected_temperature = parsed_temperature
         progress_total = 100
         process_bar = ProgressBar(progress_total)
         process_bar.update_absolute(0, progress_total)
@@ -3816,6 +3882,9 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             client = PromptEnhancerClient(
                 selected_model,
                 selected_api_key,
+                endpoint=selected_endpoint,
+                api_model=selected_api_model_name,
+                temperature=selected_temperature,
             )
             is_minimax = selected_model == MINIMAX_MODEL
             image_urls = image_tensor_data_uris(
@@ -3990,6 +4059,42 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
                         "account status only and does not affect prompt enhancement."
                     ),
                 ),
+                io.Combo.Input(
+                    "preset",
+                    options=list(PROMPT_ENHANCER_PRESETS),
+                    default=PROMPT_ENHANCER_PRESET_NONE,
+                    tooltip=(
+                        "提示词风格预设（与 🤖 AI 全能生成 同一机制），叠加到系统指令之前。"
+                        "只对有系统指令位的第三方/自定义模型生效；H3 官方接口没有系统指令位。"
+                    ),
+                ),
+                io.String.Input(
+                    "endpoint",
+                    default="",
+                    tooltip=(
+                        "自定义 OpenAI 兼容地址，仅在选择「自定义 (OpenAI 兼容)」时使用。"
+                        "例如 https://api.deepseek.com/v1/chat/completions、"
+                        "http://127.0.0.1:11434/v1/chat/completions。"
+                    ),
+                ),
+                io.String.Input(
+                    "api_model_name",
+                    default="",
+                    tooltip=(
+                        "发送给该地址的模型名，仅自定义模型使用。例如 deepseek-chat、"
+                        "qwen-plus、glm-4.5-flash、llama3.2；本地服务可不填 API 密钥。"
+                    ),
+                ),
+                io.Float.Input(
+                    "temperature",
+                    default=-1.0,
+                    min=-1.0,
+                    max=2.0,
+                    step=0.05,
+                    tooltip=(
+                        "OpenAI 兼容厂商的采样温度；-1 表示保持服务商默认（不发送该参数）。"
+                    ),
+                ),
             ],
             outputs=[
                 TYPE_TRACKS_INFO.Output(
@@ -4015,6 +4120,10 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
         seed: list[int] | int | None = None,
         enabled: list[bool] | bool | None = None,
         api_account: list[str] | str | None = None,
+        preset: list[str] | str | None = None,
+        endpoint: list[str] | str | None = None,
+        api_model_name: list[str] | str | None = None,
+        temperature: list[float] | float | None = None,
     ) -> io.NodeOutput:
         info = _parse_track_data(_unwrap_list_scalar(tracks_info, {}))
         tasks = _multitrack_task_segments(info)
@@ -4095,6 +4204,10 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
                 seed=[selected_seed],
                 enabled=[True],
                 api_account=api_account,
+                preset=preset,
+                endpoint=endpoint,
+                api_model_name=api_model_name,
+                temperature=temperature,
             )
             enhanced_prompts.append(result[0])
             if result.expand:

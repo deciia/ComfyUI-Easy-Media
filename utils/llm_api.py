@@ -8,6 +8,7 @@ import io as bytes_io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,14 +34,18 @@ ZHIPU_MODEL = "glm-5v-turbo (智谱)"
 RUNNINGHUB_DOUBAO_MODEL = "bytedance/doubao-seed-2.0-pro (RunningHub)"
 RUNNINGHUB_GLM_MODEL = "glm-5v-turbo (RunningHub)"
 LLAMACPP_MODEL = "llama.cpp (本地)"
+CUSTOM_OPENAI_MODEL = "自定义 (OpenAI 兼容)"
 
 __all__ = [
     "ApiModelConfig",
+    "CUSTOM_OPENAI_MODEL",
     "LLAMACPP_MODEL",
     "MINIMAX_MODEL",
     "MODEL_CONFIGS",
     "PROMPT_ENHANCER_MAX_TOKENS",
     "PROMPT_ENHANCER_MODELS",
+    "PROMPT_ENHANCER_PRESET_NONE",
+    "PROMPT_ENHANCER_PRESETS",
     "PromptEnhancerApiError",
     "PromptEnhancerClient",
     "PromptEnhancerResult",
@@ -53,6 +58,7 @@ __all__ = [
     "load_api_key_from_config",
     "load_config_value",
     "minimax_length_to_seconds",
+    "prompt_enhancer_preset_text",
     "prompt_enhancer_supports_video_url",
     "prompt_enhancer_video_inputs",
     "strip_text_code_fence",
@@ -72,6 +78,7 @@ PROMPT_ENHANCER_MODELS = [
     RUNNINGHUB_DOUBAO_MODEL,
     RUNNINGHUB_GLM_MODEL,
     LLAMACPP_MODEL,
+    CUSTOM_OPENAI_MODEL,
 ]
 
 
@@ -145,6 +152,19 @@ MODEL_CONFIGS = {
         max_video_duration=15,
         supports_seed=False,
     ),
+    CUSTOM_OPENAI_MODEL: ApiModelConfig(
+        provider="openai",
+        api_model="",
+        endpoint="",
+        api_key_name="CUSTOM_API_KEY",
+        legacy_env_names=("OPENAI_API_KEY",),
+        supports_video_url=True,
+        # 任意第三方/本地端点最稳的路径是抽帧成 image_url，而不是传原生视频。
+        supports_video_data_uri=False,
+        supports_seed=False,
+        default_max_tokens=4096,
+        max_tokens_limit=131072,
+    ),
 }
 
 PROMPT_ENHANCER_MAX_TOKENS = {
@@ -153,6 +173,38 @@ PROMPT_ENHANCER_MAX_TOKENS = {
     if config.default_max_tokens is not None and config.max_tokens_limit is not None
 }
 PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL] = (512, 768)
+
+# 提示词预设：参考 🤖 AI 全能生成 的「提示词预设」机制，叠加到系统指令之前。
+# 只作用于有 system 角色的第三方/自定义模型；H3 官方接口没有系统指令位，预设对它无效。
+PROMPT_ENHANCER_PRESET_NONE = "无 (使用自定义)"
+
+PROMPT_ENHANCER_PRESETS: dict[str, str] = {
+    PROMPT_ENHANCER_PRESET_NONE: "",
+    "视频风格 - 简洁": (
+        "用一到两句简洁中文描述主体、动作与场景，只写画面里能看到的内容，不加解释与评价。"
+    ),
+    "视频风格 - 详细": (
+        "写一段连贯的中文提示词，按「主体与外观 → 动作过程 → 环境 → 光线与氛围 → 镜头」组织，"
+        "保留原提示词里已有的时间点、镜头切换与台词信息。"
+    ),
+    "视频风格 - 极致详细": (
+        "写一段极致详细的中文提示词：逐项展开主体外观与材质、动作细节与节奏、环境层次、光线质感、"
+        "色彩与氛围；原提示词中的时间点、镜头切换、台词与音效线索一条都不能丢。"
+    ),
+    "视频风格 - 电影感": (
+        "以电影摄影的方式改写：明确景别、运镜、焦段感、光线方向与色调，营造情绪与视觉冲击力，"
+        "输出自然语言段落而不是标签堆叠。"
+    ),
+    "视频风格 - 标签式": (
+        "输出简洁的逗号分隔标签列表，覆盖主体、外观、动作、环境、光线、构图与风格；标签不重复，"
+        "不写抽象概念、解释或营销词。"
+    ),
+}
+
+
+def prompt_enhancer_preset_text(name: str) -> str:
+    """Return the preset instruction text; empty string for the pass-through preset."""
+    return PROMPT_ENHANCER_PRESETS.get(str(name or "").strip(), "")
 
 
 def _openai_compatible_seed(seed: int) -> int:
@@ -612,6 +664,37 @@ def _extract_error_message(payload: object) -> str:
     return str(payload.get("message") or payload.get("msg") or error or payload)
 
 
+_OPENAI_CHAT_PATH_RE = re.compile(r"/(chat/)?completions$|/responses$", re.IGNORECASE)
+
+
+def normalize_openai_endpoint(url: str) -> str:
+    """把「接口地址」补全（OpenAI 兼容服务两种写法都接受）。
+
+    已填全路径的（``.../v1/chat/completions``）原样返回，不会二次拼接；
+    只填基址时按 OpenAI 惯例补全：
+
+    ============================================  ==========================================
+    填写的值                                        实际请求地址
+    ============================================  ==========================================
+    ``https://api.deepseek.com``                  ``https://api.deepseek.com/v1/chat/completions``
+    ``https://api.deepseek.com/v1``               ``https://api.deepseek.com/v1/chat/completions``
+    ``https://open.bigmodel.cn/api/paas/v4``      ``https://open.bigmodel.cn/api/paas/v4/chat/completions``
+    ``https://api.deepseek.com/v1/chat/completions``  原样
+    ============================================  ==========================================
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+    if not re.match(r"^https?://", raw, re.IGNORECASE):
+        raw = "https://" + raw.lstrip("/")
+    raw = raw.rstrip("/")
+    if _OPENAI_CHAT_PATH_RE.search(raw):
+        return raw
+    if re.search(r"/v\d+[a-z]*$", raw, re.IGNORECASE):
+        return raw + "/chat/completions"
+    return raw + "/v1/chat/completions"
+
+
 class PromptEnhancerClient:
     """Provider-neutral prompt enhancer with MiniMax async-task support."""
 
@@ -620,6 +703,9 @@ class PromptEnhancerClient:
         model: str,
         api_key: str,
         *,
+        endpoint: str = "",
+        api_model: str = "",
+        temperature: float | None = None,
         timeout: float = 300.0,
         opener: Callable[..., object] = urllib.request.urlopen,
         sleeper: Callable[[float], None] = time.sleep,
@@ -632,6 +718,21 @@ class PromptEnhancerClient:
             self.config = MODEL_CONFIGS[model]
         except KeyError as exc:
             raise ValueError(f"Unsupported prompt-enhancer model: {model}") from exc
+        self.endpoint = normalize_openai_endpoint((endpoint or "").strip() or self.config.endpoint)
+        self.api_model = (api_model or "").strip() or self.config.api_model
+        self.temperature = float(temperature) if temperature is not None else None
+        if model == CUSTOM_OPENAI_MODEL:
+            if not (endpoint or "").strip():
+                raise ValueError(
+                    "Custom OpenAI-compatible endpoint is required: fill the "
+                    "endpoint option: either a base URL (https://api.deepseek.com) "
+                    "or the full path (https://api.deepseek.com/v1/chat/completions)."
+                )
+            if not (api_model or "").strip():
+                raise ValueError(
+                    "Custom model name is required: fill the api_model_name option, "
+                    "e.g. deepseek-chat."
+                )
         explicit_api_key = (api_key or "").strip()
         config_api_key = (
             load_api_key_from_config(self.config.api_key_name, config_path)
@@ -648,7 +749,8 @@ class PromptEnhancerClient:
                 if environment_api_key:
                     break
         self.api_key = explicit_api_key or config_api_key or environment_api_key
-        if not self.api_key:
+        # A local OpenAI-compatible server (Ollama, LM Studio, vLLM) may not need a key.
+        if not self.api_key and model != CUSTOM_OPENAI_MODEL:
             raise ValueError(
                 "API key is required. Enter apikey or configure "
                 f"{self.config.api_key_name} in config.yaml."
@@ -671,13 +773,18 @@ class PromptEnhancerClient:
             url,
             data=data,
             method=method,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=self._request_headers(),
         )
         return self._execute_request(request)
+
+    def _request_headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     def _execute_request(self, request: urllib.request.Request) -> dict:
         try:
@@ -1007,7 +1114,7 @@ class PromptEnhancerClient:
             "MultiTrack Prompt Enhancer",
             (
                 f"duration={duration}s | ratio={ratio} | "
-                f"endpoint={self.config.endpoint} | model={self.config.api_model} | "
+                f"endpoint={self.endpoint} | model={self.api_model} | "
                 "inputs: "
                 f"system_prompt={system_prompt_count}, user_prompt={user_prompt_count}, "
                 f"images={image_count}, videos={video_count}, audios={audio_count}, "
@@ -1085,7 +1192,7 @@ class PromptEnhancerClient:
                 uploaded_audios,
             )
             payload = {
-                "model": self.config.api_model,
+                "model": self.api_model,
                 "content": content,
                 "duration": min(15, max(4, int(duration))),
                 "ratio": official_ratio,
@@ -1102,7 +1209,7 @@ class PromptEnhancerClient:
                 request_logger=request_logger,
             )
             try:
-                response = self._request_json("POST", self.config.endpoint, payload)
+                response = self._request_json("POST", self.endpoint, payload)
             except PromptEnhancerApiError as exc:
                 self._log_h3_status(request_logger, f"create request failed: {exc}")
                 raise
@@ -1152,7 +1259,7 @@ class PromptEnhancerClient:
             messages.append({"role": "system", "content": system_text})
         messages.append({"role": "user", "content": content})
         payload = {
-            "model": self.config.api_model,
+            "model": self.api_model,
             "messages": messages,
             "stream": False,
         }
@@ -1164,6 +1271,8 @@ class PromptEnhancerClient:
         )
         if requested_max_tokens is not None and token_limit is not None:
             payload["max_tokens"] = min(token_limit, max(1, requested_max_tokens))
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
         self._log_request_info(
             duration=int(duration),
             ratio=ratio,
@@ -1175,21 +1284,41 @@ class PromptEnhancerClient:
             file_count=max(0, int(file_count)),
             request_logger=request_logger,
         )
-        response = self._request_json("POST", self.config.endpoint, payload)
+        response = self._request_json("POST", self.endpoint, payload)
         try:
-            prompt = response["choices"][0]["message"]["content"]
+            message = response["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             raise PromptEnhancerApiError(
                 f"{self.config.provider} API response did not contain generated text."
             ) from exc
+        prompt = message.get("content")
         if isinstance(prompt, list):
             prompt = "".join(
                 str(item.get("text", "")) for item in prompt if isinstance(item, dict)
             )
-        prompt = strip_text_code_fence(str(prompt))
+        prompt = strip_text_code_fence(str(prompt or ""))
         if not prompt:
+            # 推理类模型（deepseek-flash 等）先吐 reasoning_content，
+            # max_tokens 不够时正文还没开始就被截断 —— 把线索一起报出来。
+            choice = (response.get("choices") or [{}])[0] or {}
+            finish = choice.get("finish_reason")
+            reasoning = str(message.get("reasoning_content") or "")
+            usage = response.get("usage") or {}
+            reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+                "reasoning_tokens"
+            )
+            detail = [f"finish_reason={finish}"]
+            if reasoning:
+                detail.append(f"reasoning_content={len(reasoning)} 字符")
+            if reasoning_tokens:
+                detail.append(f"reasoning_tokens={reasoning_tokens}")
+            detail.append(f"max_tokens={payload.get('max_tokens')}")
+            hint = ""
+            if reasoning and finish == "length":
+                hint = "；推理占满了 max_tokens，请调大该通道的 max_tokens"
             raise PromptEnhancerApiError(
-                f"{self.config.provider} API returned an empty prompt."
+                f"{self.config.provider} API returned an empty prompt"
+                f"（{'，'.join(detail)}）{hint}"
             )
         return PromptEnhancerResult(prompt=prompt)
 
