@@ -321,3 +321,22 @@ max_tokens 给小了会出现"正文为空"；自定义通道默认 4096，够�
 2. 本 fork 新增模块（如 `easy_media.nodes.deciiapassthrough`）不在上游测试的桩件表里 → 预注册，并给出 `PASSTHROUGH_CONTEXT_FRAMES=22` 与 `is_passthrough_task` / `passthrough_continuity_mode` 两个函数；**兜底切勿返回类对象**，否则 `inspect.getsourcefile` 会崩
 3. 命令：`cd <ComfyUI 根> && PYTHONPATH=<scratch> python -m pytest custom_nodes/ComfyUI_Deciia_EasyMedia/tests/test_minimax_node.py -k <测试名> -q -p <插件模块名>`
 4. 报 "ERROR at setup ... PromptServer" 属基线断裂，先按第 1 条补齐桩件再判断是不是真失败
+
+## 2026-09-25 收尾：saveVideo 新契约撞上未迁移的生产工作流（生产阻断，已定位）
+
+**症状**：P3a 跑到最后一步报 `ValueError: An IMAGES input is required when input_mode is 'images+audio'`（Node ID 25，`easy saveVideo`）。
+
+**根因**：saveVideo 静态化（`f3004ed`）把「选中模式的媒体输入缺失」从**静默取可用输入**改成**明确报错**；
+而两个生产工作流的该节点仍是 `input_mode='images+audio'` + 只接 `video`（其上游 `easy multitrackProjectVideoCombine` 输出 VIDEO），
+属旧 DynamicCombo 时代遗留的漂移值。上一轮的迁移清单（4 个文件）**漏了这两个真正在用的生产文件**。
+
+**范围（全目录扫描口径）**：`easy saveVideo` 共 5 个 → 3 个模式与接线不一致 =
+`05-生产/P3a-Easy_Project_AllInOnev_v1.json`、`05-生产/P3b-Easy_Project_AllInOnev_v2(竖版).json`、`04-测试/P3a-L4verify-seg1-ref-dual.json`；
+另两个一致（`MiniMaxH3_v1.3.1` 用 `video`；`MinimaxH3_ForLoop_MultiShot` 用 `images+audio` 且 images/audio/fps 全接）。
+
+**处置**：两处 widget `input_mode` → `video`（用户手动改；与同族姊妹工作流一致）。测试副本已改并跑通（`4d05b81a` success，保存节点通过）。
+`output_mode='preview_only'`（成品只落 `temp/`，代码 tooltip 语义）经用户确认保持现状。
+
+**顺带（bd4ebf2 合并的 L4 结果）**：段0 同 seed `181434282070711` 重跑（reference + dual + upscale 1.5 + tiling 2）→
+产品 832×1440 / 243 帧 / 10.125s / aac 32kHz 双声道，与改动前末代 `video_0_6.mp4` 规格全同，体积 2093 KB vs 2079 KB（0.7%）；
+上游新增测试 headless `1 passed`。证据齐备，结论待用户确认。三段合成成品 43.0 MB / 2987 帧 / 124.46s 已交用户。
