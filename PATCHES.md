@@ -340,3 +340,39 @@ max_tokens 给小了会出现"正文为空"；自定义通道默认 4096，够�
 **顺带（bd4ebf2 合并的 L4 结果）**：段0 同 seed `181434282070711` 重跑（reference + dual + upscale 1.5 + tiling 2）→
 产品 832×1440 / 243 帧 / 10.125s / aac 32kHz 双声道，与改动前末代 `video_0_6.mp4` 规格全同，体积 2093 KB vs 2079 KB（0.7%）；
 上游新增测试 headless `1 passed`。证据齐备，结论待用户确认。三段合成成品 43.0 MB / 2987 帧 / 124.46s 已交用户。
+
+## 2026-09-26 同步上游 v1.3.3（4 个提交，零冲突）
+
+| 提交 | 内容 |
+|------|------|
+| 9a7ec4eb5 | passthrough 采样模式（多轨 H3 #111）：新增节点 `easy h3PassthroughVideo` + `utils/video.py::passthrough_video_media` |
+| 88b7d229c | SelfLift 高清阶段可挂独立模型（#112，`modules/selflift/sampling.py`） |
+| f025362e3 | 合并视频时容忍微小 fps 差异（#99，`utils/video.py`） |
+| ed20432dc | 版本号 1.3.3 |
+
+**冲突**：0 个（`nodes/project.py` 双方都改，但改动区域不重叠，自动合并安全）
+
+**语义核对（自动合并过≠对）**：
+1. 上游新局部变量 `is_passthrough` 与本 fork 函数 `is_passthrough_task` **不同名**，无遮蔽
+2. 本 fork 直通钩子 8 处全在（`from .deciiapassthrough import`、`info_with_pass_entries`、`easy deciiaPassthroughStage` 调用等）
+3. `sampling_mode` 选项表 = `single/dual/selflift/passthrough`，无重复项
+
+**⚠️ 两套直通并存（待收敛）**：上游 = 项目级 `sampling_mode=passthrough`；本 fork = 任务段级 `task_mode=passthrough`（P3a/P3b 生产在用）。两套都保留，未互相干扰；是否收敛为一套待定。
+
+**测试证据**：`tests/` 全量 A/B（同一桩件、同一机器跑两遍）
+- 合并后 `190 failed / 718 passed`；合并前 `190 failed / 711 passed`
+- **新增失败 0 个，净增通过 7 个**（上游新增用例：passthrough 2/2 直接过）
+- 那 190 个失败是**桩件基线问题**（上游测试按 `easy_media` 包名导入，而生产模块名是 `custom_nodes.ComfyUI_Deciia_EasyMedia`），与本次合并无关，两侧完全一致
+
+**无头测试正确姿势（原配方修正）**：
+```bash
+cd <ComfyUI 根>
+PYTHONPATH=<scratch>:<scratch>/pkg_link "$PY" -m pytest custom_nodes/ComfyUI_Deciia_EasyMedia/tests -q -p probe_srv_stub -p easy_media
+```
+- `pkg_link/easy_media` = 指向本包的**junction 别名目录**（不复制、不改本包目录）
+- `probe_srv_stub` = 提供宽松 `server.PromptServer` 桩
+- 缺别名目录会出现约 190 个假失败；缺 `-p easy_media` 会在收集期就 `ImportError: attempted relative import beyond top-level package`
+
+**节点核对（离线导入）**：69 个节点类；`easy h3PassthroughVideo` 为本次新增；**无节点消失**。
+
+**备份/回滚**：`D:\workspace\_node_backups\2026-09-26_easymedia_fork_merge\easymedia_fork_all.bundle`（12 MB 全量历史，不含凭据）＋ `HEAD_before.txt`；回滚 = `git reset --hard b7c6493`。
