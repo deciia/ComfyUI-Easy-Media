@@ -18,6 +18,47 @@ from typing import Any, Callable
 import folder_paths
 import torch
 
+
+def passthrough_video_media(
+    videos: list[object] | object,
+    frame_count: int,
+    fps: float,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Read video zero at the project frame rate without changing its timing."""
+    candidates = videos if isinstance(videos, list) else [videos]
+    video = candidates[0] if candidates else None
+    if video is None:
+        raise ValueError("Passthrough requires a video reference at index 0")
+    if frame_count < 1 or not math.isfinite(fps) or fps <= 0:
+        raise ValueError("Passthrough requires a positive timeline length and fps")
+    try:
+        components = video.get_components()
+    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        raise ValueError("Unable to read passthrough video reference") from error
+    images = components.images
+    source_fps = float(components.frame_rate)
+    if not isinstance(images, torch.Tensor) or images.ndim != 4 or images.shape[0] == 0:
+        raise ValueError("Passthrough video has no valid frames")
+    if not math.isfinite(source_fps) or source_fps <= 0:
+        raise ValueError("Passthrough video has an invalid frame rate")
+    if images.shape[0] / source_fps + 1e-6 < frame_count / fps:
+        raise ValueError("Passthrough video must cover the complete task timeline")
+    indices = torch.floor(
+        torch.arange(frame_count, device=images.device) * source_fps / fps
+    ).long().clamp(max=images.shape[0] - 1)
+    output_images = images.index_select(0, indices)
+    audio = components.audio
+    waveform = audio.get("waveform") if isinstance(audio, dict) else None
+    sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
+    if not isinstance(waveform, torch.Tensor) or not isinstance(sample_rate, int) or sample_rate <= 0:
+        sample_rate = 44100
+        waveform = torch.zeros((1, 2, 0), dtype=torch.float32)
+    sample_count = max(1, round(frame_count / fps * sample_rate))
+    waveform = waveform[..., :sample_count]
+    if waveform.shape[-1] < sample_count:
+        waveform = torch.nn.functional.pad(waveform, (0, sample_count - waveform.shape[-1]))
+    return output_images, {"waveform": waveform, "sample_rate": sample_rate}
+
 logger = logging.getLogger(__name__)
 
 FFMPEG_RESIZE_METHODS = frozenset({"stretch", "resize", "pad", "pad (white)", "crop"})
@@ -694,7 +735,12 @@ def validate_merge_compatibility(specs: list[MergeSpec]) -> None:
         for label in labels:
             baseline_val = getattr(baseline, label)
             spec_val = getattr(spec, label)
-            if baseline_val != spec_val:
+            if label == "fps":
+                # Decoders can report the same nominal rate with tiny rounding differences.
+                matches = math.isclose(float(baseline_val), float(spec_val), rel_tol=0, abs_tol=1e-4)
+            else:
+                matches = baseline_val == spec_val
+            if not matches:
                 raise ValueError(
                     f"Video {index} is incompatible: '{label}' mismatch "
                     f"(expected {baseline_val!r}, got {spec_val!r})"
