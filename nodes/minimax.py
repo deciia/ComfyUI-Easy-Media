@@ -52,7 +52,7 @@ from ..utils.minimax import (
     remove_output_files_by_prefix,
 )
 from ..utils.prompt_override import build_minimax_prompt_override_json
-from ..utils.video import passthrough_video_media
+from ..utils.video import stage_passthrough_video_media
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -138,7 +138,7 @@ class EasyMinimaxPromptOverride(io.ComfyNode):
                     default="shot",
                     tooltip=(
                         "Continuity mode per clip. Supported values are shot, "
-                        "context, and context_swap; a single value "
+                        "context, and context_drift (legacy context_swap); a single value "
                         "applies to every "
                         "clip, while comma-separated values like shot,context,context "
                         "assign modes in order and reuse the last value when fewer "
@@ -1222,13 +1222,6 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             segment = manifest["segments"][str(int(segment_index))]
             generation = str(int(segment["active_generation"]))
             generation_data = segment["generations"][generation]
-            if generation_data.get("context_cut") is True:
-                # Deciia 本地新增：直通段 shot 切断 → 返回占位空 latent
-                # 下游 trim/motion_context 会按 0 帧处理, 等效独立开场
-                return io.NodeOutput({
-                    "samples": torch.zeros(1, 16, 1, 60, 34, dtype=torch.float32),
-                    "context_cut": True,
-                })
             if resolution == "low":
                 filename = (
                     generation_data.get("context_latent_low")
@@ -2122,7 +2115,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
 
 
 class EasyH3PassthroughVideo(io.ComfyNode):
-    """Select the first reference video for a complete task timeline."""
+    """Stage the first task video and expose only its continuation suffix."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -2136,16 +2129,42 @@ class EasyH3PassthroughVideo(io.ComfyNode):
                 io.Video.Input("videos"),
                 io.Int.Input("frame_count", min=1),
                 io.Float.Input("fps", min=0.001),
+                io.Int.Input("width", min=1),
+                io.Int.Input("height", min=1),
+                io.String.Input("project_name"),
+                io.Int.Input("segment_index", min=0),
             ],
-            outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
+            outputs=[
+                io.String.Output("video_path"),
+                io.Image.Output("tail_images"),
+                io.Audio.Output("tail_audio"),
+            ],
+            not_idempotent=True,
         )
 
     @classmethod
     def execute(
-        cls, videos: list[object], frame_count: list[int], fps: list[float]
+        cls,
+        videos: list[object],
+        frame_count: list[int],
+        fps: list[float],
+        width: list[int],
+        height: list[int],
+        project_name: list[str],
+        segment_index: list[int],
     ) -> io.NodeOutput:
-        images, audio = passthrough_video_media(videos, int(frame_count[0]), float(fps[0]))
-        return io.NodeOutput(images, audio)
+        video = videos[0] if videos else None
+        safe_name = safe_h3_project_name(project_name[0])
+        staging_path = (
+            Path(folder_paths.get_output_directory()).resolve()
+            / "easy_media" / "projects" / safe_name
+            / f".staging_video_{int(segment_index[0])}.mp4"
+        )
+        video_path, tail_images, tail_audio = stage_passthrough_video_media(
+            video, int(frame_count[0]), float(fps[0]),
+            int(width[0]), int(height[0]), staging_path,
+        )
+        return io.NodeOutput(video_path, tail_images, tail_audio)
 
 
 class EasyH3ContextMediaTrim(io.ComfyNode):
@@ -2418,13 +2437,13 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                     default="new",
                 ),
                 io.Int.Input("segment_index", min=0),
-                io.Latent.Input("context_latent", optional=True),
+                io.Latent.Input("context_latent"),
                 io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path", default="", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.Combo.Input(
                     "continuity_mode",
-                    options=["shot", "context", "context_swap"],
+                    options=["shot", "context", "context_drift", "context_swap"],
                     default="shot",
                 ),
                 io.Combo.Input(
@@ -2455,8 +2474,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         project_name: str,
         project_save: str,
         segment_index: int,
+        context_latent: dict[str, Any],
         tracks_info: dict[str, Any],
-        context_latent: dict[str, Any] | None = None,
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
         seed: int = 0,
@@ -2475,10 +2494,12 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         if sampling_pass not in {"single", "first", "second"}:
             raise ValueError("sampling_pass must be 'single', 'first', or 'second'")
         continuity_mode = str(continuity_mode).lower()
-        if continuity_mode not in {"shot", "context", "context_swap"}:
+        if continuity_mode not in {"shot", "context", "context_drift", "context_swap"}:
             raise ValueError(
-                "continuity_mode must be 'shot', 'context', or 'context_swap'"
+                "continuity_mode must be 'shot', 'context', 'context_drift', or 'context_swap'"
             )
+        if continuity_mode == "context_swap":
+            continuity_mode = "context_drift"
         generation = choose_h3_generation(
             project_dir,
             int(segment_index),
@@ -2523,32 +2544,19 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             project_dir
             / f"context_latent_{int(segment_index)}_{generation}.safetensors"
         )
-        # Deciia 本地新增：直通段 shot 切断 → 占位 latent + manifest 标记
-        context_cut = context_latent is None
-        if context_cut:
-            placeholder_latent = {
-                "samples": torch.zeros(1, 16, 1, 60, 34, dtype=torch.float32),
-                "context_cut": True,
-            }
-            with log_stage_time(
-                "MultiTrack Project",
-                f"{safe_name} / segment {segment_index} / save_latent_placeholder",
-            ):
-                save_h3_latent(placeholder_latent, target_context_latent)
-        else:
-            with log_stage_time(
-                "MultiTrack Project",
-                f"{safe_name} / segment {segment_index} / save_latent_high",
-                synchronize=synchronize_execution_device,
-            ):
-                save_h3_latent(
-                    (
-                        context_latent
-                        if sampling_pass == "first"
-                        else trim_motion_context_latent(context_latent)
-                    ),
-                    target_context_latent,
-                )
+        with log_stage_time(
+            "MultiTrack Project",
+            f"{safe_name} / segment {segment_index} / save_latent_high",
+            synchronize=synchronize_execution_device,
+        ):
+            save_h3_latent(
+                (
+                    context_latent
+                    if sampling_pass == "first"
+                    else trim_motion_context_latent(context_latent)
+                ),
+                target_context_latent,
+            )
 
         target_context_latent_low: Path | None = None
         if context_latent_low is not None:
@@ -2620,8 +2628,13 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
-        if context_cut:
-            generation_manifest["context_cut"] = True
+        task_mode: str | None = None
+        task_segments = manifest.get("task_segments", [])
+        if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):
+            task_segment = task_segments[int(segment_index)]
+            if isinstance(task_segment, dict):
+                task_mode = str(task_segment.get("task_mode", "default"))
+                generation_manifest["task_mode"] = task_mode
         if target_context_latent_low is not None:
             generation_manifest["context_latent_low"] = (
                 target_context_latent_low.name
@@ -2629,13 +2642,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
         segment_manifest["continuity_mode"] = continuity_mode
-        task_segments = manifest.get("task_segments", [])
-        if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):
-            task_segment = task_segments[int(segment_index)]
-            if isinstance(task_segment, dict):
-                segment_manifest["task_mode"] = str(
-                    task_segment.get("task_mode", "default")
-                )
+        if task_mode is not None:
+            segment_manifest["task_mode"] = task_mode
         segment_manifest["updated_at"] = time.time()
         temporary_manifest = project_dir / ".project.json.tmp"
         try:

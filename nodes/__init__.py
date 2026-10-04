@@ -9,5 +9,6 @@ from .minimax import *
 from .project import *
 from .prompt_studio import *
 from .video import *
+from .rtx_vsr import *
 from .subtitle import *
 from .wan import *
