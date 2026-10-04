@@ -9,7 +9,7 @@ import { useT } from '@/lib/i18n'
 import { mediaPathToViewUrl } from '@/lib/media-url'
 import { computeSlotItems, type SlotItem } from '@/lib/timeline-utils'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
-import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSourceType, MultiTrackSegment } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { TrackAudioControls } from './TrackAudioControls'
@@ -39,6 +39,8 @@ interface VideoTrackProps {
   canDeleteTrack: boolean
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
+  /** Deciia P1: patch a segment's content (audio_locked / muted / reference_scope …). */
+  onSegmentContentChange?: (trackId: string, segmentId: string, patch: Partial<MultiTrackSegment['content']>) => void
   onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
@@ -84,6 +86,7 @@ export function VideoTrack({
   canDeleteTrack,
   onDeleteTrack,
   onTrackAudioSettingsChange,
+  onSegmentContentChange,
   onSharedReferenceChange = () => {},
   onResizeSegment,
   onResizeSegmentPreview,
@@ -167,6 +170,18 @@ export function VideoTrack({
             audioLockEnabled={audioLockEnabled}
             onAudioLockToggle={(locked) => {
               onTrackAudioSettingsChange(track.id, { audio_locked: locked })
+            }}
+            segmentAudioLocked={audioLockEnabled && segment.content.audio_locked === true}
+            onSegmentAudioLockToggle={(locked) => {
+              onSegmentContentChange?.(track.id, segment.id, { audio_locked: locked })
+            }}
+            segmentAudioMuted={segment.content.muted === true}
+            onSegmentAudioMuteToggle={(muted) => {
+              onSegmentContentChange?.(track.id, segment.id, { muted })
+            }}
+            referenceScope={segment.content.reference_scope}
+            onReferenceScopeChange={(scope) => {
+              onSegmentContentChange?.(track.id, segment.id, { reference_scope: scope })
             }}
             sharedReference={segment.content.shared_reference === true}
             onSharedReferenceToggle={(enabled) => {

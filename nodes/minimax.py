@@ -2127,6 +2127,7 @@ class EasyH3PassthroughVideo(io.ComfyNode):
             is_input_list=True,
             inputs=[
                 io.Video.Input("videos"),
+                io.Audio.Input("audio", optional=True),
                 io.Int.Input("frame_count", min=1),
                 io.Float.Input("fps", min=0.001),
                 io.Int.Input("width", min=1),
@@ -2146,6 +2147,7 @@ class EasyH3PassthroughVideo(io.ComfyNode):
     def execute(
         cls,
         videos: list[object],
+        audio: list | None,
         frame_count: list[int],
         fps: list[float],
         width: list[int],
@@ -2163,6 +2165,7 @@ class EasyH3PassthroughVideo(io.ComfyNode):
         video_path, tail_images, tail_audio = stage_passthrough_video_media(
             video, int(frame_count[0]), float(fps[0]),
             int(width[0]), int(height[0]), staging_path,
+            audio=audio,
         )
         return io.NodeOutput(video_path, tail_images, tail_audio)
 

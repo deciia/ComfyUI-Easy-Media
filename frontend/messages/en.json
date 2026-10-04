@@ -105,7 +105,7 @@
   },
   "multitrackTaskModes": {
     "default": "TI2V",
-    "passthrough": "Passthrough",
+    "passthrough": "Pass",
     "l2v": "L2V",
     "t2v": "T2V",
     "i2v": "I2V",
@@ -116,8 +116,7 @@
     "rv2v": "RV2V",
     "vi2v": "VI2V",
     "ref": "R2V",
-    "edit": "Edit",
-    "passthrough": "Pass"
+    "edit": "Edit"
   },
   "multitrackSegment": {
     "taskLabel": "Segment {n} {mode}"
@@ -303,7 +302,14 @@
     "timelineSnap": "Timeline snap",
     "hideTimeline": "Hide timeline",
     "showTimeline": "Show timeline",
-    "timelineZoom": "Timeline zoom"
+    "timelineZoom": "Timeline zoom",
+    "muteMedia": "Mute this media",
+    "unmuteMedia": "Unmute",
+    "segmentMuteTooltip": "Mute this segment (video original audio too); lock/reference unaffected.",
+    "referenceScopeToggle": "Reference scope: {scope} (click to toggle)",
+    "referenceScopeWindow": "task window",
+    "referenceScopeFull": "full file",
+    "passthroughReferenceDisabled": "Passthrough: reference disabled (window passes through)"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

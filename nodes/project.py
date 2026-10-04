@@ -1494,6 +1494,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "easy h3PassthroughVideo",
                     id=f"passthrough_video_{task_index}",
                     videos=task_output.out(6),
+                    # Deciia 2026-10-04：直通段音频取任务窗音轨混音（AUDIO 槽），
+                    # 见 docs/DESIGN_track_segment_flags_20261004.md。
+                    audio=task_output.out(5),
                     frame_count=task_duration_frames,
                     fps=fps,
                     width=target_width,
@@ -2167,12 +2170,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "easy saveVideo",
                     id=f"save_video_{task_index}",
                     input_mode="images+audio",
-                    **{
-                        "input_mode.images": output_images,
-                        "input_mode.audio": saved_audio,
-                        "input_mode.fps": fps,
-                        "output_mode": "hide&save",
-                    },
+                    # 本地 video.py 已把 DynamicCombo 换成扁平普通下拉 + 固定输入，
+                    # 因此这里必须传扁平键（原 input_mode.images/audio/fps 点前缀只在
+                    # DynamicCombo 形式下合法，会报 unexpected keyword argument）。
+                    images=output_images,
+                    audio=saved_audio,
+                    fps=fps,
+                    output_mode="hide&save",
                     filename_prefix=(
                         f"easy_media/projects/{safe_project_name}/"
                         f".staging_video_{task_index}"

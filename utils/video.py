@@ -19,6 +19,66 @@ import folder_paths
 import torch
 
 
+def _write_passthrough_audio_override(
+    audio: list | dict | None,
+    duration: float,
+    temporary_paths: list[str],
+) -> str | None:
+    """Mix task-window audio payloads into one stereo 44.1 kHz WAV (Deciia 2026-10-04).
+
+    Design: docs/DESIGN_track_segment_flags_20261004.md — the passthrough segment
+    takes its audio from the task window's audio tracks (per-track merged payloads
+    already apply mute/volume), not only from the passed-through video stream.
+    """
+    if audio is None:
+        return None
+    items = audio if isinstance(audio, list) else [audio]
+    target_rate = 44100
+    total_samples = max(1, round(duration * target_rate))
+    mixed = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        waveform = item.get("waveform")
+        if not isinstance(waveform, torch.Tensor) or waveform.numel() == 0:
+            continue
+        wave = waveform
+        if wave.dim() == 2:
+            wave = wave.unsqueeze(0)
+        if wave.dim() != 3 or wave.shape[0] != 1:
+            continue
+        wave = wave[0].float()
+        rate = int(item.get("sample_rate", target_rate) or target_rate)
+        if rate <= 0:
+            rate = target_rate
+        if rate != target_rate:
+            new_len = max(1, round(wave.shape[-1] * target_rate / rate))
+            wave = torch.nn.functional.interpolate(
+                wave.unsqueeze(0), size=new_len, mode="linear", align_corners=False,
+            ).squeeze(0)
+        if wave.shape[0] == 1:
+            wave = wave.expand(2, -1)
+        elif wave.shape[0] > 2:
+            wave = wave[:2]
+        if mixed is None:
+            mixed = torch.zeros(2, total_samples)
+        count = min(total_samples, wave.shape[-1])
+        mixed[:, :count] += wave[:, :count]
+    if mixed is None:
+        return None
+    fd, path = tempfile.mkstemp(suffix=".wav", dir=folder_paths.get_temp_directory())
+    os.close(fd)
+    temporary_paths.append(path)
+    import wave as _wave_module
+    pcm = (mixed.clamp(-1.0, 1.0).T.contiguous().numpy() * 32767.0).astype("<i2")
+    with _wave_module.open(path, "wb") as handle:
+        handle.setnchannels(2)
+        handle.setsampwidth(2)
+        handle.setframerate(target_rate)
+        handle.writeframes(pcm.tobytes())
+    return path
+
+
 def stage_passthrough_video_media(
     video: object | None,
     frame_count: int,
@@ -28,6 +88,7 @@ def stage_passthrough_video_media(
     output_path: str | Path,
     *,
     context_frames: int = 22,
+    audio: list | dict | None = None,
 ) -> tuple[str, torch.Tensor, dict[str, Any]]:
     """Stage a task video or black fallback with FFmpeg and decode its suffix."""
     from .minimax import H3_VAE_FRAME_CHUNK, H3_VAE_FRAME_REMAINDER, h3_phase_aligned_context_start
@@ -57,6 +118,8 @@ def stage_passthrough_video_media(
     destination.parent.mkdir(parents=True, exist_ok=True)
     duration = frame_count / fps
     try:
+        # Deciia 2026-10-04：任务窗音轨混音（见 _write_passthrough_audio_override）。
+        audio_override_path = _write_passthrough_audio_override(audio, duration, temporary_paths)
         has_audio = False
         command = [ffmpeg, "-y", "-nostdin", "-v", "error"]
         if source_path is not None:
@@ -77,25 +140,55 @@ def stage_passthrough_video_media(
                 "-f", "lavfi", "-i",
                 f"color=c=black:s={width}x{height}:r={fps}:d={duration}",
             ])
-        if not has_audio:
+        if audio_override_path is not None:
+            command.extend(["-i", audio_override_path])
+        elif not has_audio:
             command.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={duration}"])
-        command.extend([
-            "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
-            "-vf", (
-                f"fps=fps={fps}:start_time=0,scale={width}:{height},"
-                f"tpad=stop_mode=clone:stop_duration={duration},"
-                f"trim=end_frame={frame_count},setpts=PTS-STARTPTS"
-            ),
-            "-af", (
-                "aresample=44100:first_pts=0,"
-                f"atrim=duration={duration},asetpts=PTS-STARTPTS,"
-                f"apad=pad_dur={duration},atrim=duration={duration}"
-            ),
+        encode_tail = [
             "-frames:v", str(frame_count), "-t", str(duration),
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
             str(destination),
-        ])
+        ]
+        video_chain = (
+            f"fps=fps={fps}:start_time=0,scale={width}:{height},"
+            f"tpad=stop_mode=clone:stop_duration={duration},"
+            f"trim=end_frame={frame_count},setpts=PTS-STARTPTS"
+        )
+        audio_chain = (
+            "aresample=44100:first_pts=0,"
+            f"atrim=duration={duration},asetpts=PTS-STARTPTS,"
+            f"apad=pad_dur={duration},atrim=duration={duration}"
+        )
+        if audio_override_path is not None and has_audio:
+            # 视频原声与音轨混音都进成片（设计：未静音即合成）。
+            filter_complex = (
+                "[0:v]" + video_chain + "[vout];"
+                "[0:a]aresample=44100:first_pts=0[pa];"
+                "[1:a]aresample=44100:first_pts=0[ba];"
+                "[pa][ba]amix=inputs=2:duration=longest:normalize=0[mixa];"
+                "[mixa]atrim=duration=" + str(duration) + ",asetpts=PTS-STARTPTS,"
+                "apad=pad_dur=" + str(duration) + ",atrim=duration=" + str(duration) + "[aout]"
+            )
+            command.extend([
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "[aout]",
+                *encode_tail,
+            ])
+        elif audio_override_path is not None:
+            command.extend([
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-vf", video_chain,
+                "-af", audio_chain,
+                *encode_tail,
+            ])
+        else:
+            command.extend([
+                "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
+                "-vf", video_chain,
+                "-af", audio_chain,
+                *encode_tail,
+            ])
         try:
             result = subprocess.run(command, capture_output=True, timeout=600)
         except (OSError, subprocess.TimeoutExpired) as error:

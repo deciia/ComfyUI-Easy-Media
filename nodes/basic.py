@@ -3250,8 +3250,19 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     )
                     if track.get("type") == "audio":
                         resolved_audio_segments: list[tuple[dict, dict]] = []
+                        track_level_locked = track.get("audio_locked") is True
                         for local_segment in local_segments:
                             local_content = local_segment.get("content", {})
+                            # Deciia P1: locked-audio collection follows the
+                            # participation rule (track default OR explicit
+                            # segment lock); unlocked segments only feed the
+                            # normal AUDIO slot / references, not locked audio.
+                            if (
+                                locked_audio_track
+                                and not track_level_locked
+                                and local_content.get("audio_locked") is not True
+                            ):
+                                continue
                             resolved_audio = _resolve_multitrack_audio(local_content, None)
                             if resolved_audio is not None:
                                 resolved_audio_segments.append((local_segment, resolved_audio))
@@ -3324,11 +3335,25 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                     track_audio = audio_items[media_index]
                     if isinstance(track_audio, dict):
-                        task_audio = _trim_track_audio(
-                            track_audio,
-                            start_frame,
-                            track_media_duration_frames if is_minimax else duration_frames,
-                            frame_rate,
+                        # Deciia P2: reference_scope='full' keeps the whole audio
+                        # payload as reference instead of the task-window crop.
+                        scope_full = any(
+                            isinstance(segment, dict)
+                            and isinstance(segment.get("content"), dict)
+                            and segment["content"].get("reference_scope") == "full"
+                            and _multitrack_frame_value(segment.get("start_frame")) < end_frame
+                            and _multitrack_frame_value(segment.get("end_frame")) > start_frame
+                            for segment in track.get("segments", [])
+                        )
+                        task_audio = (
+                            {"waveform": track_audio.get("waveform"), "sample_rate": track_audio.get("sample_rate")}
+                            if scope_full
+                            else _trim_track_audio(
+                                track_audio,
+                                start_frame,
+                                task_media_duration_frames if is_minimax else duration_frames,
+                                frame_rate,
+                            )
                         )
                         selected_audio.append(task_audio)
                         if locked_audio_track and locked_audio_priority < 2:

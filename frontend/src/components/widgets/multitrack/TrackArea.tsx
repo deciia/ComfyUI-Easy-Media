@@ -76,6 +76,8 @@ interface TrackAreaProps {
   onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
   onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
+  /** Deciia P1: patch segment content (lock/mute/reference scope). */
+  onSegmentContentChange?: (trackId: string, segmentId: string, patch: Partial<MultiTrackSegment['content']>) => void
   onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
@@ -199,6 +201,7 @@ export function TrackArea({
   onReorderTrack = () => {},
   onTrackVisibilityChange = () => {},
   onTrackAudioSettingsChange,
+  onSegmentContentChange,
   onSharedReferenceChange = () => {},
   onDistributeTaskSegments,
   onCloneTaskSegment,
@@ -600,6 +603,7 @@ export function TrackArea({
               canDeleteTrack={track.id !== firstVideoTrackId}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+              onSegmentContentChange={onSegmentContentChange}
               onSharedReferenceChange={onSharedReferenceChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
@@ -633,6 +637,7 @@ export function TrackArea({
               onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+              onSegmentContentChange={onSegmentContentChange}
               onSharedReferenceChange={onSharedReferenceChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}

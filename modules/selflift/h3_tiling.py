@@ -284,7 +284,14 @@ def _condition_elements(condition, tile_height, tile_width, channels):
     text = condition.get("cross_attn")
     elements = text.shape[-2] * channels * 4 if text is not None else 0
     for keyframe in condition.get("minimax_keyframes") or []:
-        shape = keyframe["latent"].shape
+        # Keyframe entries may be audio-only (only "audio_latent"): the H3 motion
+        # context node emits both video and audio keyframes and tests rely on
+        # .get("latent") being None for the audio ones.  Match the tolerant
+        # handling used by the minimax_refs branch below instead of hard-indexing.
+        latent = keyframe.get("latent")
+        if latent is None:
+            continue
+        shape = latent.shape
         elements += shape[1] * shape[2] * tile_height * tile_width
     for reference in condition.get("minimax_refs") or []:
         latent = reference.get("latent")

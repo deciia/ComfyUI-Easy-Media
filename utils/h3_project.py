@@ -464,14 +464,27 @@ def _h3_locked_track(
     *,
     require_audible_audio: bool = True,
 ) -> dict[str, Any] | None:
+    # Deciia P1 (2026-10-04): a track also qualifies when it carries segment-
+    # level audio locks inside the task window, even if the track-level flag is
+    # off (design: docs/DESIGN_track_segment_flags_20261004.md).
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
     for track in info.get("tracks", []):
-        if (
-            not isinstance(track, dict)
-            or track.get("type") != track_type
-            or track.get("audio_locked") is not True
-        ):
+        if not isinstance(track, dict) or track.get("type") != track_type:
+            continue
+        track_locked = track.get("audio_locked") is True
+        segment_locked_in_window = (
+            not track_locked
+            and any(
+                isinstance(segment, dict)
+                and isinstance(segment.get("content"), dict)
+                and segment["content"].get("audio_locked") is True
+                and _frame_value(segment.get("start_frame")) < end_frame
+                and _frame_value(segment.get("end_frame")) > start_frame
+                for segment in track.get("segments", [])
+            )
+        )
+        if not track_locked and not segment_locked_in_window:
             continue
         if require_audible_audio and not multitrack_audio_lock_is_effective(
             info, track, start_frame, end_frame,
@@ -1525,6 +1538,14 @@ def prepare_multitrack_project_media(
                     content = local_segment.get("content", {})
                     if audio_is_muted(content):
                         continue
+                    # Deciia P1: with the whole track locked every audible segment
+                    # participates (track default). Without the track flag only
+                    # segments explicitly locked participate.
+                    if (
+                        track.get("audio_locked") is not True
+                        and content.get("audio_locked") is not True
+                    ):
+                        continue
                     source_audio = _project_source_audio(
                         track_type, content, audio_items, video_items,
                         video_audio_cache,
@@ -1541,9 +1562,11 @@ def prepare_multitrack_project_media(
                     not audible,
                 )
                 locked_audio_priority = lock_priority
-            if track_type == "audio":
+            if track_type == "audio" and track.get("audio_locked") is True:
                 # The project-level locked audio replaces this track for every
                 # task, so retaining it would add the same audio a second time.
+                # (Deciia P1: segment-level locks keep the track intact so
+                # unlocked segments still feed task reference audio.)
                 track["segments"] = []
                 track.pop("media_index", None)
             continue

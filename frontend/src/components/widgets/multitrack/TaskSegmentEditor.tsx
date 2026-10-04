@@ -1227,6 +1227,11 @@ export function TaskSegmentEditor({
         </div>
 
         <div className="flex items-center gap-2">
+          {format === 'MiniMax' && mode === 'passthrough' && (
+            <span className="text-[9px] text-muted-foreground" data-testid="passthrough-reference-hint">
+              {t('multitrack.passthroughReferenceDisabled')}
+            </span>
+          )}
           {format === 'MiniMax' && mode !== 'passthrough' && (taskIndex > 0 || hasSelectedContinuityTargets) && (
             <Select
               value={continuityMode}

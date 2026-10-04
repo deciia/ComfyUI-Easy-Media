@@ -59,6 +59,10 @@ export interface MultiTrackSegmentContent {
   media_index?: number
   shared_reference?: boolean
   shared_media_index?: number
+  /** Deciia P1: segment-level audio lock (参考/静音/锁定三标志). Track-level audio_locked still overrides when explicitly set on this segment's window. */
+  audio_locked?: boolean
+  /** Deciia P2: reference audio scope — 'window' (task window part only, default) or 'full' (whole file). */
+  reference_scope?: 'window' | 'full'
   /** @deprecated Migrated to shared_reference when legacy workflows are loaded. */
   speaker_reference?: boolean
   subtitle_style?: MultiTrackSubtitleStyle

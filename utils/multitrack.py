@@ -268,11 +268,19 @@ def multitrack_audio_lock_is_effective(
         return False
 
     track_type = track.get("type")
+    # Deciia P1 (2026-10-04): segment-level lock first, track-level lock as the
+    # window default — a segment participates when either the track is locked
+    # (track default) or this specific segment is locked. Muted segments are
+    # still excluded either way.
     return any(
         isinstance(segment, dict)
         and isinstance(segment.get("content"), dict)
         and segment["content"].get("media_type") == track_type
         and not audio_is_muted(segment["content"])
+        and (
+            segment["content"].get("audio_locked") is True
+            or track.get("audio_locked") is True
+        )
         and _multitrack_frame_value(segment.get("start_frame")) < end_frame
         and _multitrack_frame_value(
             segment.get("end_frame"),

@@ -676,6 +676,26 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     commitNormalizedTrackChange({ ...data, tracks })
   }
 
+  // Deciia P1: patch one media segment's content flags (segment-level lock /
+  // mute / reference scope). Track-level audio_locked is unaffected — the
+  // backend resolves "track overrides segment" per design doc.
+  function handleSegmentContentChange(
+    trackId: string,
+    segmentId: string,
+    patch: Partial<MultiTrackSegment['content']>,
+  ) {
+    const tracks = data.tracks.map((track) => {
+      if (track.id !== trackId) return track
+      const segments = track.segments.map((segment) => (
+        segment.id === segmentId
+          ? { ...segment, content: { ...segment.content, ...patch } }
+          : segment
+      ))
+      return { ...track, segments }
+    })
+    commitNormalizedTrackChange({ ...data, tracks })
+  }
+
   function handleTrackAudioSettingsChange(
     trackId: string,
     patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>,
@@ -1541,6 +1561,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onReorderTrack={handleReorderTrack}
                     onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
+            onSegmentContentChange={handleSegmentContentChange}
                     onSharedReferenceChange={handleSharedReferenceChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneSegment}

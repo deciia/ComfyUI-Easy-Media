@@ -1637,7 +1637,11 @@ function normalizeLegacySegment(segment: LegacyMultiTrackSegment): MultiTrackSeg
     muted: segment.content.muted === true,
     volume_db: normalizedVolumeDb(segment.content.volume_db),
   } as MultiTrackSegment['content'] & { audio_locked?: unknown }
-  delete content.audio_locked
+  // Deciia P1 (2026-10-04): keep segment-level audio_locked instead of deleting.
+  // Design: docs/DESIGN_track_segment_flags_20261004.md — the three per-segment
+  // flags (reference/mute/lock) live on the segment content; the track-level
+  // audio_locked stays as a track default that a segment can override.
+  if (content.audio_locked !== true) delete content.audio_locked
   if (content.media_type === 'audio' || content.media_type === 'video') {
     content.shared_reference = content.shared_reference === true || content.speaker_reference === true
   }
@@ -1730,9 +1734,15 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
   const frameRate = Math.max(1, Math.round(raw.frame_rate ?? MULTITRACK_DEFAULT_FRAME_RATE))
   const tracks = raw.tracks.map((track) => {
     const normalizedTrack = omitLegacyVolume(track)
+    // Deciia P1: segment-level locks are no longer promoted to the track; the
+    // legacy detection below is kept only for a one-time log so old workflows
+    // that relied on the promotion are discoverable.
     const legacyAudioLocked = (track.type === 'audio' || track.type === 'video') && track.segments.some((segment) => (
       (segment.content as MultiTrackSegment['content'] & { audio_locked?: unknown }).audio_locked === true
     ))
+    if (legacyAudioLocked) {
+      console.info('[EasyMedia] legacy segment-level audio locks kept on segments (track-level lock not promoted)')
+    }
     const segments = normalizeTrackSegments(track)
     const audioSettings = {
       muted: track.muted === true,
@@ -1758,7 +1768,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
         ...audioSettings,
         type: track.type,
         audio_locked: track.type === 'audio' || track.type === 'video'
-          ? track.audio_locked === true || legacyAudioLocked
+          ? track.audio_locked === true
           : undefined,
         visible: track.type === 'subtitle' ? track.visible !== false : track.visible,
         segments,

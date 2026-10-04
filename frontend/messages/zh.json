@@ -116,8 +116,7 @@
     "vi2v": "图像视频编辑",
     "v2v": "视频生视频",
     "ref": "参考",
-    "edit": "编辑",
-    "passthrough": "直通"
+    "edit": "编辑"
   },
   "multitrackSegment": {
     "taskLabel": "片段 {n} {mode}"
@@ -303,7 +302,14 @@
     "timelineSnap": "时间线磁吸",
     "hideTimeline": "隐藏轨道区域",
     "showTimeline": "显示轨道区域",
-    "timelineZoom": "时间线缩放"
+    "timelineZoom": "时间线缩放",
+    "muteMedia": "静音该素材",
+    "unmuteMedia": "取消静音",
+    "segmentMuteTooltip": "静音这段素材（视频片段的原声也一起静音）；锁定/参考不受影响。",
+    "referenceScopeToggle": "参考取材：{scope}（点击切换）",
+    "referenceScopeWindow": "区间内",
+    "referenceScopeFull": "整段",
+    "passthroughReferenceDisabled": "直通段：参考失效（该区间原样输出）"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

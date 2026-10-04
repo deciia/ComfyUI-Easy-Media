@@ -144,7 +144,12 @@ def register_workflow_routes(routes: web.RouteTableDef, connected: Callable[[str
         if request.content_type != "application/json":
             raise web.HTTPUnsupportedMediaType(text="Content-Type must be application/json")
         origin = request.headers.get("Origin")
-        if origin and origin != f"{request.scheme}://{request.host}":
+        # Compare authority only (host[:port]), not the scheme: behind the
+        # Cloudflare tunnel HTTPS terminates at the edge and nginx speaks plain
+        # HTTP to aiohttp, so a scheme comparison can never match even for
+        # same-site traffic. nginx rewrites Origin to the site's own host
+        # before proxying, so a foreign Origin still cannot reach this check.
+        if origin and origin.split("://", 1)[-1] != request.host:
             raise web.HTTPForbidden(text="Cross-origin workflow control is not allowed")
         try:
             payload = await request.json()

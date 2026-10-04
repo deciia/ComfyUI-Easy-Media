@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Lock, Share2, Unlock } from 'lucide-react'
+import { Lock, Share2, Unlock, VolumeX, Volume2} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -63,6 +63,15 @@ interface MultiTrackSegmentBlockProps {
   audioLocked?: boolean
   audioLockEnabled?: boolean
   onAudioLockToggle?: (locked: boolean) => void
+  /** Deciia P1: segment-level audio lock state (track-level lock overrides). */
+  segmentAudioLocked?: boolean
+  onSegmentAudioLockToggle?: (locked: boolean) => void
+  /** Deciia P1: segment-level mute state (mutes this media incl. video original audio). */
+  segmentAudioMuted?: boolean
+  onSegmentAudioMuteToggle?: (muted: boolean) => void
+  /** Deciia P2: reference audio scope for generation segments. */
+  referenceScope?: 'window' | 'full'
+  onReferenceScopeChange?: (scope: 'window' | 'full') => void
   sharedReference?: boolean
   onSharedReferenceToggle?: (enabled: boolean) => void
 }
@@ -107,6 +116,12 @@ export function MultiTrackSegmentBlock({
   audioLocked = false,
   audioLockEnabled = false,
   onAudioLockToggle,
+  segmentAudioLocked = false,
+  onSegmentAudioLockToggle,
+  segmentAudioMuted = false,
+  onSegmentAudioMuteToggle,
+  referenceScope = 'window',
+  onReferenceScopeChange,
   sharedReference = false,
   onSharedReferenceToggle,
 }: Readonly<MultiTrackSegmentBlockProps>) {
@@ -522,7 +537,10 @@ export function MultiTrackSegmentBlock({
             className="absolute right-0 top-0 h-full w-0.5 cursor-ew-resize"
             style={{ background: isResizing || selected ? borderColor : 'transparent' }}
           />
-          {trackType === 'audio' || trackType === 'video' ? (
+          {(trackType === 'audio' || trackType === 'video') ? (
+          // Deciia: vertical 12px flag rail pinned to the segment's right edge —
+          // keeps 参考/静音/锁定 in ~14px of horizontal space at any zoom.
+          <div className="absolute right-0.5 top-3 z-20 flex flex-col items-center gap-px">
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -533,7 +551,7 @@ export function MultiTrackSegmentBlock({
                   data-testid={`${trackType}-shared-reference`}
                   aria-label={sharedReference ? t('multitrack.disableSharedReference') : t('multitrack.enableSharedReference')}
                   aria-pressed={sharedReference}
-                  className={`absolute ${audioLockEnabled ? 'right-8' : 'right-2'} top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${sharedReference ? 'text-highlight' : 'text-muted-foreground'}`}
+                  className={`h-3 w-3 cursor-pointer rounded-sm bg-background/70 p-0 opacity-80 [&_svg]:!size-2 ${sharedReference ? 'text-highlight opacity-100' : 'text-muted-foreground'} hover:opacity-100`}
                   onMouseDown={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
@@ -552,45 +570,84 @@ export function MultiTrackSegmentBlock({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : null}
-          {(trackType === 'audio' || trackType === 'video') && audioLockEnabled ? (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant={audioLocked ? 'secondary' : 'ghost'}
-                    data-testid={trackType === 'audio' ? 'audio-segment-lock' : 'video-segment-audio-lock'}
-                    aria-label={audioLocked ? t('multitrack.unlockAudio') : t('multitrack.lockAudio')}
-                    aria-pressed={audioLocked}
-                    className={`absolute right-2 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${audioLocked ? 'text-highlight' : 'text-muted-foreground'}`}
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      onAudioLockToggle?.(!audioLocked)
-                    }}
-                  >
-                    {audioLocked ? <Lock/> : <Unlock/>}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-72">
-                  {t(
-                    trackType === 'video'
-                      ? 'multitrack.videoAudioLockTooltip'
-                      : 'multitrack.audioLockTooltip',
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </>
-          ) : null}
+            {audioLockEnabled ? (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={segmentAudioMuted ? 'secondary' : 'ghost'}
+                      data-testid={trackType === 'audio' ? 'audio-segment-mute' : 'video-segment-audio-mute'}
+                      aria-label={segmentAudioMuted ? t('multitrack.unmuteMedia') : t('multitrack.muteMedia')}
+                      aria-pressed={segmentAudioMuted}
+                      className={`h-3 w-3 cursor-pointer rounded-sm bg-background/70 p-0 opacity-80 [&_svg]:!size-2 ${segmentAudioMuted ? 'text-highlight opacity-100' : 'text-muted-foreground'} hover:opacity-100`}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onSegmentAudioMuteToggle?.(!segmentAudioMuted)
+                      }}
+                    >
+                      {segmentAudioMuted ? <VolumeX/> : <Volume2/>}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-72">
+                    {t('multitrack.segmentMuteTooltip')}
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant={segmentAudioLocked || audioLocked ? 'secondary' : 'ghost'}
+                      data-testid={trackType === 'audio' ? 'audio-segment-lock' : 'video-segment-audio-lock'}
+                      aria-label={(segmentAudioLocked || audioLocked) ? t('multitrack.unlockAudio') : t('multitrack.lockAudio')}
+                      aria-pressed={Boolean(segmentAudioLocked || audioLocked)}
+                      className={`h-3 w-3 cursor-pointer rounded-sm bg-background/70 p-0 opacity-80 [&_svg]:!size-2 ${(segmentAudioLocked || audioLocked) ? 'text-highlight opacity-100' : 'text-muted-foreground'} hover:opacity-100`}
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        if (audioLocked) {
+                          onAudioLockToggle?.(false)
+                          return
+                        }
+                        onSegmentAudioLockToggle?.(!segmentAudioLocked)
+                      }}
+                    >
+                      {segmentAudioLocked || audioLocked ? <Lock/> : <Unlock/>}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-72">
+                    {t(
+                      trackType === 'video'
+                        ? 'multitrack.videoAudioLockTooltip'
+                        : 'multitrack.audioLockTooltip',
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        {trackType === 'audio' && onReferenceScopeChange ? (
+          <>
+            <ContextMenuItem onClick={() => onReferenceScopeChange(referenceScope === 'full' ? 'window' : 'full')}>
+              {t('multitrack.referenceScopeToggle', { scope: referenceScope === 'full' ? t('multitrack.referenceScopeWindow') : t('multitrack.referenceScopeFull') })}
+            </ContextMenuItem>
+          </>
+        ) : null}
         {trackType === 'video' && onSmartSplit ? (
           <ContextMenuItem onClick={() => onSmartSplit(segment.id)}>
             {t('multitrack.smartSplit')}
