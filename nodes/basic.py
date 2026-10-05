@@ -3147,7 +3147,19 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 if not isinstance(track, dict):
                     continue
                 media_index = _track_output_index(track)
-                shared_segment = _shared_reference_segment(track) if not output_full_timeline else None
+                # Deciia fix (2026-10-04): shared reference audio is a generation-
+                # time reference — it must not leak into passthrough windows,
+                # whose out(5) now feeds the passthrough mixdown (design doc).
+                is_passthrough_task = (
+                    task_mode == "passthrough"
+                    if (task_mode := content.get("task_mode") if isinstance(content, dict) else None) is not None
+                    else False
+                )
+                shared_segment = (
+                    _shared_reference_segment(track)
+                    if not output_full_timeline and not is_passthrough_task
+                    else None
+                )
                 if shared_segment is not None:
                     shared_content = shared_segment.get("content", {})
                     if track.get("type") == "audio":
@@ -3335,6 +3347,20 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                     track_audio = audio_items[media_index]
                     if isinstance(track_audio, dict):
+                        # Deciia fix (2026-10-04): for a passthrough window, only
+                        # audio segments inside the window that are NOT reference
+                        # audio participate; the track-level media_index may point
+                        # at the first segment's file (e.g. a reference wav placed
+                        # before the locked MP3), which would leak the wrong file.
+                        if is_passthrough_task:
+                            window_segments = multitrack_segments_in_window(track, start_frame, end_frame)
+                            if not any(
+                                isinstance(seg, dict)
+                                and isinstance(seg.get("content"), dict)
+                                and not multitrack_is_shared_reference(seg["content"])
+                                for seg in window_segments
+                            ):
+                                continue
                         # Deciia P2: reference_scope='full' keeps the whole audio
                         # payload as reference instead of the task-window crop.
                         scope_full = any(
