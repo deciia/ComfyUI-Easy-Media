@@ -5,6 +5,8 @@ export interface ProjectVideoFile {
   file_name: string
   media_revision?: string
   source_frame_count: number
+  width?: number
+  height?: number
   continuity_mode?: ProjectContinuityMode
 }
 
@@ -22,6 +24,14 @@ export interface ProjectClip {
   video_files?: ProjectVideoFile[]
 }
 
+export interface ProjectGenSettings {
+  base_width: number
+  base_height: number
+  upscale_by: number
+  second_pass: boolean
+  hyper_vae: boolean
+}
+
 export interface ProjectData {
   project_name: string
   width: number
@@ -29,6 +39,7 @@ export interface ProjectData {
   frame_rate: number
   clips: ProjectClip[]
   auto_combine: boolean
+  gen_settings?: ProjectGenSettings | null
   updated_at?: number
 }
 

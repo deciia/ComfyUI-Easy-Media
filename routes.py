@@ -40,6 +40,7 @@ from .utils.llm_api import load_api_key_from_config
 from .utils.h3_project import (
     delete_h3_project,
     delete_h3_project_video,
+    inspect_h3_canvas,
     load_h3_project_data,
     safe_h3_project_name,
     select_h3_project_video,
@@ -97,6 +98,22 @@ async def handle_h3_project(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to load H3 project: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/project/canvas_inspect")
+async def handle_h3_project_canvas_inspect(request: web.Request) -> web.Response:
+    """Detect per-segment resolution mismatches for the combine widget warning.
+
+    2026-10-05：供「多轨项目视频合并」前端在运行前预警——各段分辨率不一致时
+    节点底部显示明细与画布方案，由用户决策后再合成。
+    """
+    project_name = request.rel_url.query.get("project_name", "")
+    try:
+        report = inspect_h3_canvas(project_name)
+        return web.json_response(report or {"ok": True})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to inspect canvas: {error}"}, status=500)
 
 
 @PromptServer.instance.routes.get("/easy-media/projects")

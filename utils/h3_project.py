@@ -689,6 +689,10 @@ def initialize_h3_project(
             "task_segments": compact_h3_task_segments(info),
         }
     )
+    # 2026-10-05：生成设置快照（base/upscale/hyper_vae），供前端推算参数
+    # 变更后的即将生成分辨率；旧 manifest 无此字段时保持缺失（前端回落）。
+    if isinstance(info.get("gen_settings"), dict):
+        manifest["gen_settings"] = info["gen_settings"]
     manifest.pop("tracks_info", None)
     manifest.pop("last_render", None)
     if not isinstance(manifest.get("segments"), dict):
@@ -1163,6 +1167,10 @@ def _h3_project_data(
                 "file_name": candidate_source.name,
                 "media_revision": str(candidate_source.stat().st_mtime_ns),
                 "source_frame_count": candidate_frame_count,
+                # 2026-10-05：附带段文件实际分辨率（ffprobe 顺带取得，无额外开销），
+                # 供「多轨项目视频合并」前端在运行前渲染画布不统一预警。
+                "width": media_info.get("width"),
+                "height": media_info.get("height"),
                 "continuity_mode": _h3_continuity_mode(candidate.get(
                     "continuity_mode",
                     segment.get("continuity_mode", "shot"),
@@ -1206,12 +1214,15 @@ def _h3_project_data(
             "video_files": video_files,
         })
 
+    gen_settings = manifest.get("gen_settings")
     return {
         "project_name": safe_name,
         "width": int(manifest.get("width", 0) or 0),
         "height": int(manifest.get("height", 0) or 0),
         "frame_rate": float(manifest.get("fps", 24) or 24),
         "clips": clips,
+        # 2026-10-05：上次生成的设置快照（旧项目可能缺失）。
+        "gen_settings": gen_settings if isinstance(gen_settings, dict) else None,
         "updated_at": max(
             float(manifest.get("updated_at", 0) or 0),
             max(
@@ -1222,7 +1233,90 @@ def _h3_project_data(
     }
 
 
-def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Path:
+def inspect_h3_canvas(
+    project_name: Any,
+    project_data: Any = None,
+) -> dict[str, Any] | None:
+    """Detect resolution mismatches across the active H3 project segments.
+
+    Returns None when every active segment shares one resolution (or the project
+    cannot be inspected); otherwise returns a dict describing the mismatch:
+    {"resolutions": {(w, h): [clip indexes]}, "manifest": (w, h),
+     "canvas_hint": (w, h)  # largest segment, the recommended unified canvas}.
+    2026-10-05：供「多轨项目视频合并」在 VALIDATE_INPUTS 阶段预警，
+    用户在节点底部看到明细后选择画布方案再入队。
+    """
+    from .video import ffprobe_info
+
+    safe_name = safe_h3_project_name(project_name)
+    try:
+        fresh_data = load_h3_project_data(safe_name)
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    requested = project_data
+    if isinstance(requested, str):
+        try:
+            requested = json.loads(requested)
+        except json.JSONDecodeError:
+            requested = None
+    requested_clips = (
+        requested.get("clips") if isinstance(requested, dict) else None
+    )
+    if not isinstance(requested_clips, list) or not requested_clips:
+        requested_clips = fresh_data.get("clips", [])
+    requested_indices = set()
+    for clip in requested_clips:
+        if isinstance(clip, dict):
+            try:
+                requested_indices.add(int(clip.get("index")))
+            except (TypeError, ValueError, OverflowError):
+                continue
+
+    output_dir = Path(folder_paths.get_output_directory()).resolve()
+    resolutions: dict[tuple[int, int], list[int]] = {}
+    manifest_canvas = (
+        int(fresh_data.get("width", 0) or 0),
+        int(fresh_data.get("height", 0) or 0),
+    )
+    for clip in fresh_data.get("clips", []):
+        if not isinstance(clip, dict) or clip.get("enabled") is False:
+            continue
+        try:
+            index = int(clip.get("index"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if requested_indices and index not in requested_indices:
+            continue
+        file_path = str(clip.get("file_path", ""))
+        if not file_path:
+            continue
+        source_path = output_dir / file_path
+        if not source_path.is_file():
+            continue
+        probe = ffprobe_info(str(source_path)) or {}
+        try:
+            width = int(probe.get("width", 0) or 0)
+            height = int(probe.get("height", 0) or 0)
+        except (TypeError, ValueError):
+            width = height = 0
+        if width <= 0 or height <= 0:
+            continue
+        resolutions.setdefault((width, height), []).append(index)
+    if len(resolutions) <= 1:
+        return None
+    canvas_hint = max(resolutions, key=lambda res: res[0] * res[1])
+    return {
+        # tuple 键转 "w,h" 字符串以兼容 JSON 序列化。
+        "resolutions": {f"{w},{h}": indexes for (w, h), indexes in resolutions.items()},
+        "manifest": manifest_canvas,
+        "canvas_hint": canvas_hint,
+    }
+
+
+def compose_h3_project_video(
+    project_name: Any,
+    project_data: Any = None,
+) -> Path:
     """Compose the selected H3 clips into a temporary video for downstream nodes."""
     from .video import merge_video_track_with_ffmpeg
 
@@ -1266,6 +1360,7 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
         ]
 
     timeline_segments: list[dict[str, Any]] = []
+    segment_resolutions: set[tuple[int, int]] = set()
     cursor = 0
     for clip in requested_clips:
         if not isinstance(clip, dict) or clip.get("enabled") is False:
@@ -1321,6 +1416,15 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
             raise ValueError(f"H3 project segment {index} has invalid trim frames") from error
         duration = source_end - source_start
         source_path = output_dir / selected_file["file_path"]
+        # 2026-10-05：段间分辨率可能不一致（HyperVAE 2× 段 / passthrough 透传
+        # 素材段 / 旧版生成的段）。探测每段实际尺寸，判定是否需要统一缩放。
+        segment_probe = ffprobe_info(str(source_path)) or {}
+        try:
+            segment_width = int(segment_probe.get("width", 0) or 0)
+            segment_height = int(segment_probe.get("height", 0) or 0)
+        except (TypeError, ValueError):
+            segment_width = segment_height = 0
+        segment_resolutions.add((segment_width, segment_height))
         timeline_segments.append({
             "source": str(source_path),
             "start_frame": cursor,
@@ -1348,12 +1452,20 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
     if width <= 0 or height <= 0:
         raise ValueError("H3 project width and height must be greater than zero")
 
+    # 2026-10-05（定稿）：画布固定 = 即将生成分辨率（manifest 画布，采样基准×
+    # 二采放大×超分倍率，HyperVAE 接入时已随段文件 ×2 写入）。各段分辨率不一致
+    # 不再阻断——前端「多轨项目视频合并」打开时已预警并展示各段尺寸，由用户
+    # 决定是否旁路超分或更换分段；合成时统一缩放到画布（保比例裁切，不拉伸）。
+    known = sorted(res for res in segment_resolutions if res[0] > 0 and res[1] > 0)
+    resize_method = "crop" if len(known) > 1 else None
+
     temporary = merge_video_track_with_ffmpeg(
         timeline_segments,
         cursor,
         frame_rate,
         width,
         height,
+        resize_method=resize_method,
     )
     if temporary is None:
         raise RuntimeError("FFmpeg could not compose the H3 project video")

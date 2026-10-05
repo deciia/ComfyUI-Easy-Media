@@ -386,8 +386,8 @@ def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     # Keep workflows saved with the original mode name loadable.
     if sampling_mode == "dual_selflift":
         sampling_mode = "selflift"
-    if sampling_mode not in {"single", "dual", "selflift", "passthrough"}:
-        raise ValueError("sampling_mode must be 'single', 'dual', 'selflift', or 'passthrough'")
+    if sampling_mode not in {"single", "dual", "dual_t8", "selflift", "passthrough"}:
+        raise ValueError("sampling_mode must be 'single', 'dual', 'dual_t8', 'selflift', or 'passthrough'")
     return sampling_mode, config
 
 
@@ -638,7 +638,8 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=0.001, optional=True),
                 io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
                 io.String.Input("sampling_plan", default="light", optional=True),
-                io.Combo.Input("sampling_mode", options=["single", "dual", "selflift", "passthrough"], default="single", optional=True),
+                io.Combo.Input("sampling_mode", options=["single", "dual", "dual_t8", "selflift", "passthrough"], default="single", optional=True,
+                    tooltip="dual_t8: LBH双钟双采(T8 fork)。需要双钟调度+学习放大+Reconcile+DetailMixer时使用; 不接LoRA/滑条照常工作。"),
                 io.Sampler.Input("sampler", optional=True, raw_link=True),
                 io.Sigmas.Input("sigmas", optional=True, raw_link=True),
                 io.Sampler.Input("sampler_2nd", optional=True, raw_link=True),
@@ -679,6 +680,8 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
         sigmas: Any | None = None,
         sampler_2nd: Any | None = None,
         sigmas_2nd: Any | None = None,
+        semantic_bridge: Any | None = None,
+        output_vae: Any | None = None,
         run_second_pass: bool = False,
         has_context_second_pass: bool = False,
         turbo_hint: bool = False,
@@ -904,6 +907,20 @@ class EasyMultiTrackProject(io.ComfyNode):
                 io.Sigmas.Input("sigmas_2nd", optional=True, raw_link=True, lazy=True, tooltip=(
                     "Optional second-pass sigmas. "
                 )),
+                io.Custom(io_type="T8_SEMANTIC_BRIDGE").Input(
+                    "semantic_bridge", optional=True, raw_link=True, lazy=True,
+                    tooltip=(
+                        "Optional H3 Semantic Bridge (T8 fork): 连接 easy deciiaH3SemanticBridgeConfig 输出。"
+                        "不接或输入为空时完全不启用（条件原样透传）。应用于一采与二采的 positive 条件。"
+                    ),
+                ),
+                io.Vae.Input(
+                    "output_vae", optional=True, raw_link=True, lazy=True,
+                    tooltip=(
+                        "Optional final-decode VAE override (e.g. easy deciiaH3HyperVAE2xLoader 2× VAE)."
+                        "仅替换最终成片像素解码；编码/一采预览/上下文重编码仍用主 VAE。不接=不启用。"
+                    ),
+                ),
                 io.String.Input("project_name", default=""),
                 io.Combo.Input(
                     "project_save",
@@ -949,6 +966,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     options=[
                         io.DynamicCombo.Option("single", []),
                         io.DynamicCombo.Option("dual", []),
+                        io.DynamicCombo.Option("dual_t8", []),
                         io.DynamicCombo.Option(
                             "selflift",
                             [
@@ -1093,7 +1111,8 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
-        has_second_pass = sampling_mode == "dual"
+        is_dual_t8 = sampling_mode == "dual_t8"
+        has_second_pass = sampling_mode in ("dual", "dual_t8")
         transition_ratio = 0.6
         lowres_scale = 0.6
         tiling_enabled, tile_count = _h3_tiling_config(kwargs.get("enabled_tiling"))
@@ -1127,7 +1146,10 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         second_model = model
         second_model_loader = None
-        if run_second_pass or is_selflift:
+        if run_second_pass or is_selflift or is_dual_t8:
+            # 2026-10-05：dual_t8 也解析 model_loader_2nd —— 接了就用它作二采模型
+            # （DetailMixer 的 model 入参），不接回落一采模型（P8a 兼容行为）。
+            # 普通dual/selflift 原逻辑不变。
             configured_second_loader = sampling_config.get("model_loader_2nd")
             second_model_loader = _raw_project_input(
                 configured_second_loader if configured_second_loader is not None
@@ -1137,6 +1159,29 @@ class EasyMultiTrackProject(io.ComfyNode):
                 second_model = _h3_second_pass_model(second_model_loader, model=model)
                 _require_minimax_h3_model(second_model)
         report_step(10)
+
+        # dual_t8/T8fork 注入（2026-10-04）：原始链接透传，段循环内构造内部图节点。
+        bridge_link = _raw_project_input(
+            sampling_config.get("semantic_bridge")
+            if sampling_config.get("semantic_bridge") is not None
+            else kwargs.get("semantic_bridge")
+        )
+        if bridge_link is None:
+            bridge_link = _raw_project_input(kwargs.get("semantic_bridge"))
+        output_vae_link = _raw_project_input(
+            sampling_config.get("output_vae")
+            if sampling_config.get("output_vae") is not None
+            else kwargs.get("output_vae")
+        )
+        if output_vae_link is None:
+            output_vae_link = _raw_project_input(kwargs.get("output_vae"))
+        has_semantic_bridge = bridge_link is not None
+        has_output_vae = output_vae_link is not None
+        if (has_semantic_bridge or has_output_vae) and not (
+            is_dual_t8 or has_second_pass or is_selflift
+        ):
+            # 单采模式也允许 bridge（只影响一采 positive）；output_vae 任何模式可用。
+            pass
 
         hidden_inputs = getattr(cls, "hidden", None)
         prompt_turbo_detection = None
@@ -1182,7 +1227,23 @@ class EasyMultiTrackProject(io.ComfyNode):
             upscale_by,
         )
         # Keep task inputs at the configured size; exports use the final size.
-        output_info = {**info, "width": target_width, "height": target_height}
+        # 2026-10-05：接 HyperVAE 2× 时段文件实际输出为 target×2（1280×2304 级），
+        # manifest 画布必须同步放大，否则 VideoCombine 的 ffmpeg overlay=0:0 会把
+        # 2× 段裁到画布左上角（表现为“画面放大了几倍”）。未接 HyperVAE 时不变。
+        output_info = {
+            **info,
+            "width": target_width * 2 if has_output_vae else target_width,
+            "height": target_height * 2 if has_output_vae else target_height,
+            # 2026-10-05：记录本次生成的关键设置，供合并节点前端推算
+            # “参数变更后的即将生成分辨率”并实时预警（无需运行）。
+            "gen_settings": {
+                "base_width": first_pass_width,
+                "base_height": first_pass_height,
+                "upscale_by": upscale_by,
+                "second_pass": bool(run_second_pass),
+                "hyper_vae": bool(has_output_vae),
+            },
+        }
         initialize_h3_project(
             safe_project_name,
             output_info,
@@ -1406,6 +1467,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         segment_nodes: dict[str, int] = {}
         for segment_position, (task_index, entry) in enumerate(selected_entries):
             previous_graph_nodes = set(graph.nodes)
+            dual_t8_refine_sigmas = None
             def report_segment_step(
                 phase: float,
                 *,
@@ -1614,9 +1676,17 @@ class EasyMultiTrackProject(io.ComfyNode):
                 latent=encoded_conditioning.out(1),
             )
             base_positive = second_pass_positive = conditioning.out(0)
+            second_pass_template_latent = None
             # Reference conditioning has no canvas-sized keyframes. Its text and
             # media embeddings can be shared by both sampling resolutions.
-            if run_second_pass and generation_mode != "reference" and (
+            # dual_t8 例外：Reconcile 需要二采分辨率模板 latent，reference 模式也重建。
+            _needs_second_template = is_dual_t8 and (
+                first_pass_width,
+                first_pass_height,
+            ) != (target_width, target_height)
+            if run_second_pass and (
+                generation_mode != "reference" or _needs_second_template
+            ) and (
                 first_pass_width,
                 first_pass_height,
             ) != (target_width, target_height):
@@ -1625,13 +1695,33 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "width": target_width,
                     "height": target_height,
                 }
-                second_pass_positive = graph.node(
+                _second_cond_node = graph.node(
                     "easy minimaxH3ToVideo",
                     id=f"second_pass_conditioning_{task_index}",
                     **second_inputs,
-                ).out(0)
+                )
+                second_pass_positive = _second_cond_node.out(0)
+                if is_dual_t8:
+                    # dual_t8：Reconcile 需要二采分辨率的模板 latent。
+                    second_pass_template_latent = _second_cond_node.out(1)
             initial_latent = conditioning.out(1)
             positive = base_positive
+
+            # Deciia 2026-10-04：Semantic Bridge（T8 fork）应用于两采 positive。
+            if has_semantic_bridge:
+                positive = graph.node(
+                    "easy deciiaH3SemanticBridgeApply",
+                    id=f"bridge_first_{task_index}",
+                    conditioning=positive,
+                    semantic_bridge=bridge_link,
+                ).out(0)
+                if second_pass_positive is not positive:
+                    second_pass_positive = graph.node(
+                        "easy deciiaH3SemanticBridgeApply",
+                        id=f"bridge_second_{task_index}",
+                        conditioning=second_pass_positive,
+                        semantic_bridge=bridge_link,
+                    ).out(0)
 
             if (
                 uses_context
@@ -1691,6 +1781,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                 ).out(0)
 
             first_pass_sampling_model = model
+            if is_dual_t8:
+                # Deciia 2026-10-04：dual_t8 预构造（须早于 context_swap，
+                # 让上下文连续段的噪声调度用双钟 sigmas 而非 preset sigmas）。
+                dual_clock = graph.node(
+                    "easy deciiaH3DualClockSampler",
+                    id=f"dual_clock_{task_index}",
+                    model=first_pass_sampling_model,
+                    av_latent=initial_latent,
+                    steps=8, shift_video=12.0, shift_audio=3.0,
+                    sampler_name="dual_clock_euler", scheduler="native_flow",
+                )
+                parity_plan = graph.node(
+                    "easy deciiaH3TwoPassParityPlan",
+                    id=f"parity_plan_{task_index}",
+                    model=dual_clock.out(0),
+                    base_steps=9, coarse_steps=4, refine_steps=5,
+                )
+                first_pass_sampler = dual_clock.out(1)
+                first_pass_sigmas = parity_plan.out(0)
+                dual_t8_refine_sigmas = parity_plan.out(1)
             if has_context_continuity:
                 report_segment_step(0.22)
                 if uses_swap:
@@ -1779,12 +1889,22 @@ class EasyMultiTrackProject(io.ComfyNode):
                 first_pass_latent = selflift_sample.out(0)
                 selflift_low_latent = selflift_sample.out(1)
             else:
-                first_pass_guider = graph.node(
-                    "BasicGuider",
-                    id=f"first_pass_guider_{task_index}",
-                    model=first_pass_sampling_model,
-                    conditioning=positive,
-                )
+                if is_dual_t8:
+                    # Deciia 2026-10-04：LBH 双钟一采 guider（DualClock/ParityPlan
+                    # 已在 context_swap 前预构造）。
+                    first_pass_guider = graph.node(
+                        "BasicGuider",
+                        id=f"first_pass_guider_{task_index}",
+                        model=dual_clock.out(0),
+                        conditioning=positive,
+                    )
+                else:
+                    first_pass_guider = graph.node(
+                        "BasicGuider",
+                        id=f"first_pass_guider_{task_index}",
+                        model=first_pass_sampling_model,
+                        conditioning=positive,
+                    )
                 if task_index == resume_task_index:
                     report_segment_step(0.38)
                     first_pass_latent = graph.node(
@@ -1939,12 +2059,56 @@ class EasyMultiTrackProject(io.ComfyNode):
                     **({} if disable_2nd_noise else {"noise_seed": second_pass_seed}),
                 )
                 report_segment_step(0.66)
-                second_pass_guider = graph.node(
-                    "BasicGuider",
-                    id=f"second_pass_guider_{task_index}",
-                    model=second_pass_sampling_model,
-                    conditioning=second_pass_positive,
-                )
+                if is_dual_t8:
+                    # Deciia 2026-10-04：LBH 二采（T8 fork）。
+                    # Reconcile(放大latent ↔ 二采模板latent) → DetailMixer(refine_sigmas)。
+                    _highres_template = (
+                        second_pass_template_latent
+                        if second_pass_template_latent is not None
+                        else initial_latent
+                    )
+                    reconcile = graph.node(
+                        "easy deciiaH3TwoPassLatentReconcile",
+                        id=f"reconcile_{task_index}",
+                        learned_latent=upscaled_latent,
+                        highres_template=_highres_template,
+                        positive=second_pass_positive,
+                        audio_policy="auto",
+                        second_pass_audio_source="legacy_policy",
+                        second_pass_audio_strength=0.0,
+                    )
+                    upscaled_latent = reconcile.out(0)
+                    second_pass_positive = reconcile.out(1)
+                    detail_mixer = graph.node(
+                        "easy deciiaH3TwoPassDetailMixer",
+                        id=f"detail_mixer_{task_index}",
+                        model=second_pass_sampling_model,
+                        av_latent=upscaled_latent,
+                        refine_sigmas=dual_t8_refine_sigmas,
+                        shift_video=12.0, shift_audio=3.0,
+                        enable_tail=False, extra_tail_steps=3, tail_spacing="video_sigma_linear",
+                        enable_model_time_bias=False, bias=-0.025,
+                        bias_start_progress=0.7, bias_end_progress=0.95, bias_domain="video_sigma",
+                        enable_stg=False, stg_scale=0.35, stg_double_blocks="25",
+                        stg_start_progress=0.25, stg_end_progress=0.85,
+                        enable_restart=False, restart_video_sigma=0.15, restart_steps=3,
+                        restart_seed=2608193401,
+                    )
+                    second_pass_guider = graph.node(
+                        "BasicGuider",
+                        id=f"second_pass_guider_{task_index}",
+                        model=detail_mixer.out(0),
+                        conditioning=second_pass_positive,
+                    )
+                    second_pass_sampler = detail_mixer.out(1)
+                    segment_second_pass_sigmas = detail_mixer.out(2)
+                else:
+                    second_pass_guider = graph.node(
+                        "BasicGuider",
+                        id=f"second_pass_guider_{task_index}",
+                        model=second_pass_sampling_model,
+                        conditioning=second_pass_positive,
+                    )
                 report_segment_step(0.71)
                 second_sampling_start = graph.node(
                     "easy h3SegmentSamplingStart",
@@ -2044,21 +2208,50 @@ class EasyMultiTrackProject(io.ComfyNode):
                 }
             else:
                 report_segment_step(0.76)
-                decoded_images = graph.node(
-                    "VAEDecode",
-                    id=f"decode_video_{task_index}",
-                    samples=final_latent,
-                    vae=vae,
-                )
-                report_segment_step(0.80)
-                decoded_audio = graph.node(
-                    "VAEDecodeAudio",
-                    id=f"decode_audio_{task_index}",
-                    samples=final_latent,
-                    vae=audio_vae,
-                )
-                output_images = decoded_images.out(0)
-                output_audio = decoded_audio.out(0)
+                if has_output_vae:
+                    # Deciia 2026-10-05：对齐 P8a 拓扑 —— 采样结束后先
+                    # cleanGpuUsed（清节点缓存+卸载模型+清 CUDA 缓存）再进解码，
+                    # 给 HyperVAE 2× 腾出显存/内存余量（P8a #900038 同款位置）。
+                    cleaned_latent = graph.node(
+                        "easy cleanGpuUsed",
+                        id=f"pre_decode_clean_{task_index}",
+                        anything=final_latent,
+                    ).out(0)
+                    # AVDecode 只做 AV 拆分（视频用原生 VAE，返回 video_latent），
+                    # HyperVAE 2× 走 comfy 原生 VAEDecode（自带 OOM 回退 tiled、
+                    # 分批与预分配缓冲）。音频取 generated_audio（P8a 同款）。
+                    av_decoded = graph.node(
+                        "easy deciiaH3AVDecode",
+                        id=f"av_decode_{task_index}",
+                        av_latent=cleaned_latent,
+                        video_vae=vae,
+                        audio_vae=audio_vae,
+                        decode_video=False,
+                    )
+                    hyper_decoded = graph.node(
+                        "VAEDecode",
+                        id=f"hyper_decode_{task_index}",
+                        samples=av_decoded.out(2),
+                        vae=output_vae_link,
+                    )
+                    output_images = hyper_decoded.out(0)
+                    output_audio = av_decoded.out(1)
+                else:
+                    decoded_images = graph.node(
+                        "VAEDecode",
+                        id=f"decode_video_{task_index}",
+                        samples=final_latent,
+                        vae=vae,
+                    )
+                    report_segment_step(0.80)
+                    decoded_audio = graph.node(
+                        "VAEDecodeAudio",
+                        id=f"decode_audio_{task_index}",
+                        samples=final_latent,
+                        vae=audio_vae,
+                    )
+                    output_images = decoded_images.out(0)
+                    output_audio = decoded_audio.out(0)
                 if context_trim_frames is not None or preserve_source_timing:
                     report_segment_step(0.84)
                     trimmed = graph.node(

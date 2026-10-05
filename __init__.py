@@ -7,6 +7,17 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 from aiohttp import web
 from .nodes import *
+from .nodes.h3_t8_fork import (
+    DeciiaH3DualClockSampler,
+    DeciiaH3AVDecode,
+    DeciiaH3LearnedLatentUpscale,
+    DeciiaH3TwoPassLatentReconcile,
+    DeciiaH3TwoPassParityPlan,
+    DeciiaH3TwoPassDetailMixer,
+    DeciiaH3SemanticBridgeConfig,
+    DeciiaH3SemanticBridgeApply,
+    DeciiaH3HyperVAE2xLoader,
+)
 from .routes import *
 from .utils.bernini_s2v_model_patch import apply_bernini_s2v_model_patches
 
@@ -131,6 +142,16 @@ class EasyMediaExtension(ComfyExtension):
             LTXSamplerSimple,
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
+            # H3 T8 fork（来源 t8star/comfyui-minimax-h3-audio-T8，见 THIRD_PARTY_NOTICES.md）
+            DeciiaH3DualClockSampler,
+            DeciiaH3AVDecode,
+            DeciiaH3LearnedLatentUpscale,
+            DeciiaH3TwoPassLatentReconcile,
+            DeciiaH3TwoPassParityPlan,
+            DeciiaH3TwoPassDetailMixer,
+            DeciiaH3SemanticBridgeConfig,
+            DeciiaH3SemanticBridgeApply,
+            DeciiaH3HyperVAE2xLoader,
         ]
         try:
             from comfy_extras.nodes_bernini import BerniniConditioning as CoreBerniniConditioning

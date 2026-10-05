@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, Loader2, Maximize2, Minimize2, Pause, Play, RefreshCw, Trash2, Volume2, VolumeX, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -47,6 +47,7 @@ function ensureProjectData(value: unknown): ProjectData {
     frame_rate: Number.isFinite(data.frame_rate) && Number(data.frame_rate) > 0 ? Number(data.frame_rate) : 24,
     clips: Array.isArray(data.clips) ? data.clips : [],
     auto_combine: data.auto_combine !== false,
+    gen_settings: data.gen_settings ?? null,
     updated_at: data.updated_at,
   }
 }
@@ -332,6 +333,178 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     if (nextPaths[0] !== clip.file_path) selectClipFile(clip, nextPaths[0])
   }
 
+  // 2026-10-05：实时推算“即将生成分辨率”。轻量轮询本包 easy multitrackProject
+  // 节点的 upscale_by widget 与 output_vae 连线状态（含 HyperVAE 来源节点
+  // bypass/mute），参数一改预警立即更新，无需运行或刷新。
+  const [liveGenSettings, setLiveGenSettings] = useState<{
+    baseWidth: number
+    baseHeight: number
+    upscaleBy: number
+    secondPass: boolean
+    hyperVae: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    const ASPECT_RATIOS: Record<string, [number, number]> = {
+      '1:1': [1, 1], '2:3': [2, 3], '3:2': [3, 2], '3:4': [3, 4], '4:3': [4, 3],
+      '9:16': [9, 16], '16:9': [16, 9], '21:9': [21, 9], '1:2.35': [1, 2.35], '2.35:1': [2.35, 1],
+    }
+    // 复刻后端 _resolve_megapixel_dimensions / _resolve_configured_dimensions
+    // 的静态分支（megapixels / custom / 预设 WxH）。shortest/longest/auto 需要
+    // 运行时素材探测，无法前端推算——返回 null 回落到 manifest 画布。
+    const resolveBase = (
+      resolutionLabel: string | undefined,
+      aspectLabel: string | undefined,
+      megapixels: number | undefined,
+      customWidth: number | undefined,
+      customHeight: number | undefined,
+    ): { width: number; height: number } | null => {
+      const label = (resolutionLabel ?? '').toLowerCase()
+      const divisor = 32
+      if (label.includes('megapixels')) {
+        const ratioKey = Object.keys(ASPECT_RATIOS).find((key) => (aspectLabel ?? '').includes(key))
+        const ratio = ratioKey ? ASPECT_RATIOS[ratioKey] : [1, 1]
+        const mp = megapixels && megapixels > 0 ? megapixels : 1
+        const scale = Math.sqrt((mp * 1024 * 1024) / (ratio[0] * ratio[1]))
+        return {
+          width: Math.max(32, Math.round((ratio[0] * scale) / divisor) * divisor),
+          height: Math.max(32, Math.round((ratio[1] * scale) / divisor) * divisor),
+        }
+      }
+      if (label.includes('custom')) {
+        const width = Math.max(32, Math.round((customWidth ?? 544) / divisor) * divisor)
+        const height = Math.max(32, Math.round((customHeight ?? 960) / divisor) * divisor)
+        return { width, height }
+      }
+      const preset = (resolutionLabel ?? '').match(/(\d+)\s*x\s*(\d+)/)
+      if (preset) return { width: Number(preset[1]), height: Number(preset[2]) }
+      if (label.includes('shortest') || label.includes('longest') || label.includes('auto')) return null
+      return { width: 544, height: 960 }
+    }
+    const readGraph = () => {
+      try {
+        const graph = (app as unknown as { graph?: { _nodes?: unknown[]; links?: Record<string, { origin_id?: unknown } | null> } }).graph
+        const nodes = Array.isArray(graph?._nodes) ? graph!._nodes! : []
+        if (!nodes.length) return
+        type AnyNode = { id?: unknown; type?: string; mode?: number; widgets?: Array<{ name?: string; value?: unknown }>; inputs?: Array<{ name?: string; link?: unknown }> }
+        const projectNodes = nodes.filter((n): n is AnyNode => Boolean(n) && typeof n === 'object' && (n as AnyNode).type === 'easy multitrackProject')
+        if (projectNodes.length === 0) {
+          setLiveGenSettings(null)
+          return
+        }
+        const projectNode = projectNodes[0]
+        const upscaleWidget = projectNode.widgets?.find((item) => item.name === 'upscale_by')
+        const upscaleBy = Number(upscaleWidget?.value)
+        const hasUpscale = Number.isFinite(upscaleBy) && upscaleBy >= 1
+        // output_vae 连线状态：link=null(拔线) 或来源节点 bypass(4)/mute(2) 时视为未接入。
+        const outputVaeInput = projectNode.inputs?.find((input) => input.name === 'output_vae')
+        const linkId = outputVaeInput?.link
+        const links = graph?.links ?? {}
+        const link = typeof linkId === 'object' ? linkId as { origin_id?: unknown } : links[String(linkId)]
+        const originId = link?.origin_id
+        const originNode = originId !== undefined
+          ? nodes.find((n) => String((n as AnyNode).id) === String(originId))
+          : undefined
+        const originMode = typeof originNode === 'object' && originNode !== null ? (originNode as AnyNode).mode : undefined
+        const hyperVae = originMode === undefined || originMode === 0 || originMode === 1
+        // 编辑器节点（easy multiTrackEditor，本包注册）：容错读取分辨率相关 widget。
+        const editorNodes = nodes.filter((n): n is AnyNode => Boolean(n) && typeof n === 'object' && (n as AnyNode).type === 'easy multiTrackEditor')
+        if (editorNodes.length === 0) {
+          setLiveGenSettings(null)
+          return
+        }
+        const editor = editorNodes[0]
+        const editorWidget = (predicate: (name: string) => boolean): unknown => {
+          const widget = editor.widgets?.find((item) => predicate(item.name ?? ''))
+          return widget?.value
+        }
+        const resolutionRaw = editorWidget((name) => name === 'resolution' || name.includes('resolution'))
+        const resolutionLabel = typeof resolutionRaw === 'string' ? resolutionRaw : undefined
+        const aspectRaw = editorWidget((name) => name.includes('aspect'))
+        const aspectLabel = typeof aspectRaw === 'string' ? aspectRaw : undefined
+        const megapixels = Number(editorWidget((name) => name.includes('megapixel')))
+        const customWidth = Number(editorWidget((name) => name === 'width' || name.endsWith('.width')))
+        const customHeight = Number(editorWidget((name) => name === 'height' || name.endsWith('.height')))
+        const base = resolveBase(resolutionLabel, aspectLabel, Number.isFinite(megapixels) ? megapixels : undefined, Number.isFinite(customWidth) ? customWidth : undefined, Number.isFinite(customHeight) ? customHeight : undefined)
+        if (!base) {
+          setLiveGenSettings(null)
+          return
+        }
+        const next = {
+          baseWidth: base.width,
+          baseHeight: base.height,
+          upscaleBy: hasUpscale ? upscaleBy : (data.gen_settings?.upscale_by ?? 1),
+          secondPass: data.gen_settings?.second_pass ?? true,
+          hyperVae,
+        }
+        // 值未变化时跳过 setState，避免 800ms 轮询引发无谓的 React 重渲染。
+        setLiveGenSettings((prev) => (
+          prev
+          && prev.baseWidth === next.baseWidth
+          && prev.baseHeight === next.baseHeight
+          && prev.upscaleBy === next.upscaleBy
+          && prev.secondPass === next.secondPass
+          && prev.hyperVae === next.hyperVae
+        ) ? prev : next)
+      } catch {
+        setLiveGenSettings(null)
+      }
+    }
+    readGraph()
+    const timer = window.setInterval(readGraph, 800)
+    return () => window.clearInterval(timer)
+  }, [app, data.gen_settings])
+
+  // 按后端 h3_second_pass_dimensions 公式推算：scale 后 32px 网格取整，超分 ×2。
+  const projectedCanvas = useMemo(() => {
+    if (!liveGenSettings) return null
+    const { baseWidth, baseHeight, upscaleBy, secondPass, hyperVae } = liveGenSettings
+    let width = baseWidth
+    let height = baseHeight
+    if (secondPass && upscaleBy > 1 && !(baseWidth === 32 && baseHeight === 32)) {
+      width = Math.max(32, Math.round((width * upscaleBy) / 32) * 32)
+      height = Math.max(32, Math.round((height * upscaleBy) / 32) * 32)
+    }
+    if (hyperVae) {
+      width *= 2
+      height *= 2
+    }
+    return { width, height }
+  }, [liveGenSettings])
+
+  // 2026-10-05：段间分辨率一致性——从 project_data 同步计算（各段 video_files
+  // 自带 width/height），打开工作流即可见，无需运行任何节点。
+  const canvasWarning = useMemo(() => {
+    // 画布 = 即将生成分辨率。优先用实时推算值（上游参数已改、未运行），
+    // 回落到 manifest 画布（上次运行登记值）。
+    const canvas = projectedCanvas ?? (data.width > 0 && data.height > 0 ? { width: data.width, height: data.height } : null)
+    if (!canvas) return null
+    const byResolution = new Map<string, { width: number; height: number; clips: number[] }>()
+    for (const clip of data.clips) {
+      if (clip.enabled === false) continue
+      const activeFile = clip.video_files?.find((file) => file.file_path === clip.file_path)
+      const width = activeFile?.width
+      const height = activeFile?.height
+      if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) continue
+      const key = `${width}x${height}`
+      const entry = byResolution.get(key) ?? { width, height, clips: [] }
+      if (!byResolution.has(key)) byResolution.set(key, entry)
+      entry.clips.push(clip.index)
+    }
+    const canvasKey = `${canvas.width}x${canvas.height}`
+    if (byResolution.size === 0 || (byResolution.size === 1 && byResolution.has(canvasKey))) return null
+    const resolutions = [...byResolution.values()].sort((a, b) => b.width * b.height - a.width * a.height)
+    const projected = projectedCanvas
+      && (projectedCanvas.width !== data.width || projectedCanvas.height !== data.height)
+      ? projectedCanvas
+      : null
+    return {
+      resolutions,
+      manifest: { width: canvas.width, height: canvas.height },
+      stale: projected !== null,
+    }
+  }, [data.clips, data.width, data.height, projectedCanvas])
+
   const refreshProject = useCallback(async (projectName: string, showError = true) => {
     if (!projectName || deletingFileRef.current) return
     const requestId = ++refreshRequestRef.current
@@ -540,7 +713,15 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   }
 
   useEffect(() => {
-    if (data.clips.length === 0) void refreshProject(data.project_name || 'default', false)
+    // 2026-10-05：旧 schema 的 project_data 不含段分辨率字段（video_files 无
+    // width/height），画布预警无法计算——挂载时强制刷新一次拉取新 schema。
+    const missingResolution = data.clips.some((clip) => {
+      const activeFile = clip.video_files?.find((file) => file.file_path === clip.file_path)
+      return !activeFile?.width || !activeFile?.height
+    })
+    if (data.clips.length === 0 || missingResolution) {
+      void refreshProject(data.project_name || 'default', false)
+    }
   }, [])
 
   useEffect(() => {
@@ -923,6 +1104,20 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                                   : 'projectVideoCombine.continuityContext'),
                             })}
                           </span>
+                          {(() => {
+                            const activeFile = clip.video_files?.find((file) => file.file_path === clip.file_path)
+                            if (!activeFile?.width || !activeFile?.height) return null
+                            const canvas = projectedCanvas ?? (data.width > 0 && data.height > 0
+                              ? { width: data.width, height: data.height }
+                              : null)
+                            const mismatch = canvas !== null
+                              && (activeFile.width !== canvas.width || activeFile.height !== canvas.height)
+                            return (
+                              <span className={mismatch ? 'text-[9px] font-medium text-amber-600 dark:text-amber-400' : 'text-[9px] text-muted-foreground'}>
+                                {activeFile.width}×{activeFile.height}{mismatch ? ' ≠画布' : ''}
+                              </span>
+                            )
+                          })()}
                         </div>
                       )
                       const selectedPaths = selectedFilePaths(clip)
@@ -957,6 +1152,11 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                                       {checked ? <Check className="size-3" /> : null}
                                     </span>
                                     <span className="truncate">{file.file_name}</span>
+                                    {file.width && file.height ? (
+                                      <span className="ml-auto shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                                        {file.width}×{file.height}
+                                      </span>
+                                    ) : null}
                                   </Button>
                                   <Button
                                     type="button"
@@ -988,6 +1188,18 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
               </div>
             </div>
           </div>
+          {canvasWarning ? (
+            <div className="shrink-0 border-t border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+              <div className="font-medium">
+                分辨率不一致：{canvasWarning.resolutions.map((item) => `${item.width}×${item.height}（段 ${item.clips.join('、')}）`).join('；')}
+              </div>
+              <div className="mt-1 opacity-90">
+                {canvasWarning.stale ? '当前生成设置与上次运行不同，' : ''}
+                成片画布为即将生成的分辨率 {canvasWarning.manifest.width}×{canvasWarning.manifest.height}{canvasWarning.stale ? '（参数变更后推算）' : ''}，合成时其他分段将缩放到该尺寸（保比例，裁溢出）。
+                可在下方分段列表更换文件或调整生成设置（旁路超级解码 HyperVAE 2×、修改二采放大倍率）后重新生成，使各段一致。
+              </div>
+            </div>
+          ) : null}
         </div>
       </TooltipProvider>
     </LocaleContext.Provider>
