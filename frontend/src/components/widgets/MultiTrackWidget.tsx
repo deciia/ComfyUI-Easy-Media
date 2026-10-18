@@ -78,8 +78,10 @@ import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
+import { stripProjectMeta } from '@/lib/project-timeline'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
+import { ProjectBar } from './multitrack/ProjectBar'
 import { PreviewArea } from './multitrack/PreviewArea'
 import { SplitTaskSegmentDialog } from './multitrack/SplitTaskSegmentDialog'
 import { TrackArea } from './multitrack/TrackArea'
@@ -259,6 +261,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function commitNormalizedTrackChange(nextData: TrackData) {
     commitTrackChange(normalizeTrackData(nextData))
+  }
+
+  /** 项目栏载入/新建/删除后的统一写回：带上 project 标记，走撤销栈。 */
+  function applyProjectTimeline(nextData: TrackData, meta: { name: string; updated_at: number } | null) {
+    const withMeta: TrackData = meta
+      ? { ...nextData, project: { name: meta.name, updated_at: meta.updated_at } }
+      : stripProjectMeta(nextData)
+    commitNormalizedTrackChange(withMeta)
   }
 
   function setSingleSelectedSegment(segmentId: string | null) {
@@ -1477,6 +1487,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onTaskTrackSegmentsChange={handleTaskTrackSegmentsChange}
             onSelectedSegmentDurationChange={handleSelectedSegmentDurationChange}
             onGenerateSubtitleSpeech={handleGenerateSubtitleSpeech}
+          />
+          <ProjectBar
+            app={app}
+            t={t}
+            data={data}
+            resolution={resolutionInput}
+            onApply={applyProjectTimeline}
           />
           <MultiTrackToolbar
             currentTime={currentTime}

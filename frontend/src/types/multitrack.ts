@@ -127,6 +127,11 @@ export interface TrackData {
   task_overview?: boolean
   muted?: boolean
   volume_db?: number
+  /** 当前时间线挂载的项目（timeline.json）；缺省表示只保存在工作流里。 */
+  project?: {
+    name: string
+    updated_at?: number
+  }
 }
 
 export interface TracksInfoMediaItem {

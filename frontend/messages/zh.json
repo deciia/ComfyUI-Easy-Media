@@ -4,7 +4,8 @@
     "save": "保存",
     "add": "添加",
     "delete": "删除",
-    "syncPlay": "同步播放"
+    "syncPlay": "同步播放",
+    "confirm": "确认"
   },
   "compareVideo": {
     "empty": "请选择视频进行对比，或在接入输入后执行节点。",
@@ -309,7 +310,28 @@
     "referenceScopeToggle": "参考取材：{scope}（点击切换）",
     "referenceScopeWindow": "区间内",
     "referenceScopeFull": "整段",
-    "passthroughReferenceDisabled": "直通段：参考失效（该区间原样输出）"
+    "passthroughReferenceDisabled": "直通段：参考失效（该区间原样输出）",
+    "projectLabel": "项目",
+    "projectDefault": "默认（仅保存在工作流中）",
+    "projectNew": "新建",
+    "projectSave": "保存",
+    "projectSaveAs": "另存为",
+    "projectDelete": "删除",
+    "projectDeleteConfirm": "再点一次确认删除（只删轨道数据，生成视频保留）",
+    "projectDeleteConfirmShort": "确认删除？",
+    "projectRefresh": "刷新",
+    "projectUnsaved": "有未保存改动",
+    "projectSaved": "已保存：{project}",
+    "projectLoaded": "已加载：{project}",
+    "projectNoTimeline": "该项目没有时间线（只有生成产物）",
+    "projectExists": "项目已存在",
+    "projectNameInvalid": "项目名非法（不能含路径分隔符）",
+    "projectNameTooLong": "项目名过长",
+    "projectConflict": "该项目已被其它窗口修改，请刷新后再保存",
+    "projectDeleted": "已删除时间线（视频与渲染清单保留）",
+    "projectConfirmSwitch": "有未保存改动：再点一次切换（放弃改动）",
+    "projectConfirmNew": "当前时间线不为空：再点一次新建（将清空编辑器）",
+    "projectFailed": "操作失败"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

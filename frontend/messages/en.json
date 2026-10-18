@@ -4,7 +4,8 @@
     "save": "Save",
     "add": "Add",
     "delete": "Delete",
-    "syncPlay": "Sync Play"
+    "syncPlay": "Sync Play",
+    "confirm": "Confirm"
   },
   "compareVideo": {
     "empty": "Choose source and output videos to compare, or run the node with inputs.",
@@ -309,7 +310,28 @@
     "referenceScopeToggle": "Reference scope: {scope} (click to toggle)",
     "referenceScopeWindow": "task window",
     "referenceScopeFull": "full file",
-    "passthroughReferenceDisabled": "Passthrough: reference disabled (window passes through)"
+    "passthroughReferenceDisabled": "Passthrough: reference disabled (window passes through)",
+    "projectLabel": "Project",
+    "projectDefault": "Default (workflow only)",
+    "projectNew": "New",
+    "projectSave": "Save",
+    "projectSaveAs": "Save as",
+    "projectDelete": "Delete",
+    "projectDeleteConfirm": "Click again to delete (timeline only; videos kept)",
+    "projectDeleteConfirmShort": "Confirm?",
+    "projectRefresh": "Refresh",
+    "projectUnsaved": "Unsaved changes",
+    "projectSaved": "Saved: {project}",
+    "projectLoaded": "Loaded: {project}",
+    "projectNoTimeline": "This project has no timeline (videos only)",
+    "projectExists": "Project already exists",
+    "projectNameInvalid": "Invalid project name (no path separators)",
+    "projectNameTooLong": "Project name too long",
+    "projectConflict": "Project was changed elsewhere; refresh before saving",
+    "projectDeleted": "Timeline deleted (videos and manifest kept)",
+    "projectConfirmSwitch": "Unsaved changes: click again to switch (discard)",
+    "projectConfirmNew": "Timeline is not empty: click again to create (clears editor)",
+    "projectFailed": "Operation failed"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",
