@@ -45,6 +45,15 @@ from .utils.h3_project import (
     safe_h3_project_name,
     select_h3_project_video,
 )
+from .utils.h3_timeline import (
+    TimelineConflictError,
+    create_timeline,
+    delete_timeline,
+    list_timelines,
+    load_timeline,
+    safe_timeline_project_name,
+    save_timeline,
+)
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -197,6 +206,110 @@ async def handle_select_h3_project_video(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to select project video: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/project/timeline")
+async def handle_h3_project_timeline(request: web.Request) -> web.Response:
+    """读取某个项目的时间线（多轨编辑器轨道数据）。"""
+    project_name = request.rel_url.query.get("project_name", "")
+    try:
+        return web.json_response(load_timeline(project_name))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to load timeline: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.put("/easy-media/project/timeline")
+async def handle_save_h3_project_timeline(request: web.Request) -> web.Response:
+    """保存项目时间线；带 base_updated_at 时做乐观并发校验（冲突返回 409）。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Request must contain a JSON object")
+        project_name = payload.get("project_name")
+        if not isinstance(project_name, str) or not project_name.strip():
+            raise ValueError("project_name must be a non-empty string")
+        timeline = payload.get("timeline")
+        if timeline is None:
+            raise ValueError("timeline is required")
+        base_raw = payload.get("base_updated_at")
+        base_updated_at = None
+        if base_raw is not None:
+            try:
+                base_updated_at = float(base_raw)
+            except (TypeError, ValueError) as error:
+                raise ValueError("base_updated_at must be a number") from error
+        return web.json_response(
+            save_timeline(project_name, timeline, base_updated_at=base_updated_at)
+        )
+    except TimelineConflictError as error:
+        return web.json_response(
+            {
+                "error": str(error),
+                "conflict": True,
+                "project_name": error.project_name,
+                "updated_at": error.updated_at,
+            },
+            status=409,
+        )
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to save timeline: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/project/timeline/new")
+async def handle_create_h3_project_timeline(request: web.Request) -> web.Response:
+    """新建项目时间线（已存在返回 409）。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Request must contain a JSON object")
+        project_name = payload.get("project_name")
+        if not isinstance(project_name, str) or not project_name.strip():
+            raise ValueError("project_name must be a non-empty string")
+        template = payload.get("template")
+        if template is not None and not isinstance(template, (dict, str)):
+            raise ValueError("template must be a JSON object")
+        timeline = create_timeline(project_name, template)
+        return web.json_response(timeline, status=201)
+    except FileExistsError as error:
+        return web.json_response({"error": str(error), "exists": True}, status=409)
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to create timeline: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.delete("/easy-media/project/timeline")
+async def handle_delete_h3_project_timeline(request: web.Request) -> web.Response:
+    """只删除时间线（timeline.json），视频产物与渲染清单保持不动。"""
+    project_name = request.rel_url.query.get("project_name", "")
+    try:
+        safe_name = safe_timeline_project_name(project_name)
+        deleted = delete_timeline(safe_name)
+        return web.json_response({"project_name": safe_name, "deleted": deleted})
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to delete timeline: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/project/timelines")
+async def handle_h3_project_timelines(_request: web.Request) -> web.Response:
+    """列出项目及其时间线摘要（不返回完整时间线）。"""
+    try:
+        return web.json_response({"projects": list_timelines()})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to list timelines: {error}"}, status=500)
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:
