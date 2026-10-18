@@ -56,9 +56,10 @@ def test_masked_residue(v):
     assert any("MASKED" in item for item in failures)
 
 
-def test_unexpanded_tokens(v):
+def test_kept_subject_tokens_are_allowed(v):
+    # 保留 @令牌 由组装阶段解析，校验器不应拦截
     failures = v.validate_prompt(GOOD.replace("<Picture 1>", "<@车间>", 1))
-    assert any("令牌" in item for item in failures)
+    assert failures == []
 
 
 def test_unbalanced_dialogue(v):
@@ -76,8 +77,10 @@ def test_shot_out_of_range(v):
     assert any("超出镜头数量" in item for item in failures)
 
 
-def test_forbidden_watermark(v):
-    failures = v.validate_prompt(GOOD + "\n画面右下角有 water mark 水印")
+def test_forbidden_watermark_only_when_positive(v):
+    assert v.validate_prompt(GOOD + "\n不要出现任何字幕或水印") == []
+    failures = v.validate_prompt(GOOD + "\n画面右下角添加一个水印")
+    assert failures  # 正向要求应被拦截
     assert any("水印" in item for item in failures)
 
 

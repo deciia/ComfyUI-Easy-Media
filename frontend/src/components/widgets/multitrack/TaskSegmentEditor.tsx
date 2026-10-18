@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Share2, Trash2 } from 'lucide-react'
+import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Share2, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -70,6 +70,7 @@ import type {
 } from '@/types/multitrack'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
+import { PromptEnhancerModal } from './PromptEnhancerModal'
 
 type PromptTab = 'user' | 'system'
 type EditMode = 'individual' | 'combined'
@@ -220,6 +221,58 @@ async function loadSystemPromptOptions(): Promise<SystemPromptOption[]> {
   return systemPromptOptionsRequest
 }
 
+/** 读取画布上「主体库」节点的全局提示词 */
+function readSubjectLibraryGlobalPrompt(): string {
+  try {
+    const canvas = (globalThis as unknown as { comfyAPI?: { app?: { app?: { canvas?: { graph?: { _nodes?: unknown[] } } } } } })
+      .comfyAPI?.app?.app?.canvas
+    const nodes = canvas?.graph?._nodes
+    if (!Array.isArray(nodes)) return ''
+    for (const node of nodes) {
+      const item = node as { comfyClass?: string; type?: string; widgets?: Array<{ name?: string; value?: unknown }> }
+      if (item.comfyClass !== 'easy subjectLibrary' && item.type !== 'easy subjectLibrary') continue
+      const widget = item.widgets?.find((entry) => entry.name === 'subject_data')
+      const raw = widget?.value
+      const data = typeof raw === 'string' ? JSON.parse(raw) : raw
+      const value = (data as { global_prompt?: string } | null)?.global_prompt
+      return typeof value === 'string' ? value : ''
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+/** 把全局提示词写回画布上的「主体库」节点（并标脏） */
+function writeSubjectLibraryGlobalPrompt(value: string): void {
+  try {
+    const api = (globalThis as unknown as {
+      comfyAPI?: { app?: { app?: { canvas?: { graph?: { _nodes?: unknown[] }; setDirty?: (v: boolean) => void } } } }
+    }).comfyAPI?.app?.app
+    const nodes = api?.canvas?.graph?._nodes
+    if (!Array.isArray(nodes)) return
+    for (const node of nodes) {
+      const item = node as {
+        comfyClass?: string
+        type?: string
+        widgets?: Array<{ name?: string; value?: unknown }>
+        graph?: unknown
+      }
+      if (item.comfyClass !== 'easy subjectLibrary' && item.type !== 'easy subjectLibrary') continue
+      const widget = item.widgets?.find((entry) => entry.name === 'subject_data')
+      if (!widget) continue
+      const raw = widget.value
+      const data = typeof raw === 'string' ? JSON.parse(raw) : { ...((raw as object) ?? {}) }
+      const next = { ...(data as Record<string, unknown>), global_prompt: value }
+      widget.value = JSON.stringify(next)
+      api?.canvas?.setDirty?.(true)
+      return
+    }
+  } catch {
+    // 读不到画布就静默：全局提示词只是便利功能，不影响生成
+  }
+}
+
 export function TaskSegmentEditor({
   segment,
   node,
@@ -246,6 +299,7 @@ export function TaskSegmentEditor({
   const [reselectImageId, setReselectImageId] = useState<string | null>(null)
   const [isImageDragOver, setIsImageDragOver] = useState(false)
   const [applyPromptToAllOpen, setApplyPromptToAllOpen] = useState(false)
+  const [promptEnhancerOpen, setPromptEnhancerOpen] = useState(false)
   const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [isDurationEditing, setIsDurationEditing] = useState(false)
@@ -1102,6 +1156,73 @@ export function TaskSegmentEditor({
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        aria-label={t('multitrack.enhancerOpen')}
+                        data-testid="prompt-enhancer-open"
+                        className="h-7 w-7 p-0 text-highlight hover:bg-highlight/10 hover:text-highlight cursor-pointer"
+                        onClick={() => setPromptEnhancerOpen(true)}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{t('multitrack.enhancerOpen')}</TooltipContent>
+                  </Tooltip>
+                  {promptEnhancerOpen ? (
+                    <PromptEnhancerModal
+                      segmentId={segment.id}
+                      segments={(trackSegments ?? []).map((item, index) => ({ id: item.id, label: `Segment ${index + 1}` }))}
+                      onActivateSegment={(id) => {
+                        const registry = globalThis as unknown as {
+                          __easyMediaActivateSegment?: (value: string) => void
+                        }
+                        if (registry.__easyMediaActivateSegment) {
+                          registry.__easyMediaActivateSegment(id)
+                          return
+                        }
+                        window.dispatchEvent(new CustomEvent('easy-media.segment.activate', { detail: { id } }))
+                      }}
+                      onAutosave={({ brief, generated }) => onContentChange?.({
+                        user_brief: brief,
+                        prompt_meta: {
+                          ...(segment.content.prompt_meta ?? {}),
+                          generated_at: Date.now(),
+                          source: 'prompt-enhancer',
+                          generated_prompt: generated,
+                        },
+                      })}
+                      initialBrief={typeof segment.content.user_brief === 'string' ? segment.content.user_brief : ''}
+                      initialResult={typeof segment.content.prompt_meta?.generated_prompt === 'string' ? segment.content.prompt_meta.generated_prompt : (typeof segment.content.user_prompt === 'string' ? segment.content.user_prompt : '')}
+                      globalPrompt={readSubjectLibraryGlobalPrompt()}
+                      onGlobalPromptChange={(value) => writeSubjectLibraryGlobalPrompt(value)}
+                      pictureCount={promptResources.filter((item) => item.type === 'image').length}
+                      audioCount={promptResources.filter((item) => item.type === 'audio').length}
+                      videoCount={promptResources.filter((item) => item.type === 'video').length}
+                      resourceTokens={promptResources.map((item) => ({ token: item.token, label: item.label, type: item.type, thumbnailUrl: item.thumbnailUrl }))}
+                      imagePaths={activeTaskImages(images)
+                        .map((image) => image.file_path || image.local_path || image.file_name || '')
+                        .filter((path) => Boolean(path) && !/^https?:/i.test(path) && !path.startsWith('__slot__:'))}
+                      onClose={() => setPromptEnhancerOpen(false)}
+                      onApply={(next, brief, globalPrompt) => {
+                        setPromptEnhancerOpen(false)
+                        if (typeof globalPrompt === 'string') writeSubjectLibraryGlobalPrompt(globalPrompt)
+                        onContentChange({
+                          ...getSelectedTaskUserPromptPatch(segment.content, next),
+                          user_brief: brief,
+                          prompt_meta: {
+                            generated_at: Date.now(),
+                            language: 'auto',
+                            source: 'prompt-enhancer',
+                            brief_hash: String(brief.length),
+                            generated_prompt: next,
+                          },
+                        })
+                      }}
+                    />
+                  ) : null}
                 </div>
               ) : Boolean(segment.content.system_prompt) && (
                 <Tooltip>

@@ -72,7 +72,7 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
-from ..utils.h3_subjects import compose_timeline, parse_subject_config
+from ..utils.h3_subjects import compose_timeline, parse_subject_config_document
 from ..utils.multitrack import (
     _as_list_input,
     _embedded_multitrack_media,
@@ -1990,9 +1990,14 @@ class MultiTrackEditor(io.ComfyNode):
         subject_config = kwargs.get('subject_config')
         if isinstance(subject_config, list) and len(subject_config) == 1:
             subject_config = subject_config[0]
-        subjects = parse_subject_config(subject_config)
+        subjects = parse_subject_config_document(subject_config)["subjects"]
+        global_prompt = parse_subject_config_document(subject_config)["global_prompt"]
         if subjects:
-            data, subject_reports = compose_timeline(data, subjects)
+            data, subject_reports = compose_timeline(
+                data,
+                subjects,
+                global_prompt=global_prompt,
+            )
             for report in subject_reports:
                 if report.get("warnings"):
                     print(

@@ -1,4 +1,4 @@
-﻿from .basic import *
+from .basic import *
 from .audio import *
 from .common import *
 from .deciiapass_stage import *

@@ -1,4 +1,4 @@
-﻿// Custom ComfyUI widget components
+// Custom ComfyUI widget components
 export { TimelineWidget } from './TimelineWidget'
 export { MultiTrackWidget } from './MultiTrackWidget'
 export { MultiImagesLoaderWidget } from './MultiImagesLoaderWidget'

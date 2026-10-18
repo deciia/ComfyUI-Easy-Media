@@ -42,7 +42,8 @@ RESERVED_NAME_RE = re.compile(
 )
 
 #: @名字 / <@名字> / <#名字:台词>
-_TOKEN_RE = re.compile(r"<#(?P<voice>[^:>]+):(?P<line>[^>]*)>|<@(?P<subj>[^>]+)>|@(?P<bare>[^\s@<>，,。.;；:：!?！？、()（）\[\]【】]+)")
+#: 裸 @ 不能紧跟单词字符或点，避免把邮箱/URL（a@b.com）当成主体令牌
+_TOKEN_RE = re.compile(r"<#(?P<voice>[^:>]+):(?P<line>[^>]*)>|<@(?P<subj>[^>]+)>|(?<![\w.])@(?P<bare>[^\s@<>，,。.;；:：!?！？、()（）\[\]【】]+)")
 
 _SHOT_RE = re.compile(r"\[Shot\s+(\d+)\]", re.IGNORECASE)
 
@@ -112,12 +113,21 @@ def normalize_subject(raw: object, *, index: int = 0) -> dict:
     if retention not in RETENTION_VALUES:
         retention = "fully_preserved"
 
+    # 主图：图片主体取 resource.path；subject/audio/video 主体取第一个图片资源
+    image_path = path if kind == "image" else ""
+    if not image_path:
+        for item in resources:
+            if item["kind"] == "image" and item["path"]:
+                image_path = item["path"]
+                break
+
     return {
         "id": _text(source.get("id")) or f"subj-{index + 1}",
         "name": name,
         "kind": kind,
         "resource": {"path": path, "sha256": sha},
         "resources": resources,
+        "image_path": image_path,
         "description": _text(source.get("description")),
         # Ref 节点的「保留描述」是独立字段（描述外观要保持什么），与定义描述分开存
         "retention_text": _text(source.get("retention_text") or source.get("keep_description")),
@@ -279,7 +289,8 @@ def _subject_block(subject: dict, label: str) -> str:
 def _retention_block(subject: dict, label: str, shots: list[int]) -> str:
     shot_text = ", ".join(f"[Shot {shot}]" for shot in shots) if shots else ""
     prefix = f"{label} (appears in {shot_text})" if shot_text else label
-    detail = subject.get("role") or subject.get("description") or ""
+    # 优先用「保留描述」（Ref 的独立字段），没有才退回职责/定义描述
+    detail = subject.get("retention_text") or subject.get("role") or subject.get("description") or ""
     suffix = f" - {detail}" if detail else ""
     return f"{prefix}: {subject.get('retention', 'fully_preserved')}{suffix}"
 
@@ -293,14 +304,11 @@ def _append_images(content: dict, subjects: list[dict], warnings: list[str]) -> 
 
     appended: list[dict] = []
     for subject in subjects:
-        resource_path = subject["resource"]["path"]
-        if subject["kind"] != "image":
-            warnings.append(f"主体「{subject['name']}」不是图片，本版不自动追加")
+        resource_path = subject.get("image_path") or ""
+        if not resource_path:
+            warnings.append(f"主体「{subject['name']}」没有可追加的图片（{subject['kind']}）")
             continue
         if not subject.get("auto_append", True):
-            continue
-        if not resource_path:
-            warnings.append(f"主体「{subject['name']}」没有绑定资源")
             continue
         if any(image_matches(image, resource_path) for image in images if isinstance(image, dict)):
             continue
@@ -344,6 +352,7 @@ def compose_segment(
     subjects: list[dict],
     *,
     apply_append: bool = True,
+    global_prompt: str = "",
 ) -> tuple[dict, dict]:
     """对单个任务段执行：令牌解析 + 自动追加 + 生成定义/保留段落。
 
@@ -370,7 +379,8 @@ def compose_segment(
     labels_for_report: dict[str, str] = {}
     for number, image in picture_number_map(content.get("images", [])):
         for subject in referenced:
-            if image_matches(image, subject["resource"]["path"]):
+            path = subject.get("image_path") or subject["resource"]["path"]
+            if image_matches(image, path):
                 label = f"<Picture {number}>"
                 labels.setdefault(subject_name_key(subject["name"]), label)
                 labels_for_report[subject["name"]] = label
@@ -391,6 +401,9 @@ def compose_segment(
     if definitions:
         lower = expanded.lower()
         blocks: list[str] = []
+        # 全局提示词：约束整支视频中持久出现的角色/物体/场景（Ref 主体节点的「全局提示词」）
+        if global_prompt and global_prompt.lower() not in lower:
+            blocks.append("global:\n" + global_prompt)
         if "subject_definitions" not in lower:
             blocks.append("subject_definitions:\n" + "\n".join(definitions))
         if "retention_analysis" not in lower:
@@ -420,7 +433,13 @@ def compose_segment(
     return content, report
 
 
-def compose_timeline(data: dict, subjects: list[dict], *, apply_append: bool = True) -> tuple[dict, list[dict]]:
+def compose_timeline(
+    data: dict,
+    subjects: list[dict],
+    *,
+    apply_append: bool = True,
+    global_prompt: str = "",
+) -> tuple[dict, list[dict]]:
     """对整个 track_data 的所有任务段执行组装，返回 (data, 报告列表)。"""
     reports: list[dict] = []
     if not isinstance(data, dict) or not subjects:
@@ -437,7 +456,9 @@ def compose_timeline(data: dict, subjects: list[dict], *, apply_append: bool = T
             content = segment.get("content")
             if not isinstance(content, dict):
                 continue
-            _, report = compose_segment(content, subjects, apply_append=apply_append)
+            _, report = compose_segment(
+                content, subjects, apply_append=apply_append, global_prompt=global_prompt
+            )
             if report["tokens"] or report["appended"]:
                 report["segment_id"] = segment.get("id")
                 reports.append(report)

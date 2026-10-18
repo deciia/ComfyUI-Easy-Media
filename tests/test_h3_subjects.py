@@ -158,7 +158,7 @@ def test_video_subject_not_auto_appended(subj):
     data, reports = subj.compose_timeline(data, subjects)
     content = data["tracks"][0]["segments"][0]["content"]
     assert content["images"] == []
-    assert any("不是图片" in warning for warning in reports[0]["warnings"])
+    assert any("没有可追加的图片" in warning for warning in reports[0]["warnings"])
 
 
 def test_subject_name_validation(subj):
@@ -222,3 +222,45 @@ def test_rich_fields_do_not_break_compose(subj):
     content = data["tracks"][0]["segments"][0]["content"]
     assert len(content["images"]) == 1
     assert reports[0]["numbers"] == {"车间": "<Picture 1>"}
+
+
+def test_retention_text_used_in_retention_line(subj):
+    subjects = subj.parse_subject_config(
+        {"subjects": [{"name": "车间", "path": "a/工作台.jpg", "retention_text": "保留工具墙布局"}]}
+    )
+    data = _timeline(_segment("[Shot 1] 看 @车间"))
+    data, _ = subj.compose_timeline(data, subjects)
+    prompt = data["tracks"][0]["segments"][0]["content"]["user_prompt"]
+    assert "保留工具墙布局" in prompt
+
+
+def test_global_prompt_prepended(subj):
+    subjects = subj.parse_subject_config({"subjects": [{"name": "车间", "path": "a/工作台.jpg"}]})
+    data = _timeline(_segment("看 @车间"))
+    data, _ = subj.compose_timeline(data, subjects, global_prompt="始终出现的三个人物：小赵、司机")
+    prompt = data["tracks"][0]["segments"][0]["content"]["user_prompt"]
+    assert prompt.startswith("global:")
+    assert "小赵" in prompt
+
+
+def test_subject_kind_with_image_resource_is_appended(subj):
+    subjects = subj.parse_subject_config(
+        {"subjects": [{
+            "name": "安娜",
+            "kind": "subject",
+            "resources": [
+                {"kind": "image", "path": "a/anna.png"},
+                {"kind": "audio", "path": "a/anna.wav"},
+            ],
+        }]}
+    )
+    data = _timeline(_segment("看 @安娜"))
+    data, reports = subj.compose_timeline(data, subjects)
+    content = data["tracks"][0]["segments"][0]["content"]
+    assert [image["file_path"] for image in content["images"]] == ["a/anna.png"]
+    assert reports[0]["numbers"] == {"安娜": "<Picture 1>"}
+
+
+def test_email_is_not_parsed_as_subject_token(subj):
+    tokens = subj.parse_tokens("联系 zhao@yusheng.com 或 shop.name@foxmail.com")
+    assert tokens == []

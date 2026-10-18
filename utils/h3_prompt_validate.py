@@ -55,8 +55,7 @@ def validate_prompt(
     if _MASKED_RE.search(text):
         failures.append("存在未还原的掩码占位符 MASKED_n")
 
-    if _TOKEN_RE.search(text):
-        failures.append("仍残留未展开的主体令牌")
+    # 保留 <@名字>/<#名字:台词> 是**设计允许**的：组装阶段会解析成编号，这里不拦
 
     if text.count("<d>") != text.count("</d>"):
         failures.append("<d> 标签不成对")
@@ -79,7 +78,15 @@ def validate_prompt(
         if used > max_shots:
             failures.append(f"[Shot {used}] 超出镜头数量 {max_shots}")
 
-    if _FORBIDDEN_RE.search(text):
-        failures.append("出现字幕/水印/logo 类描述（官方规范禁止）")
+    # 否定式约束（"不要出现水印"）是官方规范鼓励的写法；只有正向要求才拦截
+    for sentence in re.split(r"[。\n;；!！?？]", text):
+        if not re.search(r"(字幕|水印|logo)", sentence, re.IGNORECASE):
+            continue
+        if not re.search(r"(添加|加上|出现|显示|放置)", sentence):
+            continue
+        if re.search(r"(不|别|禁|勿|无|避免)", sentence):
+            continue
+        failures.append("出现要求添加字幕/水印/logo 的正向描述（官方规范禁止）")
+        break
 
     return failures

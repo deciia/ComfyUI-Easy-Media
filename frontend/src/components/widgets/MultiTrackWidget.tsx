@@ -151,6 +151,30 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
+
+  // 提示词增强器切换任务片段：把切换函数登记到全局，弹窗直接调用（事件作为兜底）
+  useEffect(() => {
+    const activate = (id: string) => {
+      // 走编辑器自己的选中逻辑（会同步播放头/清 marker 等），不要裸 setState
+      handleSelectSegment(id, 'replace')
+    }
+    const registry = globalThis as unknown as {
+      __easyMediaActivateSegment?: (id: string) => void
+    }
+    registry.__easyMediaActivateSegment = activate
+
+    function onActivateSegment(event: Event) {
+      const detail = (event as CustomEvent<{ id?: string }>).detail
+      if (detail?.id) activate(detail.id)
+    }
+    window.addEventListener('easy-media.segment.activate', onActivateSegment as EventListener)
+    return () => {
+      if (registry.__easyMediaActivateSegment === activate) delete registry.__easyMediaActivateSegment
+      window.removeEventListener('easy-media.segment.activate', onActivateSegment as EventListener)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [editingSubtitleSegmentId, setEditingSubtitleSegmentId] = useState<string | null>(null)
   const [splittingTaskSegmentId, setSplittingTaskSegmentId] = useState<string | null>(null)
   const [isSmartSplitting, setIsSmartSplitting] = useState(false)

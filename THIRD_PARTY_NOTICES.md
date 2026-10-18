@@ -22,3 +22,26 @@
 - Semantic Bridge 模型：https://huggingface.co/t8star/Semantic-Bridge-Comfy 与
   https://huggingface.co/t8star/semantic_bridge_T8-comic-combat （放 `models/semantic_bridge/t8_compat`）
 - 学习放大器与 HyperVAE 2× 权重：见原 T8 仓库 README（放 `models/latent_upscaler` / `models/vae`）
+
+## 主体库 / 提示词增强器（2026-10）
+
+`utils/h3_subjects.py`、`nodes/subjects.py`、`utils/prompt_enhancer.py`、
+`utils/h3_prompt_validate.py` 以及前端提示词增强器（`PromptEnhancerModal.tsx`、
+`SubjectLibraryWidget.tsx`、`lib/prompt-presets.ts`）在**设计与数据结构**上参考了：
+
+- [MiniMaxRefDirector-ComfyUI](https://github.com/Deciia/MiniMaxRefDirector-ComfyUI)（`GPL-3.0`）
+  参考内容：主体模型字段（name / type / description / relationship / retention /
+  imageFiles / audioFiles / videoFile）、确定性组装思路（主体绑定 → `<Subject n>` /
+  `<Picture n>` / `<Audio n>` 编号由资源顺序派生）、提示词增强器的运镜 / 微表情 / 景别 /
+  构图预设分类，以及三栏弹窗 + 分段预览的交互形态。
+  说明：本仓库为独立实现（Python 侧自行编写，未复制其源码文件）；按 GPL-3.0 同许可证分发。
+
+- [t8star/comfyui-minimax-h3-audio-T8](https://github.com/t8star/comfyui-minimax-h3-audio-T8)（`GPL-3.0-or-later`）
+  参考内容：仅「曜石导演台」（分镜编排 / 素材库 / 每镜头三块提示词 / D1 预检与 D2 生成分层）
+  的交互与数据形态，用于后续「四合一工作台」的设计参考。
+  说明：本批次**未复制其源码**；如后续移植其代码或数据模型，将在此补充具体文件与改动说明。
+
+- MiniMax H3 官方提示词结构（`subject_definitions` / `summary` / `retention_analysis` /
+  `detailed_description` / `overall_soundscape` / `non_diegetic_music` 六段式，
+  以及 `<Subject n>`、`<Picture n>`、`<Audio n>`、`<Video n>`、`<d>` 等标签）参考官方文档与
+  示例工作流，用于生成提示词的结构校验与归一化。

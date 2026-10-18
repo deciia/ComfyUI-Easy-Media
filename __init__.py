@@ -132,7 +132,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyMinimaxPromptOverride,
             EasyMiniMaxH3ReferenceToVideoBridge,
             EasyRemoveH3MotionContextLatent,
-            # Deciia 鏈湴鏂板
+# Deciia 本地新增
             DeciiaPassthroughStage,
             PromptStudio,
             # Wan
@@ -144,7 +144,7 @@ class EasyMediaExtension(ComfyExtension):
             LTXSamplerSimple,
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
-            # H3 T8 fork锛堟潵婧?t8star/comfyui-minimax-h3-audio-T8锛岃 THIRD_PARTY_NOTICES.md锛?            DeciiaH3DualClockSampler,
+# H3 T8 fork（来源 t8star/comfyui-minimax-h3-audio-T8，见 THIRD_PARTY_NOTICES.md）
             DeciiaH3AVDecode,
             DeciiaH3LearnedLatentUpscale,
             DeciiaH3TwoPassLatentReconcile,

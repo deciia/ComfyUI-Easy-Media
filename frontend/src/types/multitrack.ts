@@ -45,6 +45,10 @@ export interface MultiTrackSegmentContent {
   file_name?: string
   text?: string
   user_prompt?: string
+  /** 手写草稿（资产）：模态窗/手写输入的原始片段，永不覆盖 */
+  user_brief?: string
+  /** 规范版元信息（生成时间/语言/来源），用于「规范版已过期」检测 */
+  prompt_meta?: { generated_at?: number; language?: string; source?: string; brief_hash?: string; generated_prompt?: string }
   user_prompt_b?: string
   user_prompt_variant?: MultiTrackUserPromptVariant
   system_prompt?: string

@@ -129,7 +129,7 @@ comfyApp.registerExtension({
           serialize: true,
         },
       }),
-      // 涓讳綋搴擄細鍗＄墖闈㈡澘锛堝榻?Ref 涓讳綋鑺傜偣鐨勪俊鎭眰绾э級
+      // 主体库：卡片面板（对齐 Ref 主体节点的信息层级）
       SUBJECT_DATA: createReactWidget<SubjectData>(SubjectLibraryWidget, {
         defaultValue: JSON.stringify({ global_prompt: '', subjects: [] }),
         keepResponsiveWidthInLiteGraph: true,

@@ -383,7 +383,12 @@
     "subjectDescription": "Definition",
     "subjectRetentionText": "Keep description",
     "subjectAutoAppend": "Auto-append resource when referenced",
-    "subjectAdd": "Add subject"
+    "subjectAdd": "Add subject",
+    "enhancerWordTarget": "Word target",
+    "enhancerPromptMode": "Prompt mode",
+    "enhancerSkillProfile": "Official skill profile",
+    "enhancerReferenceTemplate": "Reference template (shots/pacing/camera/style)",
+    "enhancerMaximize": "Maximize"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

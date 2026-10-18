@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AudioLines, Clapperboard, ImageIcon, Sparkles } from 'lucide-react'
+import { AudioLines, Clapperboard, ImageIcon, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
 import { useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import { PromptEnhancerModal } from './PromptEnhancerModal'
 
-export type PromptReferenceType = 'image' | 'audio' | 'video'
+export type PromptReferenceType = 'image' | 'audio' | 'video' | 'subject'
 
 export interface PromptReferenceResource {
   id: string
@@ -112,6 +111,9 @@ function replacementReferenceToken(currentToken: string, resource: PromptReferen
 }
 
 function normalizedReference(token: string): { type: PromptReferenceType; index: number } | null {
+  const subjectMatch = token.match(/^<Subject\s+(\d+)>$/i)
+  if (subjectMatch) return { type: 'subject', index: Number(subjectMatch[1]) }
+
   const match = token.match(/^@?(图片|音频|视频|Picture|Image|Audio|Video)\s*(\d+)>?$/i)
     ?? token.match(/^<(Picture|Audio|Video)\s+(\d+)>$/i)
   if (!match) return null
@@ -498,6 +500,7 @@ function renderValue(
 function ReferenceIcon({ type }: Readonly<{ type: PromptReferenceType }>) {
   if (type === 'audio') return <AudioLines className="h-4 w-4" />
   if (type === 'video') return <Clapperboard className="h-4 w-4" />
+  if (type === 'subject') return <UserRound className="h-4 w-4" />
   return <ImageIcon className="h-4 w-4" />
 }
 
@@ -522,7 +525,6 @@ export function PromptContentEditor({
   const lastRenderKeyRef = useRef('')
   const [mention, setMention] = useState<MentionState | null>(null)
   const [editorEmpty, setEditorEmpty] = useState(value.length === 0)
-  const [enhancerOpen, setEnhancerOpen] = useState(false)
   const filteredResources = useMemo(() => {
     if (!mention) return resources
     const query = mention.query.toLocaleLowerCase()
@@ -577,9 +579,10 @@ export function PromptContentEditor({
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null
     const caretRect = range?.getBoundingClientRect?.()
     const wrapperRect = wrapper?.getBoundingClientRect()
-    const caretLeft = caretRect?.left ?? wrapperRect?.left ?? 0
-    const caretTop = caretRect?.top ?? wrapperRect?.top ?? 0
-    const caretBottom = caretRect?.bottom ?? wrapperRect?.bottom ?? 0
+    const caretValid = Boolean(caretRect && (caretRect.width > 0 || caretRect.height > 0) && caretRect.left + caretRect.top > 0)
+    const caretLeft = (caretValid ? caretRect!.left : wrapperRect?.left) ?? 0
+    const caretTop = (caretValid ? caretRect!.top : wrapperRect?.top) ?? 0
+    const caretBottom = (caretValid ? caretRect!.bottom : wrapperRect?.bottom) ?? 0
     const left = Math.min(Math.max(8, caretLeft), Math.max(8, window.innerWidth - 264))
     const top = caretBottom + 214 <= window.innerHeight
       ? caretBottom + 6
@@ -697,34 +700,6 @@ export function PromptContentEditor({
       ref={wrapperRef}
       className="relative h-full min-h-0 max-h-full overflow-hidden [contain:size_layout_paint]"
     >
-      <button
-        type="button"
-        title={t('multitrack.enhancerOpen')}
-        aria-label={t('multitrack.enhancerOpen')}
-        data-testid="prompt-enhancer-open"
-        className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded bg-neutral-800/80 text-neutral-300 hover:bg-neutral-700 hover:text-white"
-        onMouseDown={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-        }}
-        onClick={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          setEnhancerOpen(true)
-        }}
-      >
-        <Sparkles className="h-3 w-3" />
-      </button>
-      {enhancerOpen ? (
-        <PromptEnhancerModal
-          initialBrief={value}
-          onClose={() => setEnhancerOpen(false)}
-          onApply={(next) => {
-            setEnhancerOpen(false)
-            onChange(next)
-          }}
-        />
-      ) : null}
       <div
         ref={editorRef}
         role="textbox"
@@ -847,10 +822,10 @@ export function PromptContentEditor({
             role="listbox"
             aria-label={t('multitrack.referenceResources')}
             className={cn(
-              'fixed z-50 flex w-64 flex-col overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
+              'fixed flex w-64 flex-col overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md',
               filteredResources.length === 0 ? 'h-64' : 'max-h-52',
             )}
-            style={{ left: mention.left, top: mention.top }}
+            style={{ left: mention.left, top: mention.top, zIndex: 2147483002 }}
           >
             <div className="shrink-0 px-2 py-1.5 text-[10px] font-semibold text-muted-foreground">
               {t('multitrack.referenceResources')}

@@ -383,7 +383,12 @@
     "subjectDescription": "定义描述",
     "subjectRetentionText": "保留描述",
     "subjectAutoAppend": "引用时自动追加资源",
-    "subjectAdd": "添加主体"
+    "subjectAdd": "添加主体",
+    "enhancerWordTarget": "目标长度(词)",
+    "enhancerPromptMode": "提示词模式",
+    "enhancerSkillProfile": "官方 Skill 协议",
+    "enhancerReferenceTemplate": "参考模板（镜头结构/节奏/运镜/风格）",
+    "enhancerMaximize": "全屏"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",
