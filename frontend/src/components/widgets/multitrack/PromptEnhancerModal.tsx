@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
+import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
 
 /**
@@ -88,6 +89,13 @@ export function PromptEnhancerModal({ initialBrief, onApply, onClose, pictureCou
   const [failures, setFailures] = useState<string[]>([])
   const [result, setResult] = useState('')
   const [configPath, setConfigPath] = useState('')
+  // 四类预设（与 Ref 语义一致：空数组 = 模型自由决定）
+  const [presets, setPresets] = useState<Record<string, string[]>>({
+    camera_motion: [],
+    expression: [],
+    shot_size: [],
+    framing: [],
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -135,7 +143,13 @@ export function PromptEnhancerModal({ initialBrief, onApply, onClose, pictureCou
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brief,
-          options,
+          options: {
+            ...options,
+            camera_motion: presets.camera_motion,
+            expression: presets.expression,
+            shot_size: presets.shot_size,
+            framing: presets.framing,
+          },
           images: [],
           picture_count: pictureCount ?? null,
         }),
@@ -318,6 +332,50 @@ export function PromptEnhancerModal({ initialBrief, onApply, onClose, pictureCou
                 >
                   {item.label}
                 </button>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              {PRESET_GROUPS.map((group) => (
+                <div key={group.id} className="flex flex-wrap items-center gap-1">
+                  <span className={cn(labelClass, 'w-14 shrink-0')}>{group.label}</span>
+                  <button
+                    type="button"
+                    className={cn(
+                      'rounded border px-2 py-0.5 text-[11px]',
+                      (presets[group.id] ?? []).length === 0
+                        ? 'border-sky-600 bg-sky-900/40 text-sky-200'
+                        : 'border-neutral-600 bg-neutral-800 text-neutral-400 hover:bg-neutral-700',
+                    )}
+                    onClick={() => setPresets({ ...presets, [group.id]: [] })}
+                  >
+                    模型自由决定
+                  </button>
+                  {group.options.map((option) => {
+                    const active = (presets[group.id] ?? []).includes(option.key)
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        title={option.key}
+                        className={cn(
+                          'rounded border px-2 py-0.5 text-[11px]',
+                          active
+                            ? 'border-sky-500 bg-sky-700 text-white'
+                            : 'border-neutral-600 bg-neutral-800 text-neutral-300 hover:bg-neutral-700',
+                        )}
+                        onClick={() =>
+                          setPresets({
+                            ...presets,
+                            [group.id]: togglePreset(presets[group.id] ?? [], option.key),
+                          })
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
               ))}
             </div>
 
