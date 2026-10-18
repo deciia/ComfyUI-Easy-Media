@@ -298,13 +298,24 @@ def create_timeline(project_name: Any, template: Any = None) -> dict[str, Any]:
 
 
 def delete_timeline(project_name: Any) -> bool:
-    """只删 ``timeline.json``；其它文件（视频/清单/上下文链）一律不动。"""
+    """只删 ``timeline.json``；其它文件（视频/清单/上下文链）一律不动。
+
+    若删除后项目目录已经没有任何文件（例如只有时间线的测试项目），顺手清掉空目录，
+    避免它继续以 ``has_timeline=false`` 的形态出现在项目列表里。
+    目录中只要还有视频/上下文链/清单，就保持原样。
+    """
     safe_name = safe_timeline_project_name(project_name)
     path = timeline_path(safe_name)
     _reject_symlink(path)
     if not path.exists():
         return False
     path.unlink()
+    directory = path.parent
+    try:
+        if not directory.is_symlink() and directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+    except OSError:
+        pass
     return True
 
 

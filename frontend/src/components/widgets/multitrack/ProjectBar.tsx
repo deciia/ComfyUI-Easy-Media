@@ -244,7 +244,10 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   }
 
   const options = useMemo(() => {
-    const names = projects.map((project) => project.project_name)
+    // 只列出真正有时间线的项目：删除时间线后（包括目录被清理或仅剩产物）不再出现在下拉里
+    const names = projects
+      .filter((project) => project.has_timeline)
+      .map((project) => project.project_name)
     if (currentName && !names.includes(currentName)) names.unshift(currentName)
     return names
   }, [projects, currentName])
@@ -296,21 +299,13 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
             onClick={() => { setEditing({ mode: 'new', value: '' }); setMessage(''); setPendingDelete(false); setPendingSwitch(null) }}>
             {t('multitrack.projectNew')}
           </button>
-          <button type="button" className={PRIMARY_CLASS} disabled={busy || currentName === ''}
-            onClick={() => void handleSave()}>
-            {busy ? '…' : t('multitrack.projectSave')}
-          </button>
-          <button type="button" className={BUTTON_CLASS} disabled={busy}
+          <button type="button" className={PRIMARY_CLASS} disabled={busy}
             onClick={() => { setEditing({ mode: 'saveAs', value: currentName }); setMessage('') }}>
             {t('multitrack.projectSaveAs')}
           </button>
           <button type="button" className={BUTTON_CLASS} disabled={busy || currentName === ''}
             onClick={() => void handleDelete()}>
             {pendingDelete ? t('multitrack.projectDeleteConfirmShort') : t('multitrack.projectDelete')}
-          </button>
-          <button type="button" className={BUTTON_CLASS} disabled={busy}
-            onClick={() => { void refreshProjects(); setMessage('') }}>
-            {t('multitrack.projectRefresh')}
           </button>
         </>
       )}
