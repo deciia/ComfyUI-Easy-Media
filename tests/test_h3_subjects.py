@@ -178,3 +178,47 @@ def test_shots_extracted_from_prompt(subj):
     prompt = data["tracks"][0]["segments"][0]["content"]["user_prompt"]
     assert "appears in [Shot 1], [Shot 3]" in prompt
     assert "partially_preserved" in prompt
+
+
+def test_document_parsing_global_prompt_and_rich_fields(subj):
+    raw = {
+        "global_prompt": "始终出现的三个人物：小赵、司机、画外老赵",
+        "subjects": [
+            {
+                "name": "安娜",
+                "kind": "subject",
+                "retention": "fully_preserved",
+                "description": "同 <@主角脸部> 与 <@主角全身> 定义的同一位表演者",
+                "relationship": "fully preserved",
+                "retention_text": "保留面部/发色/身材比例/服装/颜色",
+                "resources": [
+                    {"kind": "image", "path": "a/anna.png"},
+                    {"kind": "audio", "path": "a/anna.wav"},
+                ],
+            }
+        ],
+    }
+    document = subj.parse_subject_config_document(raw)
+    assert document["global_prompt"].startswith("始终出现")
+    subject = document["subjects"][0]
+    assert subject["retention_text"].startswith("保留面部")
+    assert [item["kind"] for item in subject["resources"]] == ["image", "audio"]
+    # 兼容纯 JSON 字符串与 RefDirector 的 subject_data 包装
+    nested = subj.parse_subject_config_document({"subject_data": raw})
+    assert nested["subjects"][0]["name"] == "安娜"
+
+
+def test_rich_fields_do_not_break_compose(subj):
+    subjects = subj.parse_subject_config(
+        {"subjects": [{
+            "name": "车间",
+            "path": "a/工作台.jpg",
+            "retention_text": "保留墙面颜色与工具位置",
+            "resources": [{"kind": "image", "path": "a/工作台.jpg"}],
+        }]}
+    )
+    data = _timeline(_segment("看 @车间"))
+    data, reports = subj.compose_timeline(data, subjects)
+    content = data["tracks"][0]["segments"][0]["content"]
+    assert len(content["images"]) == 1
+    assert reports[0]["numbers"] == {"车间": "<Picture 1>"}

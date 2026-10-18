@@ -90,6 +90,23 @@ def normalize_subject(raw: object, *, index: int = 0) -> dict:
                  or source.get("audioFile") or source.get("videoFile"))
     sha = _text(resource.get("sha256") or source.get("sha256"))
 
+    # 多资源：图片/音频/视频各自可挂一个（对齐 Ref 主体节点的「引用资源」区）
+    resources: list[dict] = []
+    raw_resources = source.get("resources")
+    if isinstance(raw_resources, list):
+        for item in raw_resources:
+            if not isinstance(item, dict):
+                continue
+            item_kind = _text(item.get("kind") or item.get("type")).lower() or kind
+            item_path = _text(item.get("path") or item.get("file") or item.get("file_path"))
+            if not item_path:
+                continue
+            resources.append({
+                "kind": item_kind,
+                "path": item_path,
+                "sha256": _text(item.get("sha256")),
+            })
+
     name = normalize_name(source.get("name")) or f"subject{index + 1}"
     retention = _text(source.get("retention")).lower()
     if retention not in RETENTION_VALUES:
@@ -100,7 +117,10 @@ def normalize_subject(raw: object, *, index: int = 0) -> dict:
         "name": name,
         "kind": kind,
         "resource": {"path": path, "sha256": sha},
+        "resources": resources,
         "description": _text(source.get("description")),
+        # Ref 节点的「保留描述」是独立字段（描述外观要保持什么），与定义描述分开存
+        "retention_text": _text(source.get("retention_text") or source.get("keep_description")),
         "role": _text(source.get("role")),
         "relationship": _text(source.get("relationship")),
         "retention": retention,
@@ -151,6 +171,26 @@ def parse_subject_config(value: object) -> list[dict]:
 
 def dump_subject_config(subjects: list[dict]) -> dict:
     return {"version": SUBJECT_CONFIG_VERSION, "subjects": subjects}
+
+
+def parse_subject_config_document(value: object) -> dict:
+    """解析完整文档：主体列表 + 全局提示词（对齐 Ref 主体节点）。"""
+    data = value
+    if isinstance(data, str):
+        text = data.strip()
+        if not text:
+            return {"subjects": [], "global_prompt": ""}
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return {"subjects": [], "global_prompt": ""}
+    global_prompt = ""
+    if isinstance(data, dict):
+        global_prompt = _text(data.get("global_prompt"))
+        nested = data.get("subject_data")
+        if isinstance(nested, dict) and not global_prompt:
+            global_prompt = _text(nested.get("global_prompt"))
+    return {"subjects": parse_subject_config(data), "global_prompt": global_prompt}
 
 
 # --------------------------------------------------------------------------- #
