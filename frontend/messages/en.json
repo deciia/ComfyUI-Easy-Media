@@ -337,7 +337,8 @@
     "projectDeleteSuccess": "Timeline deleted: {project}",
     "projectDeleteFailed": "Failed to delete timeline",
     "projectEmptyConfirm": "This project timeline is empty; loading it clears the editor. Click again to confirm",
-    "projectUnbound": "Back to default: content kept, project unbound"
+    "projectUnbound": "Back to default: content kept, project unbound",
+    "projectReloaded": "Reloaded from disk: {project}"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

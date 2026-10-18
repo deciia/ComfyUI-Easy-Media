@@ -91,6 +91,32 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     }
   }, [app, t])
 
+  /** 磁盘上的当前项目比内存里的新（外部补了轨道/其它窗口保存过）且本地无改动时，自动重载。 */
+  const syncCurrentProjectFromDisk = useCallback(async () => {
+    if (!currentName || dirty) return
+    try {
+      const rows = await listTimelineProjects(app)
+      const row = rows.find((item) => item.project_name === currentName)
+      const memoryUpdatedAt = typeof data.project?.updated_at === 'number' ? data.project.updated_at : 0
+      if (!row?.has_timeline || Math.abs((row.updated_at ?? 0) - memoryUpdatedAt) <= 1e-3) return
+      const document_ = await loadProjectTimeline(app, currentName)
+      const trackData = {
+        ...document_.track_data,
+        project: { name: document_.project_name, updated_at: document_.updated_at },
+      }
+      savedSignatureRef.current = timelineSignature(trackData)
+      lastLoadedAtRef.current = document_.updated_at
+      onApply(
+        trackData,
+        { name: document_.project_name, updated_at: document_.updated_at },
+        { format: document_.format },
+      )
+      setMessage(t('multitrack.projectReloaded', { project: currentName }))
+    } catch {
+      // 自动重载失败保持静默，由用户手动选择项目时再报错
+    }
+  }, [app, t, currentName, dirty, data, onApply])
+
   useEffect(() => {
     void refreshProjects()
   }, [refreshProjects])
@@ -316,8 +342,14 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         className="h-7 max-w-[12rem] rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100 disabled:opacity-40"
         value={currentName}
         disabled={busy}
-        onMouseDown={() => void refreshProjects()}
-        onFocus={() => void refreshProjects()}
+        onMouseDown={() => void (async () => {
+          await refreshProjects()
+          await syncCurrentProjectFromDisk()
+        })()}
+        onFocus={() => void (async () => {
+          await refreshProjects()
+          await syncCurrentProjectFromDisk()
+        })()}
         onChange={(event) => void handleSelect(event.target.value)}
       >
         <option value="">{t('multitrack.projectDefault')}</option>
