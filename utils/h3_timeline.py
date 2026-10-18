@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,12 @@ def timeline_path(project_name: Any) -> Path:
 
 
 def default_timeline(project_name: Any) -> dict[str, Any]:
-    """新建项目的默认时间线：带一条空的“任务”轨（与编辑器默认一致）。"""
+    """新建项目的默认时间线。
+
+    不变量：时间线里**至少有一条 ``type='task'`` 的轨道**（轨道内容可以为空），
+    否则编辑器无法创建片段。轨道的 id 用 uuid（保证唯一），名称沿用编辑器的
+    ``Task N`` 习惯——名称只是显示，编辑器每次规范化都会按 ``Task N`` 重排。
+    """
     safe_name = safe_timeline_project_name(project_name)
     return {
         "version": TIMELINE_VERSION,
@@ -130,7 +136,7 @@ def default_timeline(project_name: Any) -> dict[str, Any]:
             "task_overview": False,
             "tracks": [
                 {
-                    "id": "task-0",
+                    "id": f"task-{uuid.uuid4().hex}",
                     "name": "Task 0",
                     "type": "task",
                     "task_mode": "ref",
