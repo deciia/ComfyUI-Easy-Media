@@ -34,6 +34,11 @@ type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
 const BUTTON_CLASS = 'h-7 rounded border border-neutral-600 bg-neutral-800 px-2 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40'
 const PRIMARY_CLASS = 'h-7 rounded border border-sky-600 bg-sky-700 px-2 text-xs text-white hover:bg-sky-600 disabled:opacity-40'
 
+/** 防抖自动保存：停止编辑多久后写盘（毫秒）。 */
+const AUTOSAVE_DEBOUNCE_MS = 2500
+/** 自动保存失败后的重试延迟（毫秒）。 */
+const AUTOSAVE_RETRY_DELAY_MS = 2000
+
 interface DialogApi {
   confirm?: (options: { title?: string; message?: string }) => Promise<boolean>
 }
@@ -71,6 +76,10 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [pendingDelete, setPendingDelete] = useState(false)
   const savedSignatureRef = useRef<string | null>(null)
   const lastLoadedAtRef = useRef<number | null>(null)
+  // 自动保存：idle=待命 / saving=写盘中 / blocked=有冲突（停止自动保存） / error=失败
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'blocked' | 'error'>('idle')
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const autoSaveBlockedRef = useRef(false)
 
   const currentSignature = useMemo(() => timelineSignature(data), [data])
   const dirty = currentName !== '' && savedSignatureRef.current !== null
@@ -97,7 +106,11 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     try {
       const rows = await listTimelineProjects(app)
       const row = rows.find((item) => item.project_name === currentName)
-      const memoryUpdatedAt = typeof data.project?.updated_at === 'number' ? data.project.updated_at : 0
+      // 与内存里“最近一次保存/载入”的 updated_at 比较；不能用 data.project.updated_at，
+      // 因为自动保存为了不产生撤销记录，不会把它写回节点数据。
+      const memoryUpdatedAt = typeof lastLoadedAtRef.current === 'number'
+        ? lastLoadedAtRef.current
+        : (typeof data.project?.updated_at === 'number' ? data.project.updated_at : 0)
       if (!row?.has_timeline || Math.abs((row.updated_at ?? 0) - memoryUpdatedAt) <= 1e-3) return
       const document_ = await loadProjectTimeline(app, currentName)
       const trackData = {
@@ -135,6 +148,52 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, currentName, dirty, data, resolution, app, t])
 
+  // 防抖自动保存：仅在「已绑定项目 + 有未保存改动 + 不在忙」时，停止编辑 2.5 秒后写盘。
+  useEffect(() => {
+    if (!currentName || !dirty || busy || autoSaveBlockedRef.current) return
+    const timer = window.setTimeout(() => {
+      void runAutoSave(1)
+    }, AUTOSAVE_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentName, dirty, busy, data, resolution])
+
+  async function runAutoSave(retriesLeft: number) {
+    if (!currentName || autoSaveBlockedRef.current) return
+    setAutoSaveState('saving')
+    try {
+      const result = await saveProjectTimeline(app, {
+        projectName: currentName,
+        trackData: stripProjectMeta(data),
+        resolution: resolutionSnapshot(resolution),
+        format: resolution.format ?? null,
+        baseUpdatedAt: lastLoadedAtRef.current,
+      })
+      savedSignatureRef.current = timelineSignature({
+        ...stripProjectMeta(data),
+        project: { name: result.project_name, updated_at: result.updated_at },
+      })
+      lastLoadedAtRef.current = result.updated_at
+      setLastSavedAt(result.updated_at)
+      setAutoSaveState('idle')
+    } catch (error) {
+      if (error instanceof TimelineConflictError) {
+        // 别的窗口先保存过：绝不再覆盖，停下来让用户手动处理
+        lastLoadedAtRef.current = error.updatedAt
+        autoSaveBlockedRef.current = true
+        setAutoSaveState('blocked')
+        setMessage(t('multitrack.projectConflict'))
+        return
+      }
+      if (retriesLeft > 0) {
+        window.setTimeout(() => void runAutoSave(retriesLeft - 1), AUTOSAVE_RETRY_DELAY_MS)
+        return
+      }
+      setAutoSaveState('error')
+      setMessage(t('multitrack.projectAutoSaveFailed'))
+    }
+  }
+
   async function handleSelect(name: string) {
     if (name === currentName) return
     if (!name) {
@@ -147,6 +206,9 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       setPendingSwitch(null)
       savedSignatureRef.current = null
       lastLoadedAtRef.current = null
+      autoSaveBlockedRef.current = false
+      setAutoSaveState('idle')
+      setLastSavedAt(null)
       onApply(stripProjectMeta(data), null)
       setMessage(t('multitrack.projectUnbound'))
       return
@@ -167,6 +229,9 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = document_.updated_at
+      autoSaveBlockedRef.current = false
+      setAutoSaveState('idle')
+      setLastSavedAt(document_.updated_at)
       onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format })
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
     } catch (error) {
@@ -199,6 +264,9 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const trackData = { ...stripProjectMeta(data), project: { name: result.project_name, updated_at: result.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = result.updated_at
+      autoSaveBlockedRef.current = false
+      setAutoSaveState('idle')
+      setLastSavedAt(result.updated_at)
       onApply(trackData, { name: result.project_name, updated_at: result.updated_at })
       setEditing(null)
       setMessage(t('multitrack.projectSaved', { project: result.project_name }))
@@ -206,6 +274,8 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     } catch (error) {
       if (error instanceof TimelineConflictError) {
         lastLoadedAtRef.current = error.updatedAt
+        autoSaveBlockedRef.current = true
+        setAutoSaveState('blocked')
         setMessage(t('multitrack.projectConflict'))
       } else {
         setMessage(error instanceof Error ? error.message : t('multitrack.projectFailed'))
@@ -399,6 +469,17 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         </>
       )}
 
+      {autoSaveState === 'saving' ? (
+        <span className="text-neutral-400">{t('multitrack.projectAutoSaving')}</span>
+      ) : null}
+      {autoSaveState === 'idle' && lastSavedAt ? (
+        <span className="text-neutral-500" title={t('multitrack.projectAutoSavedHint')}>
+          {t('multitrack.projectAutoSaved', { time: new Date(lastSavedAt * 1000).toLocaleTimeString() })}
+        </span>
+      ) : null}
+      {autoSaveState === 'error' ? (
+        <span className="text-amber-400">{t('multitrack.projectAutoSaveFailed')}</span>
+      ) : null}
       {message ? <span className="ml-1 text-neutral-400">{message}</span> : null}
     </div>
   )

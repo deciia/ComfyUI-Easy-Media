@@ -338,7 +338,11 @@
     "projectDeleteFailed": "Failed to delete timeline",
     "projectEmptyConfirm": "This project timeline is empty; loading it clears the editor. Click again to confirm",
     "projectUnbound": "Back to default: content kept, project unbound",
-    "projectReloaded": "Reloaded from disk: {project}"
+    "projectReloaded": "Reloaded from disk: {project}",
+    "projectAutoSaving": "Saving…",
+    "projectAutoSaved": "Saved {time}",
+    "projectAutoSavedHint": "Auto-saves 2.5s after you stop editing; Ctrl+S saves immediately",
+    "projectAutoSaveFailed": "⚠ Auto-save failed, use Ctrl+S"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

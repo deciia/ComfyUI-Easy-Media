@@ -338,7 +338,11 @@
     "projectDeleteFailed": "删除时间线失败",
     "projectEmptyConfirm": "该项目时间线为空，载入会清空当前编辑器；再点一次确认载入",
     "projectUnbound": "已切回默认：内容保留，仅解除项目绑定",
-    "projectReloaded": "已从磁盘重新载入：{project}"
+    "projectReloaded": "已从磁盘重新载入：{project}",
+    "projectAutoSaving": "保存中…",
+    "projectAutoSaved": "已保存 {time}",
+    "projectAutoSavedHint": "停止编辑 2.5 秒后自动保存；Ctrl+S 可立即保存",
+    "projectAutoSaveFailed": "⚠ 自动保存失败，请用 Ctrl+S 手动保存"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",
