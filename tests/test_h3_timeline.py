@@ -91,7 +91,7 @@ def test_save_and_load_roundtrip_keeps_prompt_and_resolution(timeline):
                             "id": "s1",
                             "start_frame": 0,
                             "end_frame": 480,
-                            "content": {"user_prompt": "柴油车爬坡没力，按三步查。"},
+                            "content": {"user_prompt": "单元测试用提示词占位，与真实项目无关。"},
                         }
                     ],
                 }
@@ -106,7 +106,7 @@ def test_save_and_load_roundtrip_keeps_prompt_and_resolution(timeline):
     assert loaded["resolution"]["width"] == 768
     assert loaded["format"] == "MiniMax"
     segment = loaded["track_data"]["tracks"][0]["segments"][0]
-    assert segment["content"]["user_prompt"].startswith("柴油车")
+    assert segment["content"]["user_prompt"].startswith("单元测试")
 
 
 def test_save_writes_utf8_without_escaping(timeline):
@@ -196,7 +196,7 @@ def test_project_name_sanitising(timeline):
         "a/b": "a_b",
         "a:b*c?": "a_b_c_",
         "CON": "_CON",
-        "  老赵 项目  ": "老赵 项目",
+        "  测试 项目  ": "测试 项目",
     }
     for raw, expected in cases.items():
         assert module.safe_timeline_project_name(raw) == expected
