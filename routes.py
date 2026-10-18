@@ -294,6 +294,12 @@ async def handle_delete_h3_project_timeline(request: web.Request) -> web.Respons
     try:
         safe_name = safe_timeline_project_name(project_name)
         deleted = delete_timeline(safe_name)
+        # 2026-10-18：删除是破坏性动作，留一行服务端日志方便排查"点了删除却没生效"
+        print(  # noqa: T201
+            f"[EasyMedia] project timeline delete: raw={project_name!r} "
+            f"safe={safe_name!r} deleted={deleted}",
+            flush=True,
+        )
         return web.json_response({"project_name": safe_name, "deleted": deleted})
     except (TypeError, ValueError) as error:
         return web.json_response({"error": str(error)}, status=400)

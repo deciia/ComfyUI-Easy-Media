@@ -202,14 +202,16 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   async function handleDelete() {
     if (!currentName) return
     const dialog = extensionDialog(app)
+    console.info('[EasyMedia][ProjectBar] delete requested:', currentName, 'dialog=', !!dialog?.confirm, 'pendingDelete=', pendingDelete)
     if (dialog?.confirm) {
-      let confirmed = false
+      let result: unknown
       try {
-        confirmed = await dialog.confirm({
+        result = await dialog.confirm({
           title: t('multitrack.projectDeleteTitle'),
           message: t('multitrack.projectDeleteMessage', { project: currentName }),
         })
       } catch (error) {
+        console.warn('[EasyMedia][ProjectBar] dialog.confirm threw:', error)
         extensionToast(app)?.add?.({
           severity: 'error',
           summary: t('multitrack.projectDeleteFailed'),
@@ -218,7 +220,19 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         })
         return
       }
-      if (!confirmed) return
+      console.info('[EasyMedia][ProjectBar] dialog.confirm ->', result, '(typeof', typeof result, ')')
+      if (result === true) {
+        // 用户明确确认，继续删除
+      } else if (typeof result === 'boolean') {
+        // 用户明确取消
+        setMessage('')
+        return
+      } else if (!pendingDelete) {
+        // 返回值不是布尔（版本差异）：退化为按钮二次点击确认，避免"确认了却什么都没发生"
+        setPendingDelete(true)
+        setMessage(t('multitrack.projectDeleteConfirm'))
+        return
+      }
     } else if (!pendingDelete) {
       // 兜底：拿不到对话框 API 时退化为二次点击确认
       setPendingDelete(true)
@@ -230,7 +244,14 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     setMessage('')
     const target = currentName
     try {
-      await deleteProjectTimeline(app, target)
+      const deleted = await deleteProjectTimeline(app, target)
+      console.info('[EasyMedia][ProjectBar] DELETE ->', target, 'deleted=', deleted)
+      if (deleted !== true) {
+        // 文件本来就不存在：仍然刷新列表，让下拉反映真实状态
+        setMessage(t('multitrack.projectNoTimeline'))
+        void refreshProjects()
+        return
+      }
       const trackData = stripProjectMeta(data)
       savedSignatureRef.current = null
       lastLoadedAtRef.current = null
