@@ -264,11 +264,31 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   /** 项目栏载入/新建/删除后的统一写回：带上 project 标记，走撤销栈。 */
-  function applyProjectTimeline(nextData: TrackData, meta: { name: string; updated_at: number } | null) {
+  function applyProjectTimeline(
+    nextData: TrackData,
+    meta: { name: string; updated_at: number } | null,
+    snapshot?: { format?: string | null } | null,
+  ) {
     const withMeta: TrackData = meta
       ? { ...nextData, project: { name: meta.name, updated_at: meta.updated_at } }
       : stripProjectMeta(nextData)
     commitNormalizedTrackChange(withMeta)
+    // 恢复项目保存的“视频格式”：上下文接续、参考图 match/max 等控件只在 format=MiniMax 时渲染，
+    // 不恢复会让载入后的编辑器看起来“丢了功能”。
+    const savedFormat = snapshot?.format
+    if (typeof savedFormat === 'string' && savedFormat.length > 0) {
+      const widgets = (node as { widgets?: Array<{ name?: string; value?: unknown; callback?: (value: unknown) => void }> } | null)?.widgets ?? []
+      const formatWidget = widgets.find((widget) => widget?.name === 'format')
+      if (formatWidget && formatWidget.value !== savedFormat) {
+        formatWidget.value = savedFormat
+        try {
+          formatWidget.callback?.(savedFormat)
+        } catch {
+          // 忽略回调异常：节点值已写入
+        }
+        ;(app as { canvas?: { setDirty?: (dirty: boolean, canvas?: unknown) => void } } | null)?.canvas?.setDirty?.(true)
+      }
+    }
   }
 
   function setSingleSelectedSegment(segmentId: string | null) {

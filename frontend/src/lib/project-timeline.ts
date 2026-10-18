@@ -166,7 +166,9 @@ export async function createProjectTimeline(
 
 export async function deleteProjectTimeline(app: unknown, projectName: string): Promise<boolean> {
   const query = encodeURIComponent(projectName)
-  const { status, payload } = await request(app, `/easy-media/project/timeline?project_name=${query}`)
+  const { status, payload } = await request(app, `/easy-media/project/timeline?project_name=${query}`, {
+    method: 'DELETE',
+  })
   if (status !== 200) throw new Error(errorMessage(payload, 'Failed to delete timeline'))
   return payload.deleted === true
 }

@@ -21,7 +21,11 @@ interface ProjectBarProps {
   data: TrackData
   resolution: MultiTrackPreviewResolutionInput
   /** 载入/新建/删除后由编辑器统一写回（走撤销栈与节点值更新）。 */
-  onApply: (trackData: TrackData, meta: { name: string; updated_at: number } | null) => void
+  onApply: (
+    trackData: TrackData,
+    meta: { name: string; updated_at: number } | null,
+    snapshot?: { format?: string | null } | null,
+  ) => void
 }
 
 type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
@@ -119,7 +123,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = document_.updated_at
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format })
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
     } catch (error) {
       const text = error instanceof Error ? error.message : ''
@@ -187,7 +191,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = document_.updated_at
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format })
       setEditing(null)
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
       void refreshProjects()
