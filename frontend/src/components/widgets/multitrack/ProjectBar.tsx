@@ -109,17 +109,34 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   }, [busy, currentName, dirty, data, resolution, app, t])
 
   async function handleSelect(name: string) {
-    if (!name || name === currentName) return
-    if (dirty && pendingSwitch !== name) {
-      setPendingSwitch(name)
-      setMessage(t('multitrack.projectConfirmSwitch'))
+    if (name === currentName) return
+    if (!name) {
+      // 切回「默认（仅保存在工作流中）」：保留当前内容，只解除项目绑定
+      if (dirty && pendingSwitch !== '__default__') {
+        setPendingSwitch('__default__')
+        setMessage(t('multitrack.projectConfirmSwitch'))
+        return
+      }
+      setPendingSwitch(null)
+      savedSignatureRef.current = null
+      lastLoadedAtRef.current = null
+      onApply(stripProjectMeta(data), null)
+      setMessage(t('multitrack.projectUnbound'))
       return
     }
-    setPendingSwitch(null)
     setBusy(true)
     setMessage('')
     try {
       const document_ = await loadProjectTimeline(app, name)
+      const loadedTracks = Array.isArray(document_.track_data?.tracks) ? document_.track_data.tracks.length : 0
+      const wouldClearEditor = loadedTracks === 0 && data.tracks.length > 0
+      if ((dirty || wouldClearEditor) && pendingSwitch !== name) {
+        // 有未保存改动，或「载入空时间线会清空编辑器」→ 都要二次确认
+        setPendingSwitch(name)
+        setMessage(t(wouldClearEditor ? 'multitrack.projectEmptyConfirm' : 'multitrack.projectConfirmSwitch'))
+        return
+      }
+      setPendingSwitch(null)
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = document_.updated_at

@@ -335,7 +335,9 @@
     "projectDeleteTitle": "删除项目时间线",
     "projectDeleteMessage": "确定删除项目「{project}」的时间线吗？\n生成视频、上下文链与渲染清单都会保留，只删除轨道数据。",
     "projectDeleteSuccess": "已删除时间线：{project}",
-    "projectDeleteFailed": "删除时间线失败"
+    "projectDeleteFailed": "删除时间线失败",
+    "projectEmptyConfirm": "该项目时间线为空，载入会清空当前编辑器；再点一次确认载入",
+    "projectUnbound": "已切回默认：内容保留，仅解除项目绑定"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",
