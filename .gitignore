@@ -21,3 +21,11 @@ config.yaml
 superpowers/
 docs/superpowers/
 output/
+# --- 本地版本管理（2026-10-18）---
+# 手工备份（*.bak 已覆盖单点后缀，这里补下划线与连字符变体）
+*.bak_*
+*.bak-*
+*.bak.*
+# patch_refscope 本地补丁工具与其分块备份（未入库的一性性工具）
+patch_refscope_backup_chunks/
+patch_refscope_reapply.mjs
