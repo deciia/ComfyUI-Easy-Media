@@ -370,7 +370,20 @@
     "enhancerGenerate": "Generate",
     "enhancerGenerating": "Generating…",
     "enhancerApply": "Replace prompt",
-    "enhancerFailed": "Request failed"
+    "enhancerFailed": "Request failed",
+    "subjectGlobalPrompt": "Global prompt",
+    "subjectGlobalPromptPlaceholder": "Constrain the persistent characters / objects / environments",
+    "subjectCount": "{count} subject(s)",
+    "subjectCard": "Subject {index}",
+    "subjectName": "Name",
+    "subjectNamePlaceholder": "e.g. Anna / pump workshop",
+    "subjectKind": "Kind",
+    "subjectRetention": "Retention",
+    "subjectResource": "Bound resource",
+    "subjectDescription": "Definition",
+    "subjectRetentionText": "Keep description",
+    "subjectAutoAppend": "Auto-append resource when referenced",
+    "subjectAdd": "Add subject"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

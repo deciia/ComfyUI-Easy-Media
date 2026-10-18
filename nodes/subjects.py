@@ -24,11 +24,13 @@ from comfy_api.latest import io
 from ..utils.h3_subjects import (
     SUBJECT_CONFIG_TYPE,
     dump_subject_config,
-    parse_subject_config,
+    parse_subject_config_document,
     validate_subject_name,
 )
 
 SubjectConfig = io.Custom(SUBJECT_CONFIG_TYPE)
+# 卡片面板用的自定义 widget（前端在 getCustomWidgets 里注册 SUBJECT_DATA）
+SubjectData = io.Custom("SUBJECT_DATA")
 
 try:  # 与多轨编辑器同分类；导入失败时退回文本分类名
     from .basic import CATEGORY_MULTITRACK as _CATEGORY
@@ -51,24 +53,12 @@ class SubjectLibrary(io.ComfyNode):
                 "不接则编辑器行为完全不变。主体不保存编号，编号由任务段内资源顺序决定。"
             ),
             inputs=[
-                io.String.Input(
+                SubjectData.Input(
                     "subject_data",
-                    multiline=True,
-                    default=DEFAULT_SUBJECT_DATA,
                     tooltip=(
-                        "主体数据（JSON）。结构：{\"subjects\": [{\"name\": \"校泵车间\", "
-                        "\"kind\": \"image\", \"resource\": {\"path\": \"yusheng/ep2/工作台.jpg\", "
-                        "\"sha256\": \"\"}, \"description\": \"…\", \"role\": \"工具墙工位区\", "
-                        "\"retention\": \"fully_preserved\", \"auto_append\": true}]}"
+                        "主体数据（卡片面板自动管理）。每个主体绑定 input 相对路径，"
+                        "可写描述、职责、保留策略与是否随引用自动追加。"
                     ),
-                ),
-                io.Int.Input(
-                    "subject_count",
-                    default=0,
-                    min=0,
-                    max=64,
-                    step=1,
-                    tooltip="只用于前端显示；实际以 subject_data 内容为准。",
                 ),
             ],
             outputs=[
@@ -80,8 +70,9 @@ class SubjectLibrary(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, subject_data: str = DEFAULT_SUBJECT_DATA, subject_count: int = 0) -> io.NodeOutput:
-        subjects = parse_subject_config(subject_data)
+    def execute(cls, subject_data: object = DEFAULT_SUBJECT_DATA) -> io.NodeOutput:
+        document = parse_subject_config_document(subject_data)
+        subjects = document["subjects"]
         problems: list[str] = []
         for subject in subjects:
             error = validate_subject_name(subject["name"])
@@ -90,6 +81,7 @@ class SubjectLibrary(io.ComfyNode):
             if not subject["resource"]["path"]:
                 problems.append(f"{subject['name']}: 未绑定资源")
         config = dump_subject_config(subjects)
+        config["global_prompt"] = document["global_prompt"]
         config["problems"] = problems
         config["count"] = len(subjects)
         if problems:

@@ -1,4 +1,4 @@
-import { addInlineStyles } from "@/lib/add-stylesheet";
+﻿import { addInlineStyles } from "@/lib/add-stylesheet";
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveMultiImagesLoaderNodeSize } from '@/lib/multi-images-loader-node-size'
@@ -12,6 +12,7 @@ import type { TrackData } from '@/types/multitrack'
 import type { ImageData } from '@/components/widgets/MultiImagesLoaderWidget'
 import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidget'
 import type { ProjectData } from '@/types/project'
+import type { SubjectData } from '@/components/widgets/multitrack/SubjectLibraryWidget'
 import { DEFAULT_PROJECT_DATA } from '@/types/project'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 import { installWorkflowSubmission } from '@/lib/workflow-submission'
@@ -26,7 +27,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
+  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget, SubjectLibraryWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -124,6 +125,16 @@ comfyApp.registerExtension({
         domWidgetOptions: {
           getMinHeight: () => 44,
           getMaxHeight: () => 44,
+          hideOnZoom: false,
+          serialize: true,
+        },
+      }),
+      // 涓讳綋搴擄細鍗＄墖闈㈡澘锛堝榻?Ref 涓讳綋鑺傜偣鐨勪俊鎭眰绾э級
+      SUBJECT_DATA: createReactWidget<SubjectData>(SubjectLibraryWidget, {
+        defaultValue: JSON.stringify({ global_prompt: '', subjects: [] }),
+        keepResponsiveWidthInLiteGraph: true,
+        domWidgetOptions: {
+          getMinHeight: () => 300,
           hideOnZoom: false,
           serialize: true,
         },

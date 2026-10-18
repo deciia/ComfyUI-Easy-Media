@@ -370,7 +370,20 @@
     "enhancerGenerate": "生成",
     "enhancerGenerating": "生成中…",
     "enhancerApply": "替换提示词",
-    "enhancerFailed": "请求失败"
+    "enhancerFailed": "请求失败",
+    "subjectGlobalPrompt": "全局提示词",
+    "subjectGlobalPromptPlaceholder": "约束整支视频中持久出现的角色/物体/场景",
+    "subjectCount": "共 {count} 个主体",
+    "subjectCard": "主体 {index}",
+    "subjectName": "名称",
+    "subjectNamePlaceholder": "如：安娜 / 校泵车间",
+    "subjectKind": "类型",
+    "subjectRetention": "引用关系",
+    "subjectResource": "绑定资源",
+    "subjectDescription": "定义描述",
+    "subjectRetentionText": "保留描述",
+    "subjectAutoAppend": "引用时自动追加资源",
+    "subjectAdd": "添加主体"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

@@ -1,4 +1,4 @@
-// Custom ComfyUI widget components
+﻿// Custom ComfyUI widget components
 export { TimelineWidget } from './TimelineWidget'
 export { MultiTrackWidget } from './MultiTrackWidget'
 export { MultiImagesLoaderWidget } from './MultiImagesLoaderWidget'
@@ -7,3 +7,5 @@ export type { CompareVideoPayload } from './compareVideoWidget'
 export { PromptEnhancerAccountWidget } from './PromptEnhancerAccountBar'
 export { ProjectVideoCombineWidget } from './ProjectVideoCombineWidget'
 export { SamplingPreviewWidget } from './SamplingPreviewWidget'
+export { SubjectLibraryWidget } from './multitrack/SubjectLibraryWidget'
+export type { SubjectData, SubjectEntry } from './multitrack/SubjectLibraryWidget'
