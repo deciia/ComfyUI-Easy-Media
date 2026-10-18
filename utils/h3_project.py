@@ -1318,7 +1318,10 @@ def compose_h3_project_video(
     project_data: Any = None,
 ) -> Path:
     """Compose the selected H3 clips into a temporary video for downstream nodes."""
-    from .video import merge_video_track_with_ffmpeg
+    # Deciia fix (2026-10-06): the 10-05 segment-resolution probe below calls
+    # ffprobe_info, but the import only existed in inspect_h3_canvas and
+    # _h3_project_data — first combine run raised NameError.
+    from .video import ffprobe_info, merge_video_track_with_ffmpeg
 
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     fresh_data = load_h3_project_data(project_name)
@@ -1578,7 +1581,6 @@ def prepare_multitrack_project_media(
     locked_audio_priority = 0
     shared_image_identities: set[tuple[str, str]] = set()
     shared_image_sources: list[tuple[str, str] | None] = []
-    shared_audio_identities: set[tuple[str, str]] = set()
     shared_video_identities: set[tuple[str, str]] = set()
     resize_cache: dict[tuple, object] = {}
     video_audio_cache: dict[object, dict | None] = {}
@@ -1635,7 +1637,20 @@ def prepare_multitrack_project_media(
         audible = _project_track_is_audible(
             track, info, has_solo_track,
         )
-        if track.get("audio_locked") is True:
+        # Deciia fix (2026-10-06): P1 段级锁。轨级开关关着但窗口内存在
+        # audio_locked 段的轨也要走锁定提取（与 _h3_locked_track /
+        # multitrack_audio_lock_is_effective 的段级判定对齐）。整轨无任何
+        # 锁定段时保持原行为，不进提取块。
+        has_segment_lock_in_timeline = any(
+            isinstance(segment, dict)
+            and isinstance(segment.get("content"), dict)
+            and segment["content"].get("audio_locked") is True
+            for segment in segments
+        )
+        if (
+            track.get("audio_locked") is True
+            or has_segment_lock_in_timeline
+        ):
             resolved_segments: list[tuple[dict, dict]] = []
             if multitrack_audio_lock_is_effective(
                 info,
@@ -1681,7 +1696,11 @@ def prepare_multitrack_project_media(
                 # unlocked segments still feed task reference audio.)
                 track["segments"] = []
                 track.pop("media_index", None)
-            continue
+                continue
+            # Deciia fix (2026-10-06): 段级锁的轨不整轨 continue——非锁定段
+            # （如参考 wav）仍要落入下方共享参考提取循环，否则段级锁轨上的
+            # shared_reference 参考音频全部丢失（P3-beta1 症状 1）。锁定段
+            # 已并入 full_locked_audio，下面循环里再按 shared_reference 过滤。
 
         retained_segments: list[dict] = []
         for segment in segments:
@@ -1696,23 +1715,34 @@ def prepare_multitrack_project_media(
                 continue
             identity = multitrack_media_identity(content)
             if track_type == "audio":
-                if identity is not None and identity in shared_audio_identities:
+                # 多参考改造（2026-10-11，用户需求）：同轨允许多个参考片段，
+                # 不再按 identity 全局去重；参考的作用域 = 片段时间线区间，
+                # 由 crop_multitrack_project_media 按任务区间筛选分发。
+                # 静音的参考片段直接跳过：静音参考不占 ref_audios 名额（用户裁定）。
+                if audio_is_muted(content):
                     continue
                 source_audio = _project_shared_audio(content, audio_items)
-                if source_audio is not None:
+                if source_audio is None:
+                    print(
+                        f"[EasyMedia] shared audio reference at frames "
+                        f"{segment.get('start_frame')}-{segment.get('end_frame')} "
+                        "could not be resolved; skipped"
+                    )
+                else:
                     waveform = source_audio.get("waveform")
                     if isinstance(waveform, torch.Tensor):
                         gain = (
-                            audio_db_to_gain(track_volume_db)
-                            if audible and not audio_is_muted(content)
+                            audio_db_to_gain(track_volume_db + audio_volume_db(content))
+                            if audible
                             else 0.0
                         )
                         shared_audio.append({
                             "waveform": waveform * gain,
                             "sample_rate": int(source_audio.get("sample_rate", 44100)),
+                            "_start_frame": int(segment.get("start_frame", 0) or 0),
+                            "_end_frame": int(segment.get("end_frame", 0) or 0),
+                            "_identity": identity,
                         })
-                        if identity is not None:
-                            shared_audio_identities.add(identity)
             else:
                 if identity is not None and identity in shared_video_identities:
                     continue
@@ -1777,10 +1807,41 @@ def crop_multitrack_project_media(
     """Create task-length views of media already loaded for the project."""
     duration_frames = max(1, duration_frames)
     frame_rate = max(0.001, frame_rate)
-    cropped_audio = [
-        _trim_track_audio(audio, 0, duration_frames, frame_rate)
-        for audio in shared_audio
-    ]
+    task_end = max(0, start_frame) + duration_frames
+    cropped_audio: list[dict] = []
+    seen_identities: set = set()
+    skipped_by_overlap = 0
+    skipped_by_limit = 0
+    for audio in shared_audio:
+        ref_start = int(audio.get("_start_frame", 0) or 0)
+        ref_end = int(audio.get("_end_frame", 0) or 0)
+        # 多参考改造（2026-10-11）：参考只对时间线重叠的任务生效；
+        # 无区间信息的条目（兼容旧调用）始终保留。
+        if ref_end > ref_start and not (
+            ref_start < task_end and ref_end > max(0, start_frame)
+        ):
+            skipped_by_overlap += 1
+            continue
+        identity = audio.get("_identity")
+        if identity is not None:
+            if identity in seen_identities:
+                continue
+            seen_identities.add(identity)
+        if len(cropped_audio) >= 3:
+            # H3 ref_audios 上限 3（原生节点 ref_audio_ autogrow max=3）
+            skipped_by_limit += 1
+            continue
+        trimmed = _trim_track_audio(audio, 0, duration_frames, frame_rate)
+        cropped_audio.append({
+            "waveform": trimmed.get("waveform"),
+            "sample_rate": int(trimmed.get("sample_rate", 44100)),
+        })
+    if skipped_by_overlap or skipped_by_limit:
+        print(
+            f"[EasyMedia] task@{start_frame}: shared audio references "
+            f"skipped — overlap-miss: {skipped_by_overlap}, "
+            f"over-limit(>3): {skipped_by_limit}"
+        )
     cropped_video: list[object] = []
     for video in shared_video:
         trimmed = video.as_trimmed(

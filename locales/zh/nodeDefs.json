@@ -2045,7 +2045,12 @@
       "sampling_mode": {
         "name": "采样模式",
         "tooltip": "single 单次采样效果最好；dual 使用原有两次独立采样；selflift 使用单条渐进分辨率调度；passthrough 直接输出第 0 个完整时间线参考视频，并保存下一段所需的上下文。",
-        "options": {"single": "单次采样", "dual": "两次采样", "selflift": "SelfLift", "passthrough": "直通"}
+        "options": {
+          "single": "单次采样",
+          "dual": "两次采样",
+          "selflift": "SelfLift",
+          "passthrough": "直通"
+        }
       },
       "transition_ratio": {
         "name": "步数过渡比例",
@@ -2331,6 +2336,86 @@
       },
       "3": {
         "name": "视频"
+      }
+    }
+  },
+  "easy deciiaH3SemanticBridgeConfig": {
+    "display_name": "Deciia H3 语义桥 · 模型与设置 (T8 EXP)",
+    "description": "手动参数，旧默认 0.10 不变。新手请用「自动模型参数」节点按文件内容读取推荐值。动漫战斗固定 1.0 / per_token / all_tokens / chunk=0；武术 v1 不是 1.0。固定契约不匹配会在预检报错。多桥用显式「组合」，不要串多个 Apply。",
+    "inputs": {
+      "model_name": {
+        "name": "模型名称",
+        "tooltip": "原版/BUNNY：https://huggingface.co/t8star/Semantic-Bridge-Comfy ；T8 动漫战斗：https://huggingface.co/t8star/semantic_bridge_T8-comic-combat 。放在 models/semantic_bridge/t8_compat；不是 LoRA 或 H3 主模型。",
+        "options": {
+          "No Semantic Bridge models installed": "未安装 Semantic Bridge 模型"
+        }
+      },
+      "enabled": {
+        "name": "启用"
+      },
+      "alpha": {
+        "name": "强度 alpha"
+      },
+      "magnitude_match": {
+        "name": "幅度匹配",
+        "options": {
+          "per_token": "逐 token",
+          "global": "全局",
+          "none": "不匹配"
+        }
+      },
+      "token_scope": {
+        "name": "Token 作用范围",
+        "tooltip": "all_tokens 复现原作者；text_only 仅修改原生 tag=1 行，仍不能保证歌声。",
+        "options": {
+          "all_tokens": "全部 token（复现原作者）",
+          "text_only_preserve_reference": "仅文本（保留参考）"
+        }
+      },
+      "device": {
+        "name": "设备",
+        "options": {
+          "auto": "自动",
+          "cpu": "CPU",
+          "cuda": "CUDA"
+        }
+      },
+      "chunk_tokens": {
+        "name": "分块 Token 数",
+        "tooltip": "0 = 整段序列；部分训练好的 Transformer 桥接要求此项。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "语义桥"
+      },
+      "1": {
+        "name": "报告 JSON"
+      }
+    }
+  },
+  "easy deciiaH3HyperVAE2xLoader": {
+    "display_name": "Deciia HyperVAE 2× 加载 (T8 fork)",
+    "description": "加载 HyperVAE Krea2+MiniMax v2 2× 视频 VAE。编码仍为 H3 16×，解码为 32×；输出接原 video_vae，音频 VAE 不变。仅对显式选择的权重生效。",
+    "inputs": {
+      "vae_name": {
+        "name": "VAE 名称",
+        "tooltip": "直接列出 ComfyUI/models/vae 的文件；选择 HyperVAE 2× 权重。下方路径仅作旧图兼容覆盖。",
+        "options": {
+          "填写绝对路径": "填写绝对路径"
+        }
+      },
+      "absolute_path": {
+        "name": "绝对路径",
+        "tooltip": "可选兼容项，通常留空；填写后优先于 VAE 名称。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "视频 VAE"
+      },
+      "1": {
+        "name": "报告 JSON"
       }
     }
   }

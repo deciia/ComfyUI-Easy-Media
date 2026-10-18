@@ -437,6 +437,31 @@ def _h3_resolve_selflift_sigmas(
     ).out(0)
 
 
+def _h3_apply_shift_override(
+    graph: GraphBuilder,
+    model: Any,
+    *,
+    node_id: str,
+    shift_video: float,
+    shift_audio: float,
+) -> Any:
+    """在模型层统一施加 H3 视频/音频 sigma 偏移（2026-10-13）。
+
+    等价于核心节点 MiniMaxH3SigmaShift：patch model_sampling（shift / audio_shift）
+    并把同一对偏移经 transformer_options 交给 DiT，因此挂在这个模型上的任何采样器
+    都会继承它。每个项目只插一次（切勿放进段循环，否则每段都会多克隆一次模型）。
+    """
+    if model is None:
+        return None
+    return graph.node(
+        "MiniMaxH3SigmaShift",
+        id=node_id,
+        model=model,
+        shift_video=float(shift_video),
+        shift_audio=float(shift_audio),
+    ).out(0)
+
+
 def _h3_second_pass_model(
     value: Any,
     *,
@@ -970,15 +995,20 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option(
                             "selflift",
                             [
+                                # 2026-10-17：原地替换旧 transition_ratio（槽位/数量不变，
+                                # 旧工作流 widget 值不错位），改为双语义「过渡点」。
                                 io.Float.Input(
-                                    "transition_ratio",
+                                    "transition_point",
                                     default=0.6,
-                                    min=0.05,
-                                    max=0.95,
+                                    min=0.0,
+                                    max=10000.0,
                                     step=0.05,
                                     tooltip=(
-                                        "Fraction of denoiser evaluations performed "
-                                        "at low resolution."
+                                        "过渡点：0~1 = 比例（低清阶段占用的 NFE 比例，"
+                                        "内部自动换算成步数）；≥1 = 步数（低清评估次数，"
+                                        "四舍五入取整，与 selflift-Avatar 的 transition_step "
+                                        "同义）。例：7 次评估时 0.71≈5 步；直接填 5 也是 "
+                                        "5 步。越界会在采样开始时明确报错，不静默夹取。"
                                     ),
                                 ),
                                 io.Float.Input(
@@ -1043,6 +1073,86 @@ class EasyMultiTrackProject(io.ComfyNode):
                         ),
                     ],
                     tooltip="Enable shared high-resolution H3 spatial tiling.",
+                ),
+                # 高级输入（2026-10-11）：追加在列表末尾，避免旧工作流 widget 值错位；
+                # 默认折叠，节点底部原生「显示高级输入」按钮展开。新增高级参数往这组里加。
+                io.Float.Input(
+                    "shift_video",
+                    default=12.0,
+                    min=0.01,
+                    max=100.0,
+                    step=0.01,
+                    advanced=True,
+                    tooltip=(
+                        "高级：视频 sigma 偏移（默认 12.0 = H3 模型默认值）。适用范围："
+                        "除 dual_t8（其双钟链路自行处理，不受此控件影响）外，single / dual / "
+                        "selflift 都生效——在模型层统一施加一次，作用于视频档位与 DiT 的"
+                        "时间步换算。一般无需改动，只有换用 DMAD 等特殊协议时才需要；"
+                        "若 sigmas 由外部节点生成，本值须与 sigmas 生成端保持同一偏移，"
+                        "否则档位与模型假设不一致。改动影响很大。"
+                    ),
+                ),
+                io.Float.Input(
+                    "shift_audio",
+                    default=3.0,
+                    min=0.01,
+                    max=100.0,
+                    step=0.01,
+                    advanced=True,
+                    tooltip=(
+                        "高级：音频 sigma 偏移（默认 3.0 = H3 模型默认值）。适用范围："
+                        "除 dual_t8（其双钟链路自行处理）外，single / dual / selflift 都生效，"
+                        "与视频偏移一起在模型层施加。它决定音频与视频 sigma 的比例 "
+                        "audio_scale = 视频偏移 ÷ 音频偏移（12/3 → 4，12/2 → 6）："
+                        "DMAD 协议用 2.0，其余情况保持 3.0。改动影响很大，非必要不要改。"
+                    ),
+                ),
+                # 高级输入（2026-10-13 追加；2026-10-17 过渡点已移入 selflift 子选项里
+                # 原地替换旧 transition_ratio，顶层不再重复；此处只留放大器卸载开关）。
+                io.Boolean.Input(
+                    "upscaler_unload",
+                    default=True,
+                    advanced=True,
+                    tooltip=(
+                        "高级：SelfLift 学习放大器完成举升后立即从显存卸载（默认开启，与 "
+                        "YZ金鱼 SelfLift Progressive Sampler 的 upscaler_unload 一致），把"
+                        "显存让给高清阶段——12GB 卡上尤其有用。关闭则保留在显存中供后续复用"
+                        "（省去重新加载的几百毫秒）。仅 selflift 模式生效。"
+                    ),
+                ),
+                # 高级输入（2026-10-17）：SelfLift 伪影修正强度区间，追加在末尾不错位。
+                io.Float.Input(
+                    "w_min",
+                    default=0.25,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    advanced=True,
+                    tooltip=(
+                        "高级：SelfLift 伪影一致性修正的强度下限（默认 0.25 = 原本硬编码值，"
+                        "不动即与旧行为完全一致）。两组推荐值（成对使用，改一个请同时改另一个）："
+                        "①温和（现行默认）w_min / w_max = 0.25 / 0.7——配合学习放大器防过矫；"
+                        "②论文 & YZ金鱼 SelfLift Progressive Sampler 默认 = 0.5 / 1.0——修正更"
+                        "彻底、画面更锐。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样开始会明确报错"
+                        "（不静默纠正）。注意：w 仅在 rho>0 时才参与计算，而 rho 目前由代码按段"
+                        "自动决定（上下文连续段 0.1，其余 0）。仅 selflift 模式生效。"
+                    ),
+                ),
+                io.Float.Input(
+                    "w_max",
+                    default=0.7,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    advanced=True,
+                    tooltip=(
+                        "高级：SelfLift 伪影一致性修正的强度上限（默认 0.7 = 原本硬编码值，"
+                        "不动即与旧行为完全一致）。两组推荐值（成对使用）：①温和（现行默认）"
+                        "w_min / w_max = 0.25 / 0.7；②论文 & YZ金鱼 SelfLift Progressive "
+                        "Sampler 默认 = 0.5 / 1.0。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样"
+                        "开始会明确报错（不静默纠正）。同样只在 rho>0 时参与计算。仅 selflift "
+                        "模式生效。"
+                    ),
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
@@ -1112,17 +1222,71 @@ class EasyMultiTrackProject(io.ComfyNode):
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
+        # 高级输入（2026-10-11）：视频/音频 sigma 偏移覆盖；默认值 = 原本硬编码值，向后兼容
+        def _shift_value(raw, fallback: float) -> float:
+            """旧工作流 widget 错位可能给到空串/0 等脏值——非法时回落默认，避免采样崩。"""
+            try:
+                value = float(_first_input(raw, fallback))
+            except (TypeError, ValueError):
+                return fallback
+            return value if value > 0 else fallback
+
+        shift_video_override = _shift_value(kwargs.get("shift_video"), 12.0)
+        shift_audio_override = _shift_value(kwargs.get("shift_audio"), 3.0)
         has_second_pass = sampling_mode in ("dual", "dual_t8")
         transition_ratio = 0.6
         lowres_scale = 0.6
+        # 过渡点（2026-10-17 原地替换 transition_ratio 的双语义控件）：
+        #   0~1 = 比例（低位默认 0.6 换算）；>=1 = 步数；脏值/负数 → 回退 0.6 比例。
+        # 兼容：老文件/老 API prompt 里可能仍是 transition_ratio 或顶层 transition_step。
+        transition_step_override = 0
+        upscaler_unload = True
+        # 伪影修正强度区间（2026-10-17 起可在高级输入里手调；默认=原硬编码值）
+        w_min_override = 0.25
+        w_max_override = 0.7
         tiling_enabled, tile_count = _h3_tiling_config(kwargs.get("enabled_tiling"))
         if is_selflift:
-            transition_ratio = float(
-                _first_input(sampling_config.get("transition_ratio"), 0.6)
-            )
+            raw_point = sampling_config.get("transition_point")
+            if raw_point is None:
+                raw_point = sampling_config.get("transition_ratio")
+            if raw_point is None:
+                raw_point = kwargs.get("transition_step")
+            if raw_point is None:
+                raw_point = kwargs.get("transition_ratio")
+            try:
+                transition_point = float(_first_input(raw_point, 0.6))
+            except (TypeError, ValueError):
+                transition_point = 0.6
+            if not math.isfinite(transition_point) or transition_point < 0.0:
+                transition_point = 0.6
+            if transition_point >= 1.0:
+                # 步数语义：四舍五入取整；越界由引擎比对 sigmas 档数后明确报错（不夹取）
+                transition_step_override = int(round(transition_point))
+            elif transition_point > 0.0:
+                # 比例语义
+                transition_ratio = transition_point
+                transition_step_override = 0
+            else:
+                # 0/非法值：回退默认比例 0.6（自 lift 引擎按比例换算）
+                transition_step_override = 0
             lowres_scale = float(
                 _first_input(sampling_config.get("lowres_scale"), 0.6)
             )
+            upscaler_unload = bool(
+                _first_input(kwargs.get("upscaler_unload"), True)
+            )
+            try:
+                w_min_override = float(_first_input(kwargs.get("w_min"), 0.25))
+            except (TypeError, ValueError):
+                w_min_override = 0.25
+            try:
+                w_max_override = float(_first_input(kwargs.get("w_max"), 0.7))
+            except (TypeError, ValueError):
+                w_max_override = 0.7
+            if not math.isfinite(w_min_override) or not 0.0 <= w_min_override <= 1.0:
+                w_min_override = 0.25
+            if not math.isfinite(w_max_override) or not 0.0 <= w_max_override <= 1.0:
+                w_max_override = 0.7
             legacy_highres_tiling = bool(
                 _first_input(sampling_config.get("highres_tiling"), False)
             )
@@ -1454,6 +1618,39 @@ class EasyMultiTrackProject(io.ComfyNode):
                         graph, preset_name=preset_name, is_turbo=second_is_turbo,
                         has_custom_second_pass_sampling=custom_second)
         report_step(31)
+
+        # 偏移（sigma shift）适用范围（2026-10-13）：single / dual / selflift 都在模型层
+        # 统一施加一次；dual_t8 由双钟链路（DualClock / DetailMixer）自行处理，保持原行为，
+        # 避免双重施加；passthrough 不采样、无采样任务时也不插入。位置必须在段循环之外，
+        # 否则每段都会多克隆一次模型。
+        if not is_dual_t8 and not is_passthrough and has_sampling_tasks:
+            first_model_input = model
+            model = _h3_apply_shift_override(
+                graph,
+                first_model_input,
+                node_id="h3_shift_override",
+                shift_video=shift_video_override,
+                shift_audio=shift_audio_override,
+            )
+            if second_model_loader is None or second_model is first_model_input:
+                # 未接二采加载器：二采/高清阶段与一采共用同一模型，复用同一份 patch 输出。
+                second_model = model
+            else:
+                second_model = _h3_apply_shift_override(
+                    graph,
+                    second_model,
+                    node_id="h3_shift_override_2nd",
+                    shift_video=shift_video_override,
+                    shift_audio=shift_audio_override,
+                )
+            log_node_info(
+                node_name,
+                "H3 sigma shift video={:g} audio={:g} applied at model layer "
+                "(all sampling modes except dual_t8)".format(
+                    shift_video_override,
+                    shift_audio_override,
+                ),
+            )
 
         report_step(33)
 
@@ -1789,7 +1986,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     id=f"dual_clock_{task_index}",
                     model=first_pass_sampling_model,
                     av_latent=initial_latent,
-                    steps=8, shift_video=12.0, shift_audio=3.0,
+                    steps=8, shift_video=shift_video_override, shift_audio=shift_audio_override,
                     sampler_name="dual_clock_euler", scheduler="native_flow",
                 )
                 parity_plan = graph.node(
@@ -1857,10 +2054,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "sigmas": first_pass_sigmas,
                     "seed": first_pass_seed,
                     "transition_ratio": transition_ratio,
+                    "transition_step": transition_step_override,
+                    "upscaler_unload": upscaler_unload,
                     "lowres_scale": lowres_scale,
                     "rho": 0.1 if has_context_continuity else 0.0,
-                    "w_max": 0.7,
-                    "w_min": 0.25,
+                    "w_max": w_max_override,
+                    "w_min": w_min_override,
                     "upscaler_model": selected_upscale_model,
                     "enabled_tiling": tiling_enabled,
                     "tile_count": tile_count,
@@ -2085,7 +2284,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         model=second_pass_sampling_model,
                         av_latent=upscaled_latent,
                         refine_sigmas=dual_t8_refine_sigmas,
-                        shift_video=12.0, shift_audio=3.0,
+                        shift_video=shift_video_override, shift_audio=shift_audio_override,
                         enable_tail=False, extra_tail_steps=3, tail_spacing="video_sigma_linear",
                         enable_model_time_bias=False, bias=-0.025,
                         bias_start_progress=0.7, bias_end_progress=0.95, bias_domain="video_sigma",

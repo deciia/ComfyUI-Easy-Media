@@ -368,6 +368,7 @@ def progressive_sample_h3(
     transition_ratio: float,
     lowres_scale: float,
     *,
+    transition_step: int | None = None,
     highres_model: Any | None = None,
     latent_lifter: Callable[[torch.Tensor, tuple[int, int]], torch.Tensor] | None = None,
     low_context_latent: dict[str, Any] | None = None,
@@ -391,7 +392,13 @@ def progressive_sample_h3(
         raise ValueError("SelfLift: invalid artifact-correction parameters")
 
     step_count = int(sigmas.numel()) - 1
-    transition_step = selflift_transition_step(step_count, transition_ratio)
+    # 显式步数（2026-10-13）：>0 时直接生效并优先于 transition_ratio；不做静默夹取，
+    # 超出档位范围由下方 _validate_schedule 明确报错。
+    transition_from_step = transition_step is not None
+    if transition_step is None:
+        transition_step = selflift_transition_step(step_count, transition_ratio)
+    else:
+        transition_step = int(transition_step)
     _validate_schedule(sigmas, transition_step)
     _validate_latent_input(latent_image)
     model_sampling = model.get_model_object("model_sampling")
@@ -423,13 +430,14 @@ def progressive_sample_h3(
     low_shape = (batch, channels, frames, low_height, low_width)
     logging.info(
         "[SelfLift plan] low_latent=%s target_latent=%s low_nfe=%d high_nfe=%d "
-        "transition_ratio=%.4f sigma_prediction=%.8g sigma_resume=%.8g "
+        "transition_ratio=%.4f transition_source=%s sigma_prediction=%.8g sigma_resume=%.8g "
         "direct_lift=%s pixel_anchor=%s",
         low_shape,
         tuple(streams[0].shape),
         transition_step,
         step_count - transition_step,
         transition_ratio,
+        "explicit_step" if transition_from_step else "ratio",
         sigmas[transition_step - 1].item(),
         sigmas[transition_step].item(),
         "external" if latent_lifter is not None else "nearest",

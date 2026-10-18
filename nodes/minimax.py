@@ -1508,6 +1508,130 @@ class EasyH3ConditioningCache(io.ComfyNode):
 
 
 
+def _dump_cond_payload(guider: Any, segment_index: int, sampling_pass: str) -> None:
+    """deciia diagnostic (2026-10-07): 只读 dump 送进采样器的 conditioning 音频账目。
+
+    目标：定位段1 一采 "shape mismatch: value [1600,32] vs indexing [1674,32]"
+    （1674-1600=74=37步×2 行 = 运动上下文音频锚），看 keyframes/refs 各自带了
+    什么音频、挂在哪个 position，与 layout 期望对不上的环节在哪。
+    绝不修改任何数据，只读打印。
+    """
+    conds = getattr(guider, "original_conds", None)
+    if conds is None:
+        # 兜底：别的 guider 类型
+        conds = getattr(guider, "conditioning", None)
+    if conds is None or isinstance(conds, dict) and not conds:
+        log_node_info("MultiTrack Project", f"[shapeaudit] seg{segment_index}({sampling_pass}) guider 无条件可dump: {type(guider).__name__}")
+        return
+
+    # original_conds 是 {"positive": [...], "negative": [...]}; 兼容纯列表
+    if isinstance(conds, dict):
+        cond_pairs = [(name, c) for name, c in conds.items()]
+    else:
+        cond_pairs = [("cond", conds)]
+
+    def _shape(t: Any) -> str:
+        return tuple(t.shape) if hasattr(t, "shape") else type(t).__name__
+
+    lines: list[str] = [f"[shapeaudit] seg{segment_index}({sampling_pass}) guider={type(guider).__name__}"]
+    for name, cond_list in cond_pairs:
+        lines.append(f" == {name}: {len(cond_list)} 条 ==")
+        for ci, entry in enumerate(cond_list):
+            emb, meta = (entry[0], entry[1]) if isinstance(entry, (list, tuple)) else (None, entry)
+            kfs = meta.get("minimax_keyframes") or []
+            refs = meta.get("minimax_refs") or []
+            lines.append(
+                f"  cond[{ci}] keyframes={len(kfs)} refs={len(refs)}"
+                f" hooks={'有' if meta.get('hooks') else '无'}"
+            )
+            for ki, kf in enumerate(kfs):
+                lines.append(
+                    f"    kf[{ki}] pos={kf.get('resolved_frame_index', kf.get('position', '?'))}"
+                    f" latent={'无' if kf.get('latent') is None else _shape(kf.get('latent'))}"
+                    f" audio={'无' if kf.get('audio_latent') is None else _shape(kf.get('audio_latent'))}"
+                    f" keys={sorted(kf.keys())}"
+                )
+            for ri, r in enumerate(refs):
+                lines.append(
+                    f"    ref[{ri}] kind={r.get('kind', '?')}"
+                    f" audio={'无' if r.get('audio_latent') is None else _shape(r.get('audio_latent'))}"
+                    f" ref_audio_t={r.get('ref_audio_t', '?')} keys={sorted(r.keys())}"
+                )
+            # 音频行合计：audio_latent 每步 2 行（fp32 [1,32,2,T] → T*2 行）
+            audio_rows = 0
+            for kf in kfs:
+                al = kf.get("audio_latent")
+                if al is not None and hasattr(al, "shape"):
+                    audio_rows += int(al.shape[-1]) * int(al.shape[-2]) if al.ndim >= 2 else 1
+            for r in refs:
+                al = r.get("audio_latent")
+                if al is not None and hasattr(al, "shape"):
+                    audio_rows += int(al.shape[-1]) * int(al.shape[-2]) if al.ndim >= 2 else 1
+            lines.append(f"  cond[{ci}] 音频行合计(按 T×2 估)={audio_rows}")
+    for ln in lines:
+        log_node_info("MultiTrack Project", ln)
+
+
+_EMBED_AUDIT_INSTALLED = False
+
+
+def _install_embed_and_pack_audit() -> None:
+    """deciia diagnostic (2026-10-07): 崩点前一刻取证。
+
+    包一层 comfy.ldm.minimax.model.MiniMaxH3Model._embed_and_pack：
+    布局音频行数 != cond_audio_latents 实际行数时，打印 payload 现场
+    （keyframes/refs 的 audio_latent 有无与形状、layout 段表），再放行原调用。
+    只读不改，模块级装一次。
+    """
+    global _EMBED_AUDIT_INSTALLED
+    if _EMBED_AUDIT_INSTALLED:
+        return
+    _EMBED_AUDIT_INSTALLED = True
+    try:
+        import comfy.ldm.minimax.model as mm_model
+
+        original = mm_model.MiniMaxH3Model._embed_and_pack
+
+        def _audited(self, video_x, audio_x, context, layout, payload, transformer_options):
+            try:
+                want = int(layout.audio_update.numel()) - int(layout.audio_update.sum().item())
+                have = 0
+                for z in payload.get("cond_audio_latents") or []:
+                    have += int(z.shape[-1]) * 2 if hasattr(z, "shape") else 0
+                if want != have:
+                    def _sh(t):
+                        return tuple(t.shape) if hasattr(t, "shape") else type(t).__name__
+
+                    lines = [
+                        f"[shapeaudit-embed] 布局条件音频行={want} 实际值行={have} 差={want - have}",
+                        f"  layout.signature={layout.signature} seq_len={layout.seq_len}",
+                        f"  segments={[s for s in layout.segments if s[2] in ('cond_audio', 'ref_audio')]}",
+                        f"  payload.keyframes={len(payload.get('keyframes') or [])} refs={len(payload.get('refs') or [])}",
+                    ]
+                    for i, kf in enumerate(payload.get("keyframes") or []):
+                        lines.append(
+                            f"    kf[{i}] pos={kf.get('resolved_frame_index')} "
+                            f"audio={'无' if kf.get('audio_latent') is None else _sh(kf.get('audio_latent'))} "
+                            f"latent={'无' if kf.get('latent') is None else _sh(kf.get('latent'))}"
+                        )
+                    for i, r in enumerate(payload.get("refs") or []):
+                        lines.append(
+                            f"    ref[{i}] kind={r.get('kind')} ref_audio_t={r.get('ref_audio_t')} "
+                            f"audio={'无' if r.get('audio_latent') is None else _sh(r.get('audio_latent'))}"
+                        )
+                    lines.append(f"  cond_audio_latents={[_sh(z) for z in (payload.get('cond_audio_latents') or [])]}")
+                    for ln in lines:
+                        log_node_info("MultiTrack Project", ln)
+            except Exception as exc:
+                log_node_info("MultiTrack Project", f"[shapeaudit-embed] 取证自身出错: {exc!r}")
+            return original(self, video_x, audio_x, context, layout, payload, transformer_options)
+
+        mm_model.MiniMaxH3Model._embed_and_pack = _audited
+        log_node_info("MultiTrack Project", "[shapeaudit-embed] 已挂载 _embed_and_pack 运行时取证")
+    except Exception as exc:
+        log_node_info("MultiTrack Project", f"[shapeaudit-embed] 挂载失败: {exc!r}")
+
+
 class EasyH3SegmentSamplingStart(io.ComfyNode):
     """Notify and log immediately before a project sampling pass starts."""
 
@@ -1553,6 +1677,18 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         previous: Any | None = None,
     ) -> io.NodeOutput:
         del previous
+        # --- deciia diagnostic (2026-10-07): dump conditioning payload snapshot ---
+        # 只读诊断：段采样开始前打印 positive 条件的 keyframes/refs 音频账目，
+        # 用于定位 "shape mismatch: [1600,32] vs [1674,32]"（layout 多算 74 行音频锚）。
+        try:
+            _install_embed_and_pack_audit()
+            _dump_cond_payload(guider, segment_index, sampling_pass)
+        except Exception as _exc:  # 诊断绝不阻断主流程
+            log_node_info(
+                "MultiTrack Project",
+                f"[shapeaudit] segment {segment_index} dump failed: {_exc!r}",
+            )
+        # --- deciia diagnostic end ---
         _notify_multitrack_project_refresh(
             project_name,
             "before",
@@ -1921,6 +2057,34 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     tooltip="Optional project-loop execution dependency.",
                 ),
                 io.Model.Input("highres_model", optional=True),
+                # 高级输入（2026-10-13）：追加在列表末尾，旧工作流 widget 值不错位。
+                io.Int.Input(
+                    "transition_step",
+                    default=0,
+                    min=0,
+                    max=10000,
+                    step=1,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "高级：低清评估次数（NFE 绝对步数，与 selflift-Avatar 的 "
+                        "transition_step 同义）。0（默认）= 按 transition_ratio 自动"
+                        "换算；>0 时直接生效并优先于 ratio。不静默夹取，超出本次 "
+                        "sigmas 有效范围会在采样开始时报错。"
+                    ),
+                ),
+                # 高级输入（2026-10-17）：学习放大器举升后卸载，追加在末尾不错位。
+                io.Boolean.Input(
+                    "upscaler_unload",
+                    default=True,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "高级：举升完成后立即把外部 H3 放大器从显存卸载（默认开启，与 "
+                        "YZ金鱼 SelfLift Progressive Sampler 的 upscaler_unload 一致），"
+                        "为高清阶段腾显存；关闭则保留在显存中供后续复用。"
+                    ),
+                ),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1956,9 +2120,20 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         sampling_pass: str = "selflift",
         previous: Any | None = None,
         highres_model: Any | None = None,
+        transition_step: int = 0,
+        upscaler_unload: bool = True,
     ) -> io.NodeOutput:
         del previous
         from ..modules.selflift.sampling import progressive_sample_h3
+
+        # 显式过渡步（2026-10-13）：脏值/0/负数回落 auto（按 ratio 换算），>0 优先。
+        try:
+            parsed_transition_step = int(transition_step)
+        except (TypeError, ValueError):
+            parsed_transition_step = 0
+        explicit_transition_step = (
+            parsed_transition_step if parsed_transition_step > 0 else None
+        )
 
         tiling_enabled = bool(enabled_tiling or highres_tiling)
         preview_callback = None
@@ -2014,6 +2189,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     latent,
                     target_size,
                     selected_upscaler,
+                    force_unload=bool(upscaler_unload),
                     temporal_split=temporal_split,
                 )
 
@@ -2021,6 +2197,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
             "MiniMax H3 SelfLift Sampler",
             "Sampling with forced Euler, "
             f"transition_ratio={float(transition_ratio):.3f}, "
+            f"transition_step={'auto' if explicit_transition_step is None else explicit_transition_step}, "
             f"lowres_scale={lowres_factor:.3f}, "
             f"rho={correction_rho:.3f}, "
             f"weights={correction_min:.3f}..{correction_max:.3f}, "
@@ -2039,6 +2216,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                 sigmas=sigmas,
                 seed=int(seed),
                 transition_ratio=float(transition_ratio),
+                transition_step=explicit_transition_step,
                 lowres_scale=lowres_factor,
                 latent_lifter=latent_lifter,
                 low_context_latent=low_context_latent,
@@ -2917,3 +3095,99 @@ class EasyRemoveH3MotionContextLatent(io.ComfyNode):
             filename_path,
         )
         return io.NodeOutput(input, deleted_count)
+
+
+ 
+ 
+class EasyMiniMaxH3SamplerSelect(io.ComfyNode):
+    """K 采样器选择器的 H3 扩展版：下拉含 dmad（DMAD 4 步重噪声规则）与全部 ComfyUI 原生采样器。
+
+    dmad 档必须搭配：simple 调度 4 步 + MiniMaxH3SigmaShift(video 12 / audio 2) + DMAD 蒸馏 LoRA。
+    """
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxH3SamplerSelect",
+            display_name="MiniMax H3 采样器选择器（含 DMAD）",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Sampler select with the DMAD 4-step re-noise rule plus all native "
+                "ComfyUI samplers. dmad requires the DMAD distillation LoRA, a "
+                "simple 4-step schedule, and video/audio sigma shift 12/2."
+            ),
+            inputs=[
+                io.Combo.Input(
+                    "sampler_name",
+                    options=[
+                        "dmad",
+                        "euler",
+                        "euler_ancestral",
+                        "heun",
+                        "heunpp2",
+                        "dpm_2",
+                        "dpm_2_ancestral",
+                        "lms",
+                        "dpm_fast",
+                        "dpm_adaptive",
+                        "dpmpp_2s_ancestral",
+                        "dpmpp_sde",
+                        "dpmpp_2m",
+                        "dpmpp_2m_sde",
+                        "dpmpp_3m_sde",
+                        "ddpm",
+                        "ddim",
+                        "uni_pc",
+                        "uni_pc_bh2",
+                        "res_multistep",
+                    ],
+                    default="dmad",
+                    tooltip="dmad = DMAD 4-step re-noise rule; others are native ComfyUI samplers.",
+                ),
+            ],
+            outputs=[io.Sampler.Output()],
+        )
+
+    @classmethod
+    def execute(cls, sampler_name: str) -> io.NodeOutput:
+        import comfy.samplers
+
+        if sampler_name == "dmad":
+            sampler = comfy.samplers.KSAMPLER(_dmad_renoise_sampler)
+        else:
+            sampler = comfy.samplers.sampler_object(sampler_name)
+        return io.NodeOutput(sampler)
+
+
+@torch.no_grad()
+def _dmad_renoise_sampler(model, x, sigmas, extra_args=None, callback=None, disable=None, **kwargs):
+    """DMAD (DMD 式) 步规则：预测 x0，再按下一个 sigma 重新加噪。
+
+    实现移植自 ComfyUI-Spark-H3 的 comfyui_dmad.py（zechengtang/Spark-H3）。
+    """
+    import comfy.k_diffusion.sampling
+    from tqdm.auto import trange
+
+    extra_args = {} if extra_args is None else extra_args
+    noise_sampler = comfy.k_diffusion.sampling.default_noise_sampler(
+        x, seed=extra_args.get("seed")
+    )
+    s_in = x.new_ones((x.shape[0],))
+    for index in trange(len(sigmas) - 1, disable=disable):
+        sigma = sigmas[index]
+        sigma_next = sigmas[index + 1]
+        denoised = model(x, sigma * s_in, **extra_args)
+        if float(sigma_next) == 0.0:
+            x = denoised
+        else:
+            noise = noise_sampler(sigma, sigma_next)
+            x = (1.0 - sigma_next) * denoised + sigma_next * noise
+        if callback is not None:
+            callback({
+                "i": index,
+                "denoised": denoised,
+                "x": x,
+                "sigma": sigma,
+                "sigma_hat": sigma,
+            })
+    return x

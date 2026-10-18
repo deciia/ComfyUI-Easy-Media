@@ -247,11 +247,16 @@ def multitrack_audio_lock_is_effective(
     Video timing remains independent from this decision. This helper only
     answers whether the track is allowed to provide lock audio.
     """
+    # Deciia fix (2026-10-06): the gate previously required the track-level
+    # audio_locked flag and returned False immediately otherwise, which silently
+    # dropped segment-level locks (P1 design): a track with track-level lock off
+    # but segment-level locks inside the window must still qualify. The final
+    # any() below already enforces "segment locked OR track locked", so the gate
+    # only needs to accept either entry path.
     if (
         not isinstance(info, dict)
         or not isinstance(track, dict)
         or track.get("type") not in {"audio", "video"}
-        or track.get("audio_locked") is not True
         or audio_is_muted(info)
         or audio_is_muted(track)
     ):
