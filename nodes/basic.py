@@ -1902,6 +1902,16 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Image.Output("IMAGES", is_output_list=True),
                 io.Audio.Output("AUDIO", is_output_list=True),
                 io.Video.Output("VIDEO", is_output_list=True),
+                # 2026-10-18：项目名出口。接到「多轨项目 / 多轨项目视频合并」的 project_name
+                # 即可用连线覆盖手填值，避免三处手填不一致。
+                io.String.Output(
+                    "PROJECT_NAME",
+                    tooltip=(
+                        "当前时间线绑定的项目名（来自项目栏）。未绑定项目时输出 default。"
+                        "把它连到「多轨项目」或「多轨项目视频合并」的 project_name 输入，"
+                        "执行时会以连线值为准覆盖手填值。"
+                    ),
+                ),
             ],
         )
 
@@ -1980,7 +1990,15 @@ class MultiTrackEditor(io.ComfyNode):
             materialize_media=materialize_media,
         )
 
-        return io.NodeOutput(tracks_info, images_out, audio_out, video_out)
+        # 供下游「多轨项目 / 视频合并」的 project_name 输入使用：未绑定项目时输出 default
+        project_meta = data.get("project")
+        project_name = ""
+        if isinstance(project_meta, dict):
+            project_name = str(project_meta.get("name") or "").strip()
+        if not project_name:
+            project_name = "default"
+
+        return io.NodeOutput(tracks_info, images_out, audio_out, video_out, project_name)
 
 
 class TimelineInfoOutput(io.ComfyNode):
