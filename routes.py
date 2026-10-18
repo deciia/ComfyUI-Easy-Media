@@ -54,6 +54,15 @@ from .utils.h3_timeline import (
     safe_timeline_project_name,
     save_timeline,
 )
+from .utils.h3_prompt_validate import validate_prompt
+from .utils.prompt_enhancer import (
+    PROVIDER_DEFAULTS,
+    PromptEnhancerError,
+    generate_prompt,
+    load_config as load_prompt_enhancer_config,
+    masked_config as mask_prompt_enhancer_config,
+    save_config as save_prompt_enhancer_config,
+)
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -921,3 +930,98 @@ async def handle_subtitle_speech(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Subtitle speech generation failed: {error}"}, status=500)
+
+
+# --------------------------------------------------------------------------- #
+# 提示词增强器（模态窗）：配置 + 生成
+# 设计见 D:\workspace\docs\easymedia-subject-prompt-compose-spec.md §6
+# --------------------------------------------------------------------------- #
+def _resolve_enhancer_images(items) -> list[str]:
+    """把 input 相对路径解析成绝对路径；非绝对且不存在则丢弃。"""
+    from pathlib import Path
+
+    import folder_paths as _fp
+
+    resolved: list[str] = []
+    for item in items if isinstance(items, list) else []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        path = Path(text)
+        if not path.is_absolute():
+            path = Path(_fp.get_input_directory()) / text
+        if path.is_file():
+            resolved.append(str(path))
+    return resolved
+
+
+@PromptServer.instance.routes.get("/easy-media/prompt-studio/config")
+async def handle_prompt_studio_config_get(_request: web.Request) -> web.Response:
+    """读取提示词增强器配置（api_key 脱敏）。"""
+    try:
+        config = load_prompt_enhancer_config()
+        return web.json_response({
+            "config": mask_prompt_enhancer_config(config),
+            "providers": PROVIDER_DEFAULTS,
+        })
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to read config: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.put("/easy-media/prompt-studio/config")
+async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
+    """保存提示词增强器配置到 ComfyUI/user/DeciiaEasyMedia/prompt_studio.json。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return web.json_response({"error": "config must be an object"}, status=400)
+        current = load_prompt_enhancer_config()
+        merged = dict(current)
+        for key, value in payload.items():
+            if key == "api_key":
+                continue
+            merged[key] = value
+        api_key = str(payload.get("api_key") or "").strip()
+        if api_key:
+            merged["api_key"] = api_key
+        path = save_prompt_enhancer_config(merged)
+        return web.json_response({
+            "ok": True,
+            "path": str(path),
+            "config": mask_prompt_enhancer_config(merged),
+        })
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to save config: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/prompt-studio/generate")
+async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
+    """生成规范提示词；失败不覆盖原文，校验不过也原样返回失败项。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return web.json_response({"error": "payload must be an object"}, status=400)
+        brief = str(payload.get("brief") or "").strip()
+        if not brief:
+            return web.json_response({"error": "片段提示词为空"}, status=400)
+        payload = dict(payload)
+        payload["images"] = _resolve_enhancer_images(payload.get("images"))
+        result = await generate_prompt(payload)
+        options = payload.get("options") or {}
+        task_type = str(options.get("task_type") or "")
+        failures = validate_prompt(
+            result.get("prompt", ""),
+            require_sections="Ref" in task_type,
+            picture_count=payload.get("picture_count"),
+            audio_count=payload.get("audio_count"),
+            video_count=payload.get("video_count"),
+            max_shots=payload.get("max_shots"),
+        )
+        return web.json_response({**result, "failures": failures})
+    except PromptEnhancerError as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to generate prompt: {error}"}, status=500)
