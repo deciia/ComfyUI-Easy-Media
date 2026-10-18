@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Globe } from 'lucide-react'
 import { Lock, Share2, Unlock, VolumeX, Volume2} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -74,6 +75,9 @@ interface MultiTrackSegmentBlockProps {
   onReferenceScopeChange?: (scope: 'window' | 'full') => void
   sharedReference?: boolean
   onSharedReferenceToggle?: (enabled: boolean) => void
+  /** 参考作用域三态：off / aligned（仅重叠任务）/ global（全片） */
+  referenceMode?: 'off' | 'aligned' | 'global'
+  onReferenceModeChange?: (mode: 'off' | 'aligned' | 'global') => void
 }
 
 function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth: number) {
@@ -124,8 +128,12 @@ export function MultiTrackSegmentBlock({
   onReferenceScopeChange,
   sharedReference = false,
   onSharedReferenceToggle,
+  referenceMode,
+  onReferenceModeChange,
 }: Readonly<MultiTrackSegmentBlockProps>) {
   const t = useT()
+  const effectiveReferenceMode = referenceMode
+    ?? (sharedReference ? (referenceScope === 'full' ? 'global' : 'aligned') : 'off')
   const didDragRef = useRef(false)
   const dragPreviewRef = useRef<{
     x: number
@@ -547,11 +555,22 @@ export function MultiTrackSegmentBlock({
                   <Button
                   type="button"
                   size="icon"
-                  variant={sharedReference ? 'secondary' : 'ghost'}
+                  variant={effectiveReferenceMode !== 'off' ? 'secondary' : 'ghost'}
                   data-testid={`${trackType}-shared-reference`}
-                  aria-label={sharedReference ? t('multitrack.disableSharedReference') : t('multitrack.enableSharedReference')}
-                  aria-pressed={sharedReference}
-                  className={`h-3 w-3 cursor-pointer rounded-sm bg-background/70 p-0 opacity-80 [&_svg]:!size-2 ${sharedReference ? 'text-highlight opacity-100' : 'text-muted-foreground'} hover:opacity-100`}
+                  data-reference-mode={effectiveReferenceMode}
+                  aria-label={
+                    effectiveReferenceMode === 'off'
+                      ? t('multitrack.enableSharedReference')
+                      : effectiveReferenceMode === 'aligned'
+                        ? t('multitrack.referenceAligned')
+                        : t('multitrack.referenceGlobal')
+                  }
+                  aria-pressed={effectiveReferenceMode !== 'off'}
+                  className={`h-3 w-3 cursor-pointer rounded-sm bg-background/70 p-0 opacity-80 [&_svg]:!size-2 ${
+                    effectiveReferenceMode !== 'off'
+                      ? 'text-highlight opacity-100'
+                      : 'text-muted-foreground'
+                  } hover:opacity-100`}
                   onMouseDown={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
@@ -559,14 +578,24 @@ export function MultiTrackSegmentBlock({
                   onClick={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
-                    onSharedReferenceToggle?.(!sharedReference)
+                    const nextMode = effectiveReferenceMode === 'off'
+                      ? 'aligned'
+                      : effectiveReferenceMode === 'aligned'
+                        ? 'global'
+                        : 'off'
+                    if (onReferenceModeChange) onReferenceModeChange(nextMode)
+                    else onSharedReferenceToggle?.(nextMode !== 'off')
                   }}
                   >
-                    <Share2 />
+                    {effectiveReferenceMode === 'global' ? <Globe /> : <Share2 />}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">
-                  {t('multitrack.sharedReferenceTooltip')}
+                  {effectiveReferenceMode === 'global'
+                    ? t('multitrack.referenceGlobalTooltip')
+                    : effectiveReferenceMode === 'aligned'
+                      ? t('multitrack.referenceAlignedTooltip')
+                      : t('multitrack.sharedReferenceTooltip')}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -641,12 +670,35 @@ export function MultiTrackSegmentBlock({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        {trackType === 'audio' && onReferenceScopeChange ? (
-          <>
-            <ContextMenuItem onClick={() => onReferenceScopeChange(referenceScope === 'full' ? 'window' : 'full')}>
-              {t('multitrack.referenceScopeToggle', { scope: referenceScope === 'full' ? t('multitrack.referenceScopeWindow') : t('multitrack.referenceScopeFull') })}
-            </ContextMenuItem>
-          </>
+        {(trackType === 'audio' || trackType === 'video') && onReferenceModeChange ? (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              {t('multitrack.referenceScopeMenu')}
+              <span className="ml-2 text-[10px] text-muted-foreground">
+                {effectiveReferenceMode === 'off'
+                  ? t('multitrack.referenceOff')
+                  : effectiveReferenceMode === 'aligned'
+                    ? t('multitrack.referenceAligned')
+                    : t('multitrack.referenceGlobal')}
+              </span>
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem onClick={() => onReferenceModeChange('off')}>
+                {effectiveReferenceMode === 'off' ? '\u2713 ' : ''}{t('multitrack.referenceOff')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onReferenceModeChange('aligned')}>
+                {effectiveReferenceMode === 'aligned' ? '\u2713 ' : ''}{t('multitrack.referenceAligned')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onReferenceModeChange('global')}>
+                {effectiveReferenceMode === 'global' ? '\u2713 ' : ''}{t('multitrack.referenceGlobal')}
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        ) : null}
+        {trackType === 'audio' && !onReferenceModeChange && onReferenceScopeChange ? (
+          <ContextMenuItem onClick={() => onReferenceScopeChange(referenceScope === 'full' ? 'window' : 'full')}>
+            {t('multitrack.referenceScopeToggle', { scope: referenceScope === 'full' ? t('multitrack.referenceScopeWindow') : t('multitrack.referenceScopeFull') })}
+          </ContextMenuItem>
         ) : null}
         {trackType === 'video' && onSmartSplit ? (
           <ContextMenuItem onClick={() => onSmartSplit(segment.id)}>

@@ -65,12 +65,34 @@ def canonicalize_multitrack_slot_content(content: dict) -> dict:
     return normalized
 
 
+REFERENCE_MODE_OFF = "off"
+REFERENCE_MODE_ALIGNED = "aligned"
+REFERENCE_MODE_GLOBAL = "global"
+REFERENCE_MODES = (REFERENCE_MODE_OFF, REFERENCE_MODE_ALIGNED, REFERENCE_MODE_GLOBAL)
+
+
+def multitrack_reference_mode(content: dict) -> str:
+    """Return the reference scope: off / aligned / global.
+
+    ``reference_mode`` is the canonical field. Legacy booleans are migrated:
+    ``shared_reference``/``speaker_reference`` true means the clip is a
+    reference, and the old ``reference_scope == "full"`` maps to global.
+    """
+    if not isinstance(content, dict):
+        return REFERENCE_MODE_OFF
+    raw = content.get("reference_mode")
+    if isinstance(raw, str) and raw in REFERENCE_MODES:
+        return raw
+    if content.get("shared_reference") is True or content.get("speaker_reference") is True:
+        if content.get("reference_scope") == "full":
+            return REFERENCE_MODE_GLOBAL
+        return REFERENCE_MODE_ALIGNED
+    return REFERENCE_MODE_OFF
+
+
 def multitrack_is_shared_reference(content: dict) -> bool:
     """Accept the unified flag and the legacy audio speaker-reference flag."""
-    return isinstance(content, dict) and (
-        content.get("shared_reference") is True
-        or content.get("speaker_reference") is True
-    )
+    return multitrack_reference_mode(content) != REFERENCE_MODE_OFF
 
 
 def multitrack_is_muted_image(content: dict) -> bool:

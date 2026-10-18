@@ -1,3 +1,5 @@
+export type MultiTrackReferenceMode = 'off' | 'aligned' | 'global'
+
 export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle'
 
 export type MultiTrackTaskMode = 'default' | 'l2v' | 'ref' | 'edit' | 'passthrough'
@@ -67,6 +69,8 @@ export interface MultiTrackSegmentContent {
   audio_locked?: boolean
   /** Deciia P2: reference audio scope — 'window' (task window part only, default) or 'full' (whole file). */
   reference_scope?: 'window' | 'full'
+  /** off / aligned(仅重叠任务可用) / global(全片可用) */
+  reference_mode?: MultiTrackReferenceMode
   /** @deprecated Migrated to shared_reference when legacy workflows are loaded. */
   speaker_reference?: boolean
   subtitle_style?: MultiTrackSubtitleStyle

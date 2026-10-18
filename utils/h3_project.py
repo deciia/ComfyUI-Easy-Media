@@ -35,6 +35,7 @@ from .multitrack import (
     _trim_track_audio,
     multitrack_audio_lock_is_effective,
     multitrack_is_shared_reference,
+    multitrack_reference_mode,
     multitrack_is_muted_image,
     multitrack_media_identity,
     multitrack_segments_in_window,
@@ -1548,6 +1549,30 @@ def _project_shared_video(
     return _resolve_multitrack_video(content, video_items)
 
 
+class _ScopedVideoReference:
+    """共享视频参考 + 作用域（aligned 只对重叠任务生效，global 全片生效）。"""
+
+    __slots__ = ("_video", "reference_mode", "start_frame", "end_frame", "source_start_frame")
+
+    def __init__(self, video, reference_mode: str, start_frame: int, end_frame: int,
+                 source_start_frame: int = 0):
+        self._video = video
+        self.reference_mode = reference_mode
+        self.start_frame = int(start_frame or 0)
+        self.end_frame = int(end_frame or 0)
+        self.source_start_frame = int(source_start_frame or 0)
+
+    def as_trimmed(self, start_time=0.0, duration=0.0, strict_duration=False):
+        return self._video.as_trimmed(
+            start_time=start_time,
+            duration=duration,
+            strict_duration=strict_duration,
+        )
+
+    def __getattr__(self, item):
+        return getattr(self._video, item)
+
+
 def prepare_multitrack_project_media(
     tracks_info: list | dict | str,
 ) -> tuple[dict, list[torch.Tensor], list[dict], list[object], dict | None]:
@@ -1714,6 +1739,15 @@ def prepare_multitrack_project_media(
                 retained_segments.append(segment)
                 continue
             identity = multitrack_media_identity(content)
+            reference_mode = multitrack_reference_mode(content)
+            segment_start = int(segment.get("start_frame", 0) or 0)
+            raw_origin = segment.get("origin_start_frame")
+            try:
+                origin_start = int(raw_origin)
+            except (TypeError, ValueError):
+                origin_start = segment_start
+            # 轨道上裁剪后的起点：片段左边缘相对素材起点的偏移
+            source_start_frame = max(0, segment_start - origin_start)
             if track_type == "audio":
                 # 多参考改造（2026-10-11，用户需求）：同轨允许多个参考片段，
                 # 不再按 identity 全局去重；参考的作用域 = 片段时间线区间，
@@ -1742,19 +1776,27 @@ def prepare_multitrack_project_media(
                             "_start_frame": int(segment.get("start_frame", 0) or 0),
                             "_end_frame": int(segment.get("end_frame", 0) or 0),
                             "_identity": identity,
+                            "_reference_mode": reference_mode,
+                            "_source_start_frame": source_start_frame,
                         })
             else:
                 if identity is not None and identity in shared_video_identities:
                     continue
                 source_video = _project_shared_video(content, video_items)
                 if source_video is not None:
-                    shared_video.append(_resize_multitrack_video(
-                        source_video,
-                        width,
-                        height,
-                        resize_method,
-                        resize_cache,
-                        lambda _ratio: None,
+                    shared_video.append(_ScopedVideoReference(
+                        _resize_multitrack_video(
+                            source_video,
+                            width,
+                            height,
+                            resize_method,
+                            resize_cache,
+                            lambda _ratio: None,
+                        ),
+                        reference_mode,
+                        int(segment.get("start_frame", 0) or 0),
+                        int(segment.get("end_frame", 0) or 0),
+                        source_start_frame,
                     ))
                     if identity is not None:
                         shared_video_identities.add(identity)
@@ -1817,7 +1859,8 @@ def crop_multitrack_project_media(
         ref_end = int(audio.get("_end_frame", 0) or 0)
         # 多参考改造（2026-10-11）：参考只对时间线重叠的任务生效；
         # 无区间信息的条目（兼容旧调用）始终保留。
-        if ref_end > ref_start and not (
+        reference_mode = str(audio.get("_reference_mode", "aligned"))
+        if reference_mode != "global" and ref_end > ref_start and not (
             ref_start < task_end and ref_end > max(0, start_frame)
         ):
             skipped_by_overlap += 1
@@ -1831,7 +1874,14 @@ def crop_multitrack_project_media(
             # H3 ref_audios 上限 3（原生节点 ref_audio_ autogrow max=3）
             skipped_by_limit += 1
             continue
-        trimmed = _trim_track_audio(audio, 0, duration_frames, frame_rate)
+        reference_length = ref_end - ref_start
+        limit_frames = (
+            min(duration_frames, reference_length)
+            if reference_length > 0
+            else duration_frames
+        )
+        source_start = int(audio.get("_source_start_frame", 0) or 0)
+        trimmed = _trim_track_audio(audio, source_start, limit_frames, frame_rate)
         cropped_audio.append({
             "waveform": trimmed.get("waveform"),
             "sample_rate": int(trimmed.get("sample_rate", 44100)),
@@ -1844,9 +1894,21 @@ def crop_multitrack_project_media(
         )
     cropped_video: list[object] = []
     for video in shared_video:
+        video_mode = str(getattr(video, "reference_mode", "global"))
+        video_start = int(getattr(video, "start_frame", 0) or 0)
+        video_end = int(getattr(video, "end_frame", 0) or 0)
+        video_source_start = int(getattr(video, "source_start_frame", 0) or 0)
+        if video_mode != "global" and video_end > video_start and not (
+            video_start < task_end and video_end > max(0, start_frame)
+        ):
+            continue
+        video_length = video_end - video_start
+        video_limit = (
+            min(duration_frames, video_length) if video_length > 0 else duration_frames
+        )
         trimmed = video.as_trimmed(
-            start_time=0.0,
-            duration=duration_frames / frame_rate,
+            start_time=video_source_start / frame_rate,
+            duration=video_limit / frame_rate,
             strict_duration=False,
         )
         if trimmed is not None:

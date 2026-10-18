@@ -388,7 +388,13 @@
     "enhancerPromptMode": "Prompt mode",
     "enhancerSkillProfile": "Official skill profile",
     "enhancerReferenceTemplate": "Reference template (shots/pacing/camera/style)",
-    "enhancerMaximize": "Maximize"
+    "enhancerMaximize": "Maximize",
+    "referenceScopeMenu": "Reference scope",
+    "referenceOff": "Not a reference",
+    "referenceAligned": "Aligned to segments",
+    "referenceGlobal": "Global",
+    "referenceAlignedTooltip": "Reference · aligned: only task segments overlapping this clip can use it (drag to change coverage)",
+    "referenceGlobalTooltip": "Reference · global: every task segment can use it"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

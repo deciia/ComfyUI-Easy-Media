@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
+import { getReferenceMode } from '@/lib/multitrack-utils'
 import { mediaPathToViewUrl } from '@/lib/media-url'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import { computeSlotItems } from '@/lib/timeline-utils'
@@ -48,6 +49,7 @@ interface AudioTrackProps {
   /** Deciia P1: patch a segment's content (audio_locked / muted / reference_scope …). */
   onSegmentContentChange?: (trackId: string, segmentId: string, patch: Partial<MultiTrackSegment['content']>) => void
   onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
+  onReferenceModeChange?: (trackId: string, segmentId: string, mode: 'off' | 'aligned' | 'global') => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -86,6 +88,7 @@ export function AudioTrack({
   onTrackAudioSettingsChange,
   onSegmentContentChange,
   onSharedReferenceChange = () => {},
+  onReferenceModeChange,
   onResizeSegment,
   onResizeSegmentPreview,
   onMoveSegment,
@@ -178,6 +181,10 @@ export function AudioTrack({
             onSharedReferenceToggle={(enabled) => {
               onSharedReferenceChange(track.id, segment.id, enabled)
             }}
+            referenceMode={getReferenceMode(segment.content)}
+            onReferenceModeChange={onReferenceModeChange
+              ? (mode) => onReferenceModeChange(track.id, segment.id, mode)
+              : undefined}
             onDoubleClick={(segmentId, event) => {
               const rect = contentRef.current?.getBoundingClientRect()
               if (!rect) return

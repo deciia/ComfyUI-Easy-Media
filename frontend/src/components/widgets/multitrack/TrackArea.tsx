@@ -79,6 +79,7 @@ interface TrackAreaProps {
   /** Deciia P1: patch segment content (lock/mute/reference scope). */
   onSegmentContentChange?: (trackId: string, segmentId: string, patch: Partial<MultiTrackSegment['content']>) => void
   onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
+  onReferenceModeChange?: (trackId: string, segmentId: string, mode: 'off' | 'aligned' | 'global') => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
   canMergeSelectedTaskSegments?: boolean
@@ -203,6 +204,7 @@ export function TrackArea({
   onTrackAudioSettingsChange,
   onSegmentContentChange,
   onSharedReferenceChange = () => {},
+  onReferenceModeChange,
   onDistributeTaskSegments,
   onCloneTaskSegment,
   canMergeSelectedTaskSegments = false,
@@ -605,6 +607,7 @@ export function TrackArea({
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onSegmentContentChange={onSegmentContentChange}
               onSharedReferenceChange={onSharedReferenceChange}
+              onReferenceModeChange={onReferenceModeChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => {
@@ -639,6 +642,7 @@ export function TrackArea({
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onSegmentContentChange={onSegmentContentChange}
               onSharedReferenceChange={onSharedReferenceChange}
+              onReferenceModeChange={onReferenceModeChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}

@@ -30,6 +30,7 @@ import {
   moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
   normalizeTrackData,
+  referenceModePatch,
   remapFrameToRate,
   remapTrackDataFrameRate,
   resizeTaskSegmentEnd,
@@ -799,6 +800,33 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           ? { ...track, visible }
           : track
       )),
+    })
+  }
+
+  function handleReferenceModeChange(
+    trackId: string,
+    segmentId: string,
+    mode: 'off' | 'aligned' | 'global',
+  ) {
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: data.tracks.map((track) => {
+        if (track.id !== trackId || (track.type !== 'audio' && track.type !== 'video')) return track
+        return {
+          ...track,
+          segments: track.segments.map((segment) => (
+            segment.id === segmentId
+              ? {
+                  ...segment,
+                  content: {
+                    ...segment.content,
+                    ...referenceModePatch(mode),
+                  },
+                }
+              : segment
+          )),
+        }
+      }),
     })
   }
 
@@ -1624,6 +1652,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
             onSegmentContentChange={handleSegmentContentChange}
                     onSharedReferenceChange={handleSharedReferenceChange}
+              onReferenceModeChange={handleReferenceModeChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneSegment}
                     canMergeSelectedTaskSegments={canMergeSelectedTaskSegments}

@@ -1643,7 +1643,20 @@ function normalizeLegacySegment(segment: LegacyMultiTrackSegment): MultiTrackSeg
   // audio_locked stays as a track default that a segment can override.
   if (content.audio_locked !== true) delete content.audio_locked
   if (content.media_type === 'audio' || content.media_type === 'video') {
-    content.shared_reference = content.shared_reference === true || content.speaker_reference === true
+    const legacyShared =
+      content.shared_reference === true || content.speaker_reference === true
+    const rawMode = (content as { reference_mode?: unknown }).reference_mode
+    const mode =
+      rawMode === 'off' || rawMode === 'aligned' || rawMode === 'global'
+        ? rawMode
+        : legacyShared
+          ? content.reference_scope === 'full'
+            ? 'global'
+            : 'aligned'
+          : 'off'
+    content.reference_mode = mode
+    content.shared_reference = mode !== 'off'
+    content.reference_scope = mode === 'global' ? 'full' : 'window'
   }
   delete content.speaker_reference
   return {
@@ -1659,20 +1672,7 @@ function normalizeTrackSegments(track: LegacyMultiTrack): MultiTrackSegment[] {
   const segments = track.segments
     .map((segment) => normalizeLegacySegment(segment))
     .sort((a, b) => a.start_frame - b.start_frame)
-  if (track.type !== 'audio' && track.type !== 'video') return segments
-
-  let keptSharedReference = false
-  return segments.map((segment) => {
-    if (segment.content.shared_reference !== true) return segment
-    if (!keptSharedReference) {
-      keptSharedReference = true
-      return segment
-    }
-    return {
-      ...segment,
-      content: { ...segment.content, shared_reference: false },
-    }
-  })
+  return segments
 }
 
 function normalizeTaskSegmentContent(content: MultiTrackSegment['content']): MultiTrackSegment['content'] {
@@ -1836,4 +1836,37 @@ function normalizeTaskMarkers(value: unknown, totalLength: number): MultiTrackTa
     seenFrames.add(marker.frame)
     return true
   })
+}
+
+
+export type MultitrackReferenceMode = 'off' | 'aligned' | 'global'
+
+export const MULTITRACK_REFERENCE_MODES: MultitrackReferenceMode[] = ['off', 'aligned', 'global']
+
+/** Resolve the reference scope of an audio/video segment (with legacy migration). */
+export function getReferenceMode(content: unknown): MultitrackReferenceMode {
+  if (!content || typeof content !== 'object') return 'off'
+  const record = content as Record<string, unknown>
+  const raw = record.reference_mode
+  if (raw === 'off' || raw === 'aligned' || raw === 'global') return raw
+  const legacy = record.shared_reference === true || record.speaker_reference === true
+  if (!legacy) return 'off'
+  return record.reference_scope === 'full' ? 'global' : 'aligned'
+}
+
+/** off -> aligned -> global -> off */
+export function nextReferenceMode(mode: MultitrackReferenceMode): MultitrackReferenceMode {
+  if (mode === 'off') return 'aligned'
+  if (mode === 'aligned') return 'global'
+  return 'off'
+}
+
+/** Content patch for a mode change (keeps legacy fields in sync for older readers). */
+export function referenceModePatch(mode: MultitrackReferenceMode): Record<string, unknown> {
+  return {
+    reference_mode: mode,
+    shared_reference: mode !== 'off',
+    reference_scope: mode === 'global' ? 'full' : 'window',
+    speaker_reference: undefined,
+  }
 }

@@ -141,7 +141,7 @@ describe('multitrack utilities', () => {
     expect(track.segments[0].content).not.toHaveProperty('audio_locked')
   })
 
-  it('migrates legacy speaker clips and keeps only the first shared reference', () => {
+  it('migrates legacy speaker clips into aligned references (multiple allowed)', () => {
     const data = createDefaultTrackData()
     data.tracks.push({
       id: 'audio', name: 'Audio', type: 'audio', color: 'var(--multitrack-audio-bg)',
@@ -154,7 +154,8 @@ describe('multitrack utilities', () => {
 
     const normalized = normalizeTrackData(data)
     const track = normalized.tracks.find((item) => item.id === 'audio')!
-    expect(track.segments.map((segment) => segment.content.shared_reference)).toEqual([true, false])
+    expect(track.segments.map((segment) => segment.content.shared_reference)).toEqual([true, true])
+    expect(track.segments.map((segment) => segment.content.reference_mode)).toEqual(['aligned', 'aligned'])
     expect(track.segments.every((segment) => segment.content.speaker_reference === undefined)).toBe(true)
   })
 
