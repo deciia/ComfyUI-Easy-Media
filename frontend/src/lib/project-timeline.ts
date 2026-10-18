@@ -153,11 +153,14 @@ export async function saveProjectTimeline(
 export async function createProjectTimeline(
   app: unknown,
   projectName: string,
+  template?: TrackData | null,
 ): Promise<ProjectTimelineDocument> {
+  const body: Record<string, unknown> = { project_name: projectName }
+  if (template) body.template = { track_data: template }
   const { status, payload } = await request(app, '/easy-media/project/timeline/new', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_name: projectName }),
+    body: JSON.stringify(body),
   })
   if (status === 409) throw new Error('exists')
   if (status !== 201) throw new Error(errorMessage(payload, 'Failed to create timeline'))

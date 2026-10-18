@@ -115,7 +115,7 @@ def timeline_path(project_name: Any) -> Path:
 
 
 def default_timeline(project_name: Any) -> dict[str, Any]:
-    """新建项目的默认时间线：不含轨道，由编辑器自行加轨。"""
+    """新建项目的默认时间线：带一条空的“任务”轨（与编辑器默认一致）。"""
     safe_name = safe_timeline_project_name(project_name)
     return {
         "version": TIMELINE_VERSION,
@@ -128,7 +128,20 @@ def default_timeline(project_name: Any) -> dict[str, Any]:
             "volume_db": 0.0,
             "task_markers": [],
             "task_overview": False,
-            "tracks": [],
+            "tracks": [
+                {
+                    "id": "task-0",
+                    "name": "Task 0",
+                    "type": "task",
+                    "task_mode": "ref",
+                    "color": "var(--multitrack-task-bg)",
+                    "muted": False,
+                    "solo": False,
+                    "volume_db": 0.0,
+                    "locked": False,
+                    "segments": [],
+                }
+            ],
             "total_length": 0,
             "frame_rate": 24,
         },

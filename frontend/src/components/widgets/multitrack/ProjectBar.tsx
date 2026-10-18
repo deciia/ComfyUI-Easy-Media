@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MultiTrackPreviewResolutionInput } from '@/lib/multitrack-utils'
+import { createDefaultTrackData } from '@/lib/multitrack-utils'
 import type { TrackData } from '@/types/multitrack'
 import {
   TimelineConflictError,
@@ -204,7 +205,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     setBusy(true)
     setMessage('')
     try {
-      const document_ = await createProjectTimeline(app, name)
+      const document_ = await createProjectTimeline(app, name, createDefaultTrackData())
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)
       lastLoadedAtRef.current = document_.updated_at
