@@ -331,7 +331,11 @@
     "projectDeleted": "已删除时间线（视频与渲染清单保留）",
     "projectConfirmSwitch": "有未保存改动：再点一次切换（放弃改动）",
     "projectConfirmNew": "当前时间线不为空：再点一次新建（将清空编辑器）",
-    "projectFailed": "操作失败"
+    "projectFailed": "操作失败",
+    "projectDeleteTitle": "删除项目时间线",
+    "projectDeleteMessage": "确定删除项目「{project}」的时间线吗？\n生成视频、上下文链与渲染清单都会保留，只删除轨道数据。",
+    "projectDeleteSuccess": "已删除时间线：{project}",
+    "projectDeleteFailed": "删除时间线失败"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

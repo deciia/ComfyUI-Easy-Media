@@ -331,7 +331,11 @@
     "projectDeleted": "Timeline deleted (videos and manifest kept)",
     "projectConfirmSwitch": "Unsaved changes: click again to switch (discard)",
     "projectConfirmNew": "Timeline is not empty: click again to create (clears editor)",
-    "projectFailed": "Operation failed"
+    "projectFailed": "Operation failed",
+    "projectDeleteTitle": "Delete project timeline",
+    "projectDeleteMessage": "Delete the timeline of project \"{project}\"?\nVideos, context latents and the render manifest are kept; only timeline data is removed.",
+    "projectDeleteSuccess": "Timeline deleted: {project}",
+    "projectDeleteFailed": "Failed to delete timeline"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

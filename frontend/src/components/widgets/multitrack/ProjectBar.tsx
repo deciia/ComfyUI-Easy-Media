@@ -29,6 +29,22 @@ type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
 const BUTTON_CLASS = 'h-7 rounded border border-neutral-600 bg-neutral-800 px-2 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40'
 const PRIMARY_CLASS = 'h-7 rounded border border-sky-600 bg-sky-700 px-2 text-xs text-white hover:bg-sky-600 disabled:opacity-40'
 
+interface DialogApi {
+  confirm?: (options: { title?: string; message?: string }) => Promise<boolean>
+}
+
+interface ToastApi {
+  add?: (options: { severity?: string; summary?: string; detail?: string; life?: number }) => void
+}
+
+function extensionDialog(app: unknown): DialogApi | undefined {
+  return (app as { extensionManager?: { dialog?: DialogApi } } | undefined)?.extensionManager?.dialog
+}
+
+function extensionToast(app: unknown): ToastApi | undefined {
+  return (app as { extensionManager?: { toast?: ToastApi } } | undefined)?.extensionManager?.toast
+}
+
 function resolutionSnapshot(input: MultiTrackPreviewResolutionInput): TimelineResolutionSnapshot {
   const snapshot: TimelineResolutionSnapshot = {}
   if (typeof input.resolution === 'string') snapshot.preset = input.resolution
@@ -96,6 +112,8 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       setMessage(text === 'not_found' ? t('multitrack.projectNoTimeline') : (text || t('multitrack.projectFailed')))
     } finally {
       setBusy(false)
+      // 选中即刷新：载入后同步刷新项目列表（时间戳/摘要/新增项目）
+      void refreshProjects()
     }
   }
 
@@ -169,7 +187,26 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
 
   async function handleDelete() {
     if (!currentName) return
-    if (!pendingDelete) {
+    const dialog = extensionDialog(app)
+    if (dialog?.confirm) {
+      let confirmed = false
+      try {
+        confirmed = await dialog.confirm({
+          title: t('multitrack.projectDeleteTitle'),
+          message: t('multitrack.projectDeleteMessage', { project: currentName }),
+        })
+      } catch (error) {
+        extensionToast(app)?.add?.({
+          severity: 'error',
+          summary: t('multitrack.projectDeleteFailed'),
+          detail: error instanceof Error ? error.message : String(error),
+          life: 5000,
+        })
+        return
+      }
+      if (!confirmed) return
+    } else if (!pendingDelete) {
+      // 兜底：拿不到对话框 API 时退化为二次点击确认
       setPendingDelete(true)
       setMessage(t('multitrack.projectDeleteConfirm'))
       return
@@ -177,16 +214,30 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     setPendingDelete(false)
     setBusy(true)
     setMessage('')
+    const target = currentName
     try {
-      await deleteProjectTimeline(app, currentName)
+      await deleteProjectTimeline(app, target)
       const trackData = stripProjectMeta(data)
       savedSignatureRef.current = null
       lastLoadedAtRef.current = null
+      setProjects((items) => items.filter((item) => item.project_name !== target))
       onApply(trackData, null)
       setMessage(t('multitrack.projectDeleted'))
+      extensionToast(app)?.add?.({
+        severity: 'success',
+        summary: t('multitrack.projectDeleteSuccess', { project: target }),
+        detail: t('multitrack.projectDeleted'),
+        life: 4000,
+      })
       void refreshProjects()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t('multitrack.projectFailed'))
+      extensionToast(app)?.add?.({
+        severity: 'error',
+        summary: t('multitrack.projectDeleteFailed'),
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
     } finally {
       setBusy(false)
     }
@@ -205,6 +256,8 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         className="h-7 max-w-[12rem] rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100 disabled:opacity-40"
         value={currentName}
         disabled={busy}
+        onMouseDown={() => void refreshProjects()}
+        onFocus={() => void refreshProjects()}
         onChange={(event) => void handleSelect(event.target.value)}
       >
         <option value="">{t('multitrack.projectDefault')}</option>
