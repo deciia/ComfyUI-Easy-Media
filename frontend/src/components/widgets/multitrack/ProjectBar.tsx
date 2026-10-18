@@ -90,6 +90,20 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     void refreshProjects()
   }, [refreshProjects])
 
+  // Ctrl/Cmd+S：在 ComfyUI 保存工作流的同时，把当前项目的时间线写回 timeline.json。
+  // 不拦截默认行为（工作流照常保存）；仅在已选项目且有未保存改动时触发。
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      if (event.key.toLowerCase() !== 's') return
+      if (busy || !currentName || !dirty) return
+      void handleSave(currentName)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, currentName, dirty, data, resolution, app, t])
+
   async function handleSelect(name: string) {
     if (!name || name === currentName) return
     if (dirty && pendingSwitch !== name) {
