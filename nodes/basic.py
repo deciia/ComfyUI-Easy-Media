@@ -72,6 +72,7 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
+from ..utils.h3_subjects import compose_timeline, parse_subject_config
 from ..utils.multitrack import (
     _as_list_input,
     _embedded_multitrack_media,
@@ -1896,6 +1897,16 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Image.Input("image", optional=True, lazy=True, tooltip="Optional image media list for slot-based multitrack segments."),
                 io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
                 io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
+                # 2026-10-18：可选主体库输入。不接 = 无主体，行为与原来完全一致（零侵入）。
+                io.Custom("SUBJECT_CONFIG").Input(
+                    "subject_config",
+                    optional=True,
+                    tooltip=(
+                        "可选：从「主体库 / Subject Library」导入命名主体。"
+                        "接上后段提示词里的 @名字 会被解析成 <Picture n>，"
+                        "并按需自动追加主体资源；不接则完全不影响原有功能。"
+                    ),
+                ),
             ],
             outputs=[
                 TYPE_TRACKS_INFO.Output("TRACKS_INFO"),
@@ -1975,6 +1986,20 @@ class MultiTrackEditor(io.ComfyNode):
             prompt_override = prompt_override[0]
 
         data = _parse_track_data(track_data)
+        # 主体库（可选）：不接 subject_config 时 subjects 为空，组装完全不执行 —— 零侵入。
+        subject_config = kwargs.get('subject_config')
+        if isinstance(subject_config, list) and len(subject_config) == 1:
+            subject_config = subject_config[0]
+        subjects = parse_subject_config(subject_config)
+        if subjects:
+            data, subject_reports = compose_timeline(data, subjects)
+            for report in subject_reports:
+                if report.get("warnings"):
+                    print(
+                        f"[EasyMedia] 主体组装提示（段 {report.get('segment_id')}）: "
+                        f"{report['warnings']}",
+                        flush=True,
+                    )
         if format == "MiniMax" and is_minimax_prompt_override(prompt_override):
             data = build_minimax_multitrack_data_from_prompt_override(data, prompt_override)
         elif prompt_override_has_value(prompt_override):

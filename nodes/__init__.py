@@ -1,4 +1,4 @@
-from .basic import *
+﻿from .basic import *
 from .audio import *
 from .common import *
 from .deciiapass_stage import *
@@ -7,6 +7,7 @@ from .ltx import *
 from .ltxv import *
 from .minimax import *
 from .project import *
+from .subjects import *
 from .prompt_studio import *
 from .video import *
 from .rtx_vsr import *
