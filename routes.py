@@ -63,6 +63,12 @@ from .utils.prompt_enhancer import (
     masked_config as mask_prompt_enhancer_config,
     save_config as save_prompt_enhancer_config,
 )
+from .utils.plan_segments import (
+    PlanError,
+    generate_plan,
+    parse_storyboard_text,
+    render_storyboard_text,
+)
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -1025,3 +1031,53 @@ async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to generate prompt: {error}"}, status=500)
+
+@PromptServer.instance.routes.post("/easy-media/prompt-studio/plan")
+async def handle_prompt_studio_plan(request: web.Request) -> web.Response:
+    """导演级分镜规划；失败返回可展示错误，不写入任何数据。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return web.json_response({"ok": False, "error": "payload must be an object"}, status=400)
+        plan = await generate_plan(payload)
+        return web.json_response({"ok": True, "plan": plan})
+    except PlanError as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response(
+            {"ok": False, "error": f"Failed to plan storyboard: {error}"}, status=500
+        )
+
+
+@PromptServer.instance.routes.post("/easy-media/prompt-studio/plan/parse")
+async def handle_prompt_studio_plan_parse(request: web.Request) -> web.Response:
+    """文本分镜（曜石格式）→ 结构化分镜。"""
+    try:
+        payload = await request.json()
+        source = str((payload or {}).get("text") or "")
+        frame_rate = float((payload or {}).get("frame_rate") or 30)
+        plan = parse_storyboard_text(source, frame_rate=frame_rate)
+        return web.json_response({"ok": True, "plan": plan})
+    except PlanError as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response(
+            {"ok": False, "error": f"Failed to parse storyboard: {error}"}, status=500
+        )
+
+
+@PromptServer.instance.routes.post("/easy-media/prompt-studio/plan/export")
+async def handle_prompt_studio_plan_export(request: web.Request) -> web.Response:
+    """结构化分镜 → 文本分镜（曜石格式）。"""
+    try:
+        payload = await request.json()
+        plan = (payload or {}).get("plan") or {}
+        return web.json_response({"ok": True, "text": render_storyboard_text(plan)})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response(
+            {"ok": False, "error": f"Failed to export storyboard: {error}"}, status=500
+        )
+

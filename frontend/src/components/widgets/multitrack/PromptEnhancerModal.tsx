@@ -785,7 +785,37 @@ export function PromptEnhancerModal({
                 }
               }}
               generating={workspaceGenerating}
+              planning={workspaceGenerating}
               error={workspaceError}
+              onPlan={async (input) => {
+                setWorkspaceGenerating(true)
+                setWorkspaceError('')
+                try {
+                  const response = await fetch('/easy-media/prompt-studio/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      brief: input.brief,
+                      duration_seconds: input.durationSeconds,
+                      ratio: input.ratio,
+                      style: input.style,
+                      frame_rate: workspaceFrameRate,
+                      subjects: libraryNames.map((name, index) => ({ name, type: '未分类', label: `<Subject ${index + 1}>` })),
+                    }),
+                  })
+                  const data = await response.json().catch(() => ({}))
+                  if (!data?.ok) {
+                    setWorkspaceError(String((data as { error?: string })?.error || '规划失败'))
+                    return null
+                  }
+                  return (data as { plan?: never })?.plan ?? null
+                } catch (error) {
+                  setWorkspaceError(String(error))
+                  return null
+                } finally {
+                  setWorkspaceGenerating(false)
+                }
+              }}
             />
           ) : workspaceTab === 'subjects' ? (
             <SimpleTab

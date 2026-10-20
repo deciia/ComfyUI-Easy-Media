@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { PlanPreview, type StoryboardPlan } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
@@ -27,6 +28,14 @@ export interface StoryboardTabProps {
   onGeneratePrompt?: (segmentId: string, brief: string) => Promise<string>
   generating?: boolean
   error?: string
+  /** 导演级分镜规划（AI） */
+  onPlan?: (input: {
+    brief: string
+    durationSeconds: number
+    ratio: string
+    style: string
+  }) => Promise<StoryboardPlan | null>
+  planning?: boolean
 }
 
 interface StoryboardCard {
@@ -80,23 +89,100 @@ export function StoryboardTab({
   onGeneratePrompt,
   generating = false,
   error = '',
+  onPlan,
+  planning = false,
 }: StoryboardTabProps) {
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [story, setStory] = useState('')
+  const [durationSeconds, setDurationSeconds] = useState(30)
+  const [ratio, setRatio] = useState('16:9')
+  const [style, setStyle] = useState('')
+  const [plan, setPlan] = useState<StoryboardPlan | null>(null)
+  const [planSaved, setPlanSaved] = useState(false)
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
 
+  if (plan) {
+    return (
+      <PlanPreview
+        plan={plan}
+        saved={planSaved}
+        onBack={() => setPlan(null)}
+        onSaveDraft={() => setPlanSaved(true)}
+      />
+    )
+  }
+
+  const planner = (
+    <div className="flex shrink-0 flex-col gap-1 border-b px-3 py-2" style={{ borderColor: BORDER }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-medium">我的想法</span>
+        <span className="text-[10px] text-muted-foreground">说清楚想拍什么即可，AI 负责分镜、台词、节奏与微表情</span>
+        <span className="ml-auto" />
+        <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          总时长
+          <input
+            style={{ ...fieldStyle, width: 56 }}
+            value={String(durationSeconds)}
+            onChange={(event) => setDurationSeconds(Math.max(3, Number(event.target.value) || 30))}
+          />
+          秒
+        </label>
+        <select style={{ ...fieldStyle, width: 74 }} value={ratio} onChange={(event) => setRatio(event.target.value)}>
+          <option value="16:9">16:9</option>
+          <option value="9:16">9:16</option>
+          <option value="1:1">1:1</option>
+        </select>
+        <input
+          style={{ ...fieldStyle, width: 140 }}
+          placeholder="风格（可选）"
+          value={style}
+          onChange={(event) => setStyle(event.target.value)}
+        />
+        <Button
+          size="sm"
+          disabled={!onPlan || planning || !story.trim()}
+          onClick={async () => {
+            if (!onPlan) return
+            const next = await onPlan({ brief: story, durationSeconds, ratio, style })
+            if (next) {
+              setPlan(next)
+              setPlanSaved(false)
+            }
+          }}
+        >
+          {planning ? '规划中…' : 'AI 规划整片'}
+        </Button>
+      </div>
+      <textarea
+        style={{ ...fieldStyle, minHeight: 64, resize: 'vertical', fontSize: 12, lineHeight: 1.6 }}
+        placeholder="例：老赵在修配厂门口发现车主偷偷把车开走，追上去拦住他；全程方言对话，结尾留悬念。"
+        value={story}
+        onChange={(event) => setStory(event.target.value)}
+      />
+      {error ? (
+        <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
+      ) : null}
+    </div>
+  )
+
   if (cards.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8 text-xs text-muted-foreground">
-        任务轨还没有片段。先在多轨编辑器里添加任务片段，再回到这里编排分镜。
+      <div className="flex min-h-0 flex-1 flex-col">
+        {planner}
+        <div className="flex flex-1 items-center justify-center p-8 text-center text-xs text-muted-foreground">
+          任务轨还没有片段。可以直接用上面的「AI 规划整片」生成分镜，或先在多轨编辑器里添加任务片段。
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {planner}
+      <div className="flex min-h-0 flex-1">
       {/* 左：镜头卡 */}
       <div className="flex w-[240px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
         <div className="flex items-center justify-between px-1 pb-1 text-[11px] text-muted-foreground">
@@ -252,6 +338,7 @@ export function StoryboardTab({
         <div className="mt-auto rounded-md p-2 text-[10px] leading-relaxed text-muted-foreground" style={{ border: `1px solid ${BORDER}`, background: PANEL_BG }}>
           四宫格草图预演、拆分/合并镜头、整片 AI 规划将在后续版本加入。
         </div>
+      </div>
       </div>
     </div>
   )
