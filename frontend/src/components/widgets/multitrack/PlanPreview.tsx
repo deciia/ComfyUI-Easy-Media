@@ -76,6 +76,9 @@ export function PlanPreview({
   saved,
   onApply,
   appliedNote,
+  onImportSubjects,
+  onImportResources,
+  importedNote,
 }: {
   plan: StoryboardPlan
   onBack: () => void
@@ -83,6 +86,9 @@ export function PlanPreview({
   saved: boolean
   onApply?: () => boolean
   appliedNote?: string
+  onImportSubjects?: () => void
+  onImportResources?: () => void
+  importedNote?: string
 }) {
   const [confirmApply, setConfirmApply] = useState(false)
   return (
@@ -95,6 +101,12 @@ export function PlanPreview({
         {plan.genre ? <span className="rounded border px-1 text-[10px]" style={{ borderColor: BORDER }}>{plan.genre}</span> : null}
         <span className="ml-auto" />
         <Button size="sm" variant="secondary" onClick={onBack}>返回编辑</Button>
+        {onImportSubjects ? (
+          <Button size="sm" variant="secondary" onClick={onImportSubjects}>导入主体到 ②</Button>
+        ) : null}
+        {onImportResources ? (
+          <Button size="sm" variant="secondary" onClick={onImportResources}>导入资源需求到 ③</Button>
+        ) : null}
         <Button size="sm" variant="secondary" onClick={onSaveDraft} disabled={saved}>
           {saved ? '已保存为草稿' : '保存为草稿'}
         </Button>
@@ -115,6 +127,10 @@ export function PlanPreview({
           {confirmApply ? '确认替换任务轨？' : '应用到任务轨'}
         </Button>
       </div>
+
+      {importedNote ? (
+        <div className="rounded px-2 py-1 text-[11px] text-muted-foreground" style={{ border: `1px solid ${BORDER}` }}>{importedNote}</div>
+      ) : null}
 
       {appliedNote ? (
         <div className="rounded px-2 py-1 text-[11px]" style={{ border: `1px solid ${BORDER}`, color: 'hsl(var(--primary, 199 89% 48%))' }}>

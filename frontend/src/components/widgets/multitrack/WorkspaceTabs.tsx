@@ -37,6 +37,9 @@ export interface StoryboardTabProps {
   }) => Promise<StoryboardPlan | null>
   /** 把规划结果应用到任务轨（由多轨编辑器注册表执行） */
   onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
+  /** 规划结果里的主体/资源需求导入工作台 */
+  onImportPlanSubjects?: (plan: StoryboardPlan) => void
+  onImportPlanResources?: (plan: StoryboardPlan) => void
   planning?: boolean
 }
 
@@ -93,6 +96,8 @@ export function StoryboardTab({
   error = '',
   onPlan,
   onApplyPlan,
+  onImportPlanSubjects,
+  onImportPlanResources,
   planning = false,
 }: StoryboardTabProps) {
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
@@ -105,6 +110,7 @@ export function StoryboardTab({
   const [plan, setPlan] = useState<StoryboardPlan | null>(null)
   const [planSaved, setPlanSaved] = useState(false)
   const [appliedNote, setAppliedNote] = useState('')
+  const [importedNote, setImportedNote] = useState('')
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
 
@@ -115,6 +121,15 @@ export function StoryboardTab({
         saved={planSaved}
         onBack={() => setPlan(null)}
         appliedNote={appliedNote}
+        onImportSubjects={onImportPlanSubjects ? () => {
+          onImportPlanSubjects(plan)
+          setImportedNote('已导入主体到「主体定义」页')
+        } : undefined}
+        onImportResources={onImportPlanResources ? () => {
+          onImportPlanResources(plan)
+          setImportedNote('已把资源需求导入「资源与生成」页')
+        } : undefined}
+        importedNote={importedNote}
         onSaveDraft={() => {
           try {
             window.localStorage.setItem('easy-media-storyboard-draft', JSON.stringify(plan))

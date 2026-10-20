@@ -31,16 +31,20 @@ const fieldStyle: React.CSSProperties = {
 }
 
 /** ② 主体定义骨架：卡片 + 表单（本轮先本地编辑，下一步写回主体库节点）。 */
-export function SubjectsTab({ subjects }: { subjects: WorkspaceSubject[] }) {
-  const [drafts, setDrafts] = useState<Record<string, WorkspaceSubject>>({})
+export function SubjectsTab({
+  subjects,
+  onChange,
+}: {
+  subjects: WorkspaceSubject[]
+  onChange?: (next: WorkspaceSubject[]) => void
+}) {
   const [selectedId, setSelectedId] = useState<string | undefined>(subjects[0]?.id)
-  const list = subjects.map((item) => drafts[item.id] ?? item)
+  const list = subjects
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
 
   const patch = (id: string, changes: Partial<WorkspaceSubject>) => {
-    const base = drafts[id] ?? subjects.find((item) => item.id === id)
-    if (!base) return
-    setDrafts((current) => ({ ...current, [id]: { ...base, ...changes } }))
+    if (!onChange) return
+    onChange(subjects.map((item) => (item.id === id ? { ...item, ...changes } : item)))
   }
 
   if (list.length === 0) {
@@ -125,8 +129,14 @@ export function SubjectsTab({ subjects }: { subjects: WorkspaceSubject[] }) {
 /** ③ 资源与生成骨架：Input 共享资源 + 本片资源 + 选中清单。 */
 export function ResourcesTab({
   projectResources,
+  segments = [],
+  onAttach,
+  plannedResources = [],
 }: {
   projectResources: Array<{ kind: string; name: string; scope?: string }>
+  segments?: Array<{ id: string; label: string }>
+  onAttach?: (segmentId: string, items: WorkspaceResourceItem[]) => boolean
+  plannedResources?: Array<{ kind: string; name: string; purpose?: string }>
 }) {
   const [kind, setKind] = useState<'all' | 'image' | 'audio' | 'video'>('all')
   const [query, setQuery] = useState('')
@@ -134,6 +144,7 @@ export function ResourcesTab({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Record<string, WorkspaceResourceItem>>({})
+  const [targetSegmentId, setTargetSegmentId] = useState<string>(segments[0]?.id ?? '')
 
   useEffect(() => {
     let cancelled = false
@@ -184,7 +195,50 @@ export function ResourcesTab({
         <span className="ml-auto text-[10px] text-muted-foreground">
           本片已用：{projectResources.length} 项 · 已选：{pickedList.length}
         </span>
+        <select
+          style={{ ...fieldStyle, width: 150 }}
+          value={targetSegmentId}
+          onChange={(event) => setTargetSegmentId(event.target.value)}
+          title="选择要挂载资源的目标分镜"
+        >
+          {segments.length === 0 ? <option value="">（无任务片段）</option> : null}
+          {segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.label}</option>)}
+        </select>
+        <Button
+          size="sm"
+          disabled={!onAttach || !targetSegmentId || pickedList.length === 0}
+          onClick={() => {
+            if (!onAttach || !targetSegmentId) return
+            const ok = onAttach(targetSegmentId, pickedList.filter((item) => item.kind === 'image'))
+            if (ok) setPicked({})
+          }}
+        >
+          挂到所选片段（图片）
+        </Button>
       </div>
+
+      {plannedResources.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>
+          <span className="text-muted-foreground">规划需要：</span>
+          {plannedResources.map((resource) => {
+            const found = items.some((item) => item.name === resource.name)
+            const pickedNow = Object.values(picked).some((item) => item.name === resource.name)
+            return (
+              <span
+                key={`${resource.kind}:${resource.name}`}
+                className="rounded-full px-1.5"
+                style={{
+                  border: `1px solid ${found || pickedNow ? 'hsl(var(--primary, 199 89% 48%))' : '#92400e'}`,
+                  color: found || pickedNow ? undefined : '#fbbf24',
+                }}
+                title={resource.purpose || ''}
+              >
+                {found || pickedNow ? '✓' : '缺'} {resource.kind}:{resource.name}
+              </span>
+            )
+          })}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
@@ -232,7 +286,7 @@ export function ResourcesTab({
           </span>
         ))}
         {pickedList.length > 8 ? <span className="text-muted-foreground">+{pickedList.length - 8}</span> : null}
-        <span className="ml-auto text-muted-foreground">下一步：把选中资源挂到指定分镜，并用工作流生成缺失资源</span>
+        <span className="ml-auto text-muted-foreground">音频/视频挂载与缺失资源生成下一步接入</span>
       </div>
     </div>
   )

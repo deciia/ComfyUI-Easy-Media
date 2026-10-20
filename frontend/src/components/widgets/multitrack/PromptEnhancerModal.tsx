@@ -46,6 +46,8 @@ export interface PromptEnhancerModalProps {
   workspaceFrameRate?: number
   /** 把草稿提示词写入指定任务片段 */
   onWriteSegmentPrompt?: (segmentId: string, prompt: string) => void
+  /** 把选中的图片资源挂到任务片段 */
+  onAttachImages?: (segmentId: string, images: Array<{ name: string; subfolder: string }>) => void
   resourceTokens?: Array<{ token: string; label: string; type?: string; thumbnailUrl?: string }>
 }
 
@@ -336,6 +338,7 @@ export function PromptEnhancerModal({
   workspaceSegments = [],
   workspaceFrameRate = 30,
   onWriteSegmentPrompt,
+  onAttachImages,
   resourceTokens = [],
 }: PromptEnhancerModalProps) {
   const t = useT()
@@ -365,7 +368,8 @@ export function PromptEnhancerModal({
   })
 
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
-  const subjectCards = useMemo(() => readSubjectLibrarySubjects(), [])
+  const [workspaceSubjects, setWorkspaceSubjects] = useState<WorkspaceSubject[]>(() => readSubjectLibrarySubjects())
+  const [plannedResources, setPlannedResources] = useState<Array<{ kind: string; name: string; purpose?: string }>>([])
   const projectResources = useMemo(() => {
     const items: Array<{ kind: string; name: string; scope?: string }> = []
     for (const segment of workspaceSegments) {
@@ -613,7 +617,7 @@ export function PromptEnhancerModal({
         brief: text,
         options: { ...options, ...payloadOptions, ...presetPayload() },
         global_prompt: globalDraft,
-        subjects: libraryNames.map((name, index) => ({ name, label: `<Subject ${index + 1}>` })),
+        subjects: (workspaceSubjects.length > 0 ? workspaceSubjects : libraryNames.map((name) => ({ name }))).map((item, index) => ({ name: item.name, label: `<Subject ${index + 1}>` })),
         images: imagePaths ?? [],
         picture_count: pictureCount ?? null,
         audio_count: audioCount ?? null,
@@ -844,6 +848,39 @@ export function PromptEnhancerModal({
               generating={workspaceGenerating}
               planning={workspaceGenerating}
               error={workspaceError}
+              onImportPlanSubjects={(plan) => {
+                setWorkspaceSubjects((current) => {
+                  const next = [...current]
+                  const seen = new Set(next.map((item) => item.name))
+                  for (const segment of plan.segments) {
+                    for (const subject of segment.subjects) {
+                      if (!subject.name || seen.has(subject.name)) continue
+                      seen.add(subject.name)
+                      next.push({
+                        id: `plan-subject-${next.length + 1}`,
+                        name: subject.name,
+                        type: subject.type || '人物',
+                        description: subject.description || '',
+                        retention: subject.retention || [],
+                      })
+                    }
+                  }
+                  return next
+                })
+              }}
+              onImportPlanResources={(plan) => {
+                const seen = new Set<string>()
+                const next: Array<{ kind: string; name: string; purpose?: string }> = []
+                for (const segment of plan.segments) {
+                  for (const resource of segment.resources) {
+                    const key = `${resource.kind}:${resource.name}`
+                    if (seen.has(key)) continue
+                    seen.add(key)
+                    next.push({ kind: resource.kind, name: resource.name, purpose: resource.for })
+                  }
+                }
+                setPlannedResources(next)
+              }}
               onApplyPlan={(items) => {
                 const registry = globalThis as unknown as {
                   __easyMediaApplyStoryboard?: (value: typeof items) => boolean
@@ -887,9 +924,18 @@ export function PromptEnhancerModal({
               }}
             />
           ) : workspaceTab === 'subjects' ? (
-            <SubjectsTab subjects={subjectCards} />
+            <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
           ) : (
-            <ResourcesTab projectResources={projectResources} />
+            <ResourcesTab
+              projectResources={projectResources}
+              plannedResources={plannedResources}
+              segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
+              onAttach={(segmentId, items) => {
+                if (!onAttachImages) return false
+                onAttachImages(segmentId, items.map((item) => ({ name: item.name, subfolder: item.subfolder })))
+                return true
+              }}
+            />
           )
         ) : (
           <>

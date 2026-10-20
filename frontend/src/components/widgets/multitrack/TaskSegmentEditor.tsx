@@ -1188,6 +1188,19 @@ export function TaskSegmentEditor({
                       workspaceSegments={trackSegments}
                       workspaceFrameRate={frameRate}
                       onWriteSegmentPrompt={(id, prompt) => onTrackSegmentsContentChange?.([{ segmentId: id, patch: { user_prompt: prompt } }])}
+                      onAttachImages={(id, images) => {
+                        const target = trackSegments?.find((item) => item.id === id)
+                        if (!target) return
+                        const current = ((target.content as unknown as { images?: Array<Record<string, unknown>> }).images ?? [])
+                        const stamp = Date.now()
+                        const appended = images.map((image, index) => ({
+                          id: `img-${stamp}-${index + 1}`,
+                          source_type: 'input',
+                          file_name: image.name,
+                          subfolder: image.subfolder || undefined,
+                        }))
+                        onTrackSegmentsContentChange?.([{ segmentId: id, patch: { images: [...current, ...appended] as never } }])
+                      }}
                       onAutosave={({ brief, generated }) => onContentChange?.({
                         user_brief: brief,
                         prompt_meta: {
