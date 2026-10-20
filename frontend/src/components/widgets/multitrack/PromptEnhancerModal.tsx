@@ -787,6 +787,18 @@ export function PromptEnhancerModal({
               generating={workspaceGenerating}
               planning={workspaceGenerating}
               error={workspaceError}
+              onApplyPlan={(items) => {
+                const registry = globalThis as unknown as {
+                  __easyMediaApplyStoryboard?: (value: typeof items) => boolean
+                }
+                if (!registry.__easyMediaApplyStoryboard) return false
+                try {
+                  return registry.__easyMediaApplyStoryboard(items)
+                } catch (error) {
+                  console.error('[EasyMedia] apply storyboard failed', error)
+                  return false
+                }
+              }}
               onPlan={async (input) => {
                 setWorkspaceGenerating(true)
                 setWorkspaceError('')

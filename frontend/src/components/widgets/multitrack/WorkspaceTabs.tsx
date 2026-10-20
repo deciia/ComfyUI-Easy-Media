@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { PlanPreview, type StoryboardPlan } from './PlanPreview'
+import { PlanPreview, formatPlanSegmentBrief, type StoryboardPlan } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
@@ -35,6 +35,8 @@ export interface StoryboardTabProps {
     ratio: string
     style: string
   }) => Promise<StoryboardPlan | null>
+  /** 把规划结果应用到任务轨（由多轨编辑器注册表执行） */
+  onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
   planning?: boolean
 }
 
@@ -90,6 +92,7 @@ export function StoryboardTab({
   generating = false,
   error = '',
   onPlan,
+  onApplyPlan,
   planning = false,
 }: StoryboardTabProps) {
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
@@ -101,6 +104,7 @@ export function StoryboardTab({
   const [style, setStyle] = useState('')
   const [plan, setPlan] = useState<StoryboardPlan | null>(null)
   const [planSaved, setPlanSaved] = useState(false)
+  const [appliedNote, setAppliedNote] = useState('')
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
 
@@ -110,7 +114,25 @@ export function StoryboardTab({
         plan={plan}
         saved={planSaved}
         onBack={() => setPlan(null)}
-        onSaveDraft={() => setPlanSaved(true)}
+        appliedNote={appliedNote}
+        onSaveDraft={() => {
+          try {
+            window.localStorage.setItem('easy-media-storyboard-draft', JSON.stringify(plan))
+            setPlanSaved(true)
+          } catch (error) {
+            console.warn('[EasyMedia] save storyboard draft failed', error)
+          }
+        }}
+        onApply={() => {
+          if (!onApplyPlan) return false
+          const ok = onApplyPlan(plan.segments.map((segment) => ({
+            name: segment.name,
+            durationFrames: segment.duration_frames,
+            brief: formatPlanSegmentBrief(segment),
+          })))
+          setAppliedNote(ok ? '已应用到任务轨（可用 Ctrl+Z 撤销）' : '应用失败：请先在编辑器里选中任务片段')
+          return ok
+        }}
       />
     )
   }

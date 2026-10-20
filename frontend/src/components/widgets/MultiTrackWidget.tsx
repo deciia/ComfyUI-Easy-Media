@@ -1259,6 +1259,55 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  // 分镜编排：把规划结果落成任务轨片段（只由弹窗「应用到任务轨」调用）
+  useEffect(() => {
+    const applyStoryboard = (items: Array<{
+      id?: string
+      name: string
+      durationFrames: number
+      brief: string
+      prompt?: string
+    }>) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      if (!taskTrack || items.length === 0) return false
+      let cursor = 0
+      const stamp = Date.now()
+      const segments: MultiTrackSegment[] = items.map((item, index) => {
+        const frames = Math.max(1, Math.round(item.durationFrames))
+        const start = cursor
+        cursor += frames
+        return {
+          id: item.id || `task-${stamp}-${index + 1}`,
+          start_frame: start,
+          end_frame: start + frames,
+          color: taskTrack.color ?? 'var(--primary)',
+          content: {
+            media_type: 'none',
+            task_mode: 'default',
+            user_brief: item.brief,
+            user_prompt: item.prompt ?? '',
+          },
+        } as MultiTrackSegment
+      })
+      const updatedTracks = data.tracks.map((track) => (
+        track.id === taskTrack.id ? { ...track, segments } : track
+      ))
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: updatedTracks,
+        total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+      })
+      return true
+    }
+    const registry = globalThis as unknown as { __easyMediaApplyStoryboard?: typeof applyStoryboard }
+    registry.__easyMediaApplyStoryboard = applyStoryboard
+    return () => {
+      if (registry.__easyMediaApplyStoryboard === applyStoryboard) {
+        delete registry.__easyMediaApplyStoryboard
+      }
+    }
+  }, [data])
+
   function handleTaskTrackSegmentsChange(segments: MultiTrackSegment[]) {
     if (selectedSegment?.trackType !== 'task') return
     const updatedTracks = data.tracks.map((track) => (
