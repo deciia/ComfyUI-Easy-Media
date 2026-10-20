@@ -1108,6 +1108,7 @@ async def handle_resources_input(request: web.Request) -> web.Response:
 
         kind = str(request.query.get("kind") or "all").lower()
         query = str(request.query.get("query") or "").strip().lower()
+        sort = str(request.query.get("sort") or "name").lower()
         try:
             limit = min(2000, max(1, int(request.query.get("limit") or 600)))
         except (TypeError, ValueError):
@@ -1120,6 +1121,7 @@ async def handle_resources_input(request: web.Request) -> web.Response:
         base = Path(folder_paths.get_input_directory())
         items: list[dict] = []
         matched = 0
+        collected: list[tuple[float, str, Path, Path]] = []
         if base.is_dir():
             for path in sorted(base.rglob("*")):
                 if not path.is_file():
@@ -1135,22 +1137,29 @@ async def handle_resources_input(request: web.Request) -> web.Response:
                 name = path.name
                 if query and query not in name.lower():
                     continue
+                stat = path.stat()
+                collected.append((stat.st_mtime, name.lower(), path, relative))
                 matched += 1
-                if matched <= offset:
-                    continue
-                if len(items) >= limit:
-                    continue
-                subfolder = "" if len(relative.parts) == 1 else "/".join(relative.parts[:-1])
-                url = f"/view?filename={quote(name)}&type=input"
-                if subfolder:
-                    url += f"&subfolder={quote(subfolder)}"
-                items.append({
-                    "name": name,
-                    "subfolder": subfolder,
-                    "kind": file_kind,
-                    "size": path.stat().st_size,
-                    "url": url,
-                })
+
+        if sort in ("time", "time_desc", "latest"):
+            collected.sort(key=lambda entry: entry[0], reverse=True)
+        else:
+            collected.sort(key=lambda entry: entry[1])
+
+        for mtime, _name_key, path, relative in collected[offset : offset + limit]:
+            name = path.name
+            subfolder = "" if len(relative.parts) == 1 else "/".join(relative.parts[:-1])
+            url = f"/view?filename={quote(name)}&type=input"
+            if subfolder:
+                url += f"&subfolder={quote(subfolder)}"
+            items.append({
+                "name": name,
+                "subfolder": subfolder,
+                "kind": _classify_input_file(path.suffix) or "image",
+                "size": path.stat().st_size,
+                "mtime": int(mtime),
+                "url": url,
+            })
         return web.json_response({
             "ok": True,
             "items": items,

@@ -183,12 +183,14 @@ export function ResourcesTab({
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Record<string, WorkspaceResourceItem>>({})
   const [targetSegmentId, setTargetSegmentId] = useState<string>(segments[0]?.id ?? '')
+  const [sort, setSort] = useState<'name' | 'time'>('name')
+  const [thumbSize, setThumbSize] = useState(64)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError('')
-    const params = new URLSearchParams({ kind, limit: '300' })
+    const params = new URLSearchParams({ kind, limit: '300', sort })
     if (query.trim()) params.set('query', query.trim())
     fetch(`/easy-media/resources/input?${params.toString()}`)
       .then((response) => response.json())
@@ -200,7 +202,7 @@ export function ResourcesTab({
       .catch((reason) => { if (!cancelled) setError(String(reason)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [kind, query])
+  }, [kind, query, sort])
 
   const pickedList = useMemo(() => Object.values(picked), [picked])
   const findByName = (name: string) => items.find((item) => item.name === name)
@@ -238,6 +240,27 @@ export function ResourcesTab({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+          <select
+            style={{ ...fieldStyle, width: 110 }}
+            value={sort}
+            onChange={(event) => setSort(event.target.value as 'name' | 'time')}
+          >
+            <option value="name">按名称</option>
+            <option value="time">最新优先</option>
+          </select>
+          <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            尺寸
+            <input
+              type="range"
+              min={40}
+              max={140}
+              step={4}
+              value={thumbSize}
+              onChange={(event) => setThumbSize(Number(event.target.value))}
+              style={{ width: 90 }}
+            />
+            <span className="tabular-nums">{thumbSize}</span>
+          </label>
           <span className="text-[10px] text-muted-foreground">
             {loading ? '扫描中…' : `${items.length} 个 · 本片已用 ${projectResources.length} 项`}
           </span>
@@ -245,7 +268,7 @@ export function ResourcesTab({
         {error ? (
           <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
         ) : null}
-        <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2 overflow-auto">
+        <div className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-1 overflow-auto">
           {items.map((item) => {
             const key = `${item.subfolder}/${item.name}`
             const active = Boolean(picked[key])
@@ -262,11 +285,12 @@ export function ResourcesTab({
                 })}
                 className="flex flex-col overflow-hidden rounded-md text-left"
                 style={{
+                  width: thumbSize,
                   border: `1px solid ${active ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
                   background: FIELD_BG,
                 }}
               >
-                <div className="flex h-[58px] items-center justify-center overflow-hidden bg-black/40">
+                <div className="flex items-center justify-center overflow-hidden bg-black/40" style={{ height: Math.round(thumbSize * 0.72) }}>
                   {item.kind === 'image'
                     ? <img src={item.url} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
                     : <span className="text-base">{item.kind === 'audio' ? '♪' : '▶'}</span>}

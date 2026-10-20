@@ -105,7 +105,6 @@ export function StoryboardTab({
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [story, setStory] = useState('')
   const [durationSeconds, setDurationSeconds] = useState(30)
   const [ratio, setRatio] = useState('16:9')
   const [style, setStyle] = useState('')
@@ -113,7 +112,7 @@ export function StoryboardTab({
   const [planSaved, setPlanSaved] = useState(false)
   const [appliedNote, setAppliedNote] = useState('')
   const [importedNote, setImportedNote] = useState('')
-  const [rightTab, setRightTab] = useState<'timeline' | 'chat'>('timeline')
+  const [rightTab, setRightTab] = useState<'timeline' | 'chat'>('chat')
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([])
   const [projects, setProjects] = useState<Array<{ id: string; name: string; savedAt: number; plan: StoryboardPlan }>>(() => {
@@ -130,8 +129,7 @@ export function StoryboardTab({
   const planner = (
     <div className="flex shrink-0 flex-col gap-1 border-b px-3 py-2" style={{ borderColor: BORDER }}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[12px] font-medium">我的想法</span>
-        <span className="text-[10px] text-muted-foreground">说清楚想拍什么即可，AI 负责分镜、台词、节奏与微表情（规划约 1–3 分钟）</span>
+        
         <span className="ml-auto" />
         <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
           总时长
@@ -190,27 +188,7 @@ export function StoryboardTab({
         >
           保存项目
         </Button>
-        <Button
-          size="sm"
-          disabled={!onPlan || planning || !story.trim()}
-          onClick={async () => {
-            if (!onPlan) return
-            const next = await onPlan({ brief: story, durationSeconds, ratio, style })
-            if (next) {
-              setPlan(next)
-              setPlanSaved(false)
-            }
-          }}
-        >
-          {planning ? '规划中…（最长 5 分钟）' : 'AI 规划整片'}
-        </Button>
       </div>
-      <textarea
-        style={{ ...fieldStyle, minHeight: 64, resize: 'vertical', fontSize: 12, lineHeight: 1.6 }}
-        placeholder="例：老赵在修配厂门口发现车主偷偷把车开走，追上去拦住他；全程方言对话，结尾留悬念。"
-        value={story}
-        onChange={(event) => setStory(event.target.value)}
-      />
       {error ? (
         <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
       ) : null}
@@ -244,7 +222,7 @@ export function StoryboardTab({
             <button
               key={card.id}
               type="button"
-              onClick={() => onSelectSegment?.(card.id)}
+              onClick={() => { onSelectSegment?.(card.id); setRightTab('timeline') }}
               className="flex flex-col gap-1 rounded-md px-2 py-1.5 text-left"
               style={{
                 background: active ? 'hsl(var(--primary, 199 89% 48%) / 0.16)' : FIELD_BG,
@@ -388,7 +366,7 @@ export function StoryboardTab({
       {/* 右：时间轴联动 */}
       <div className="flex w-[300px] shrink-0 flex-col gap-2 p-3" style={{ borderLeft: `1px solid ${BORDER}` }}>
         <div className="flex gap-1">
-          {(['timeline', 'chat'] as const).map((key) => (
+          {(['chat', 'timeline'] as const).map((key) => (
             <button
               key={key}
               type="button"
@@ -435,20 +413,22 @@ export function StoryboardTab({
             />
             <Button
               size="sm"
-              disabled={!onPlan || planning || !chatInput.trim() || !plan}
+              disabled={!onPlan || planning || !chatInput.trim()}
               onClick={async () => {
-                if (!onPlan || !plan) return
+                if (!onPlan) return
                 const instruction = chatInput.trim()
                 setChatInput('')
                 setChatMessages((current) => [...current, { role: 'user', text: instruction }])
-                const next = await onPlan({
-                  brief: story,
-                  durationSeconds,
-                  ratio,
-                  style,
-                  instruction,
-                  previousPlan: plan,
-                })
+                const next = plan
+                  ? await onPlan({
+                      brief: '',
+                      durationSeconds,
+                      ratio,
+                      style,
+                      instruction,
+                      previousPlan: plan,
+                    })
+                  : await onPlan({ brief: instruction, durationSeconds, ratio, style })
                 if (next) {
                   setPlan(next)
                   setAppliedNote('')
@@ -476,7 +456,7 @@ export function StoryboardTab({
                 className="relative h-5 w-full rounded"
                 style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}
                 title={`${card.label} · ${card.seconds.toFixed(1)}s`}
-                onClick={() => onSelectSegment?.(card.id)}
+                onClick={() => { onSelectSegment?.(card.id); setRightTab('timeline') }}
               >
                 <span
                   className="absolute inset-y-0 rounded"
