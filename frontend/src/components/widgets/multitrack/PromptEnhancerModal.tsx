@@ -906,15 +906,37 @@ export function PromptEnhancerModal({
                       ratio: input.ratio,
                       style: input.style,
                       frame_rate: workspaceFrameRate,
-                      subjects: libraryNames.map((name, index) => ({ name, type: '未分类', label: `<Subject ${index + 1}>` })),
+                      subjects: libraryNames.map((name, index) => ({
+                        name,
+                        type: '未分类',
+                        label: `<Subject ${index + 1}>`,
+                      })),
                     }),
                   })
-                  const data = await response.json().catch(() => ({}))
-                  if (!data?.ok) {
-                    setWorkspaceError(String((data as { error?: string })?.error || '规划失败'))
+                  if (response.status === 404 || response.status === 405) {
+                    setWorkspaceError(
+                      `后端接口未注册（HTTP ${response.status}）：请重启 ComfyUI 后再试`,
+                    )
                     return null
                   }
-                  return (data as { plan?: never })?.plan ?? null
+                  const rawText = await response.text()
+                  let data: { ok?: boolean; error?: string; plan?: unknown } | null = null
+                  try {
+                    data = JSON.parse(rawText)
+                  } catch {
+                    data = null
+                  }
+                  if (!data) {
+                    setWorkspaceError(
+                      `返回非 JSON（HTTP ${response.status}）：${rawText.slice(0, 200)}`,
+                    )
+                    return null
+                  }
+                  if (!data.ok) {
+                    setWorkspaceError(String(data.error || `规划失败（HTTP ${response.status}）`))
+                    return null
+                  }
+                  return (data as { plan?: never }).plan ?? null
                 } catch (error) {
                   setWorkspaceError(String(error))
                   return null
