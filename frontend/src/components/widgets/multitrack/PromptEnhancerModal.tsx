@@ -4,7 +4,8 @@ import { Maximize2, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
-import { SimpleTab, StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
+import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
+import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
@@ -183,6 +184,49 @@ function caretPosition(el: HTMLTextAreaElement, caret: number): { top: number; l
   return { top: Math.max(0, nextTop), left: Math.max(0, nextLeft) }
 }
 
+
+/** 从画布读取「主体库」节点的完整主体（读不到就返回空） */
+function readSubjectLibrarySubjects(): WorkspaceSubject[] {
+  try {
+    const canvas = (globalThis as unknown as { comfyAPI?: { app?: { app?: { canvas?: { graph?: { _nodes?: unknown[] } } } } } })
+      .comfyAPI?.app?.app?.canvas
+    const nodes = canvas?.graph?._nodes
+    if (!Array.isArray(nodes)) return []
+    const items: WorkspaceSubject[] = []
+    const seen = new Set<string>()
+    for (const node of nodes) {
+      const entry = node as { type?: string; comfyClass?: string; widgets?: Array<{ name?: string; value?: unknown }> }
+      const isLibrary = entry.comfyClass === 'easy subjectLibrary' || entry.type === 'easy subjectLibrary'
+      if (!isLibrary) continue
+      const raw = entry.widgets?.find((widget) => widget.name === 'subject_data')?.value
+      const parsed = typeof raw === 'string'
+        ? (() => { try { return JSON.parse(raw) } catch { return null } })()
+        : (raw as Record<string, unknown> | null)
+      const subjects = (parsed as { subjects?: Array<Record<string, unknown>> } | null)?.subjects
+      if (!Array.isArray(subjects)) continue
+      for (const subject of subjects) {
+        const name = typeof subject?.name === 'string' ? subject.name.trim() : ''
+        if (!name || seen.has(name)) continue
+        seen.add(name)
+        const retentionRaw = subject.retention
+        const retention = Array.isArray(retentionRaw)
+          ? retentionRaw.map((item) => String(item)).filter(Boolean)
+          : (typeof retentionRaw === 'string' ? retentionRaw.split(/[，,、]/).map((item) => item.trim()).filter(Boolean) : [])
+        items.push({
+          id: `subject-${items.length + 1}`,
+          name,
+          type: typeof subject.type === 'string' && subject.type ? subject.type : '人物',
+          description: typeof subject.description === 'string' ? subject.description : '',
+          retention,
+        })
+      }
+    }
+    return items
+  } catch {
+    return []
+  }
+}
+
 /** 从画布读取「主体库」节点里定义的主体名（读不到就返回空） */
 function readSubjectLibraryNames(): string[] {
   try {
@@ -321,6 +365,19 @@ export function PromptEnhancerModal({
   })
 
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
+  const subjectCards = useMemo(() => readSubjectLibrarySubjects(), [])
+  const projectResources = useMemo(() => {
+    const items: Array<{ kind: string; name: string; scope?: string }> = []
+    for (const segment of workspaceSegments) {
+      const content = segment.content as unknown as { images?: Array<Record<string, unknown>> }
+      for (const image of content?.images ?? []) {
+        const record = image as Record<string, unknown>
+        const name = String(record.file_name ?? record.file_path ?? record.slot_name ?? 'image')
+        items.push({ kind: 'image', name })
+      }
+    }
+    return items.slice(0, 200)
+  }, [workspaceSegments])
   const [mentionTab, setMentionTab] = useState<'all' | 'subject' | 'picture' | 'video' | 'audio'>('all')
   const [maximized, setMaximized] = useState(false)
   const [globalDraft, setGlobalDraft] = useState(globalPrompt)
@@ -830,20 +887,9 @@ export function PromptEnhancerModal({
               }}
             />
           ) : workspaceTab === 'subjects' ? (
-            <SimpleTab
-              title="主体定义"
-              hint="下一步：对齐 MiniMax Reference Subject 字段，并同步到画布「主体库」节点。"
-              rows={libraryNames.map((name, index) => ({ label: `<Subject ${index + 1}>`, value: name }))}
-            />
+            <SubjectsTab subjects={subjectCards} />
           ) : (
-            <SimpleTab
-              title="资源与生成"
-              hint="下一步：扫描 ComfyUI/input、标记缺失资源、用用户工作流生成并回填。"
-              rows={resourceTokens.map((item) => ({
-                label: item.type === 'audio' ? '音频' : item.type === 'video' ? '视频' : '图片',
-                value: item.label,
-              }))}
-            />
+            <ResourcesTab projectResources={projectResources} />
           )
         ) : (
           <>

@@ -1081,3 +1081,86 @@ async def handle_prompt_studio_plan_export(request: web.Request) -> web.Response
             {"ok": False, "error": f"Failed to export storyboard: {error}"}, status=500
         )
 
+_INPUT_KIND_EXT = {
+    "image": {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"},
+    "audio": {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac"},
+    "video": {".mp4", ".webm", ".mov", ".mkv", ".avi"},
+}
+
+
+def _classify_input_file(suffix: str) -> str | None:
+    lowered = suffix.lower()
+    for kind, extensions in _INPUT_KIND_EXT.items():
+        if lowered in extensions:
+            return kind
+    return None
+
+
+@PromptServer.instance.routes.get("/easy-media/resources/input")
+async def handle_resources_input(request: web.Request) -> web.Response:
+    """列出 ComfyUI/input 下的共享资源（只读，按需分页）。
+
+    查询参数：kind（all/image/audio/video）、query（文件名过滤）、limit/offset。
+    不预先计算 sha256；被引用时再按需计算。
+    """
+    try:
+        from urllib.parse import quote
+
+        kind = str(request.query.get("kind") or "all").lower()
+        query = str(request.query.get("query") or "").strip().lower()
+        try:
+            limit = min(2000, max(1, int(request.query.get("limit") or 600)))
+        except (TypeError, ValueError):
+            limit = 600
+        try:
+            offset = max(0, int(request.query.get("offset") or 0))
+        except (TypeError, ValueError):
+            offset = 0
+
+        base = Path(folder_paths.get_input_directory())
+        items: list[dict] = []
+        matched = 0
+        if base.is_dir():
+            for path in sorted(base.rglob("*")):
+                if not path.is_file():
+                    continue
+                relative = path.relative_to(base)
+                if len(relative.parts) > 4:
+                    continue
+                file_kind = _classify_input_file(path.suffix)
+                if file_kind is None:
+                    continue
+                if kind != "all" and file_kind != kind:
+                    continue
+                name = path.name
+                if query and query not in name.lower():
+                    continue
+                matched += 1
+                if matched <= offset:
+                    continue
+                if len(items) >= limit:
+                    continue
+                subfolder = "" if len(relative.parts) == 1 else "/".join(relative.parts[:-1])
+                url = f"/view?filename={quote(name)}&type=input"
+                if subfolder:
+                    url += f"&subfolder={quote(subfolder)}"
+                items.append({
+                    "name": name,
+                    "subfolder": subfolder,
+                    "kind": file_kind,
+                    "size": path.stat().st_size,
+                    "url": url,
+                })
+        return web.json_response({
+            "ok": True,
+            "items": items,
+            "total": matched,
+            "offset": offset,
+            "limit": limit,
+        })
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response(
+            {"ok": False, "error": f"Failed to scan input dir: {error}"}, status=500
+        )
+
