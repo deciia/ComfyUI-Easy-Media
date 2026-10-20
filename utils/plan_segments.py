@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -373,7 +374,14 @@ async def generate_plan(payload: dict, config: dict | None = None) -> dict:
     }
     headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
     try:
-        timeout = aiohttp.ClientTimeout(total=max(60, settings.timeout))
+        requested = payload.get("timeout_seconds")
+        try:
+            requested_value = float(requested) if requested is not None else 0.0
+        except (TypeError, ValueError):
+            requested_value = 0.0
+        # 分镜脚本很长，模型常要 1–3 分钟；默认给 300 秒，允许调用方在 30–600 间调整
+        plan_timeout = requested_value if 30 <= requested_value <= 600 else 300.0
+        timeout = aiohttp.ClientTimeout(total=max(plan_timeout, float(settings.timeout or 0)))
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(settings.base_url, json=body, headers=headers) as response:
                 raw = await response.text()
@@ -384,8 +392,14 @@ async def generate_plan(payload: dict, config: dict | None = None) -> dict:
         raise
     except PromptEnhancerError as error:
         raise PlanError(str(error)) from error
+    except (asyncio.TimeoutError, TimeoutError):
+        raise PlanError(
+            f"规划超时：模型在 {plan_timeout:.0f} 秒内没有返回。"
+            "分镜脚本较长，可重试、换更快的模型，或缩短时长。"
+        )
     except Exception as error:  # noqa: BLE001
-        raise PlanError(f"调用失败: {error}") from error
+        detail = str(error).strip() or repr(error)
+        raise PlanError(f"调用失败（{type(error).__name__}）：{detail}") from error
 
     if not isinstance(data, dict) or "choices" not in data:
         detail = ""

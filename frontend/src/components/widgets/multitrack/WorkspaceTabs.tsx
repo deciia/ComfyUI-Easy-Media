@@ -156,7 +156,7 @@ export function StoryboardTab({
     <div className="flex shrink-0 flex-col gap-1 border-b px-3 py-2" style={{ borderColor: BORDER }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px] font-medium">我的想法</span>
-        <span className="text-[10px] text-muted-foreground">说清楚想拍什么即可，AI 负责分镜、台词、节奏与微表情</span>
+        <span className="text-[10px] text-muted-foreground">说清楚想拍什么即可，AI 负责分镜、台词、节奏与微表情（规划约 1–3 分钟）</span>
         <span className="ml-auto" />
         <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
           总时长
@@ -190,7 +190,7 @@ export function StoryboardTab({
             }
           }}
         >
-          {planning ? '规划中…' : 'AI 规划整片'}
+          {planning ? '规划中…（最长 5 分钟）' : 'AI 规划整片'}
         </Button>
       </div>
       <textarea
