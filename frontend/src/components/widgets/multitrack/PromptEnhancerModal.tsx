@@ -906,6 +906,8 @@ export function PromptEnhancerModal({
                       ratio: input.ratio,
                       style: input.style,
                       frame_rate: workspaceFrameRate,
+                      instruction: input.instruction,
+                      previous_plan: input.previousPlan,
                       subjects: libraryNames.map((name, index) => ({
                         name,
                         type: '未分类',

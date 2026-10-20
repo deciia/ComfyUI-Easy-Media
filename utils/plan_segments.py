@@ -114,7 +114,8 @@ def _positive_number(value: Any) -> float | None:
 def build_plan_messages(payload: dict) -> list[dict]:
     """构造导演级规划请求消息。payload.brief 必填。"""
     brief = _text(payload.get("brief"), 8000)
-    if not brief:
+    instruction = _text(payload.get("instruction"), 2000)
+    if not brief and not instruction:
         raise PlanError("请先填写想法/故事描述")
     duration = _positive_number(payload.get("duration_seconds")) or 30.0
     duration = min(max(duration, 3.0), 600.0)
@@ -144,8 +145,41 @@ def build_plan_messages(payload: dict) -> list[dict]:
                 subject_lines.append(f"- {name}（{_text(item.get('type'), 20) or '未分类'}）")
     if subject_lines:
         lines.append("已有主体（优先复用，别造同名）：\n" + "\n".join(subject_lines))
-    lines.append("我的想法：\n" + brief)
-    lines.append("请按导演级标准输出 JSON 分镜脚本。")
+    instruction = _text(payload.get("instruction"), 2000)
+    previous = payload.get("previous_plan")
+    if instruction:
+        lines.append("我在上一版分镜的基础上提出修改要求：\n" + instruction)
+        if isinstance(previous, dict):
+            compact = {
+                "title": _text(previous.get("title"), 120),
+                "segments": [
+                    {
+                        "index": segment.get("index"),
+                        "name": segment.get("name"),
+                        "beat": segment.get("beat"),
+                        "duration": segment.get("duration_seconds"),
+                        "summary": segment.get("summary"),
+                        "shots": [
+                            {
+                                "framing": shot.get("framing"),
+                                "camera": shot.get("camera"),
+                                "action": shot.get("action"),
+                                "dialogue": shot.get("dialogue"),
+                                "micro_expression": shot.get("micro_expression"),
+                            }
+                            for shot in (segment.get("shots") or [])
+                        ],
+                    }
+                    for segment in (previous.get("segments") or [])[:24]
+                ],
+            }
+            lines.append(
+                "上一版分镜（JSON，可整体重写，但未被要求修改的部分请保持原样）：\n"
+                + json.dumps(compact, ensure_ascii=False)[:12000]
+            )
+    else:
+        lines.append("我的想法：\n" + brief)
+    lines.append("请按导演级标准输出完整的 JSON 分镜脚本（不是增量补丁）。")
     return [
         {"role": "system", "content": PLAN_SYSTEM_PROMPT},
         {"role": "user", "content": "\n\n".join(lines)},

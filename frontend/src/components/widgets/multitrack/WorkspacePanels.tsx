@@ -60,7 +60,34 @@ export function SubjectsTab({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex w-[220px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
-        <div className="px-1 pb-1 text-[11px] text-muted-foreground">{list.length} 个主体</div>
+        <div className="flex items-center justify-between px-1 pb-1 text-[11px] text-muted-foreground">
+          <span>{list.length} 个主体</span>
+          <button
+            type="button"
+            className="rounded px-1"
+            style={{ border: `1px solid ${BORDER}` }}
+            onClick={() => {
+              if (!onChange) return
+              const id = `subject-local-${Date.now()}`
+              onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [] }])
+              setSelectedId(id)
+            }}
+          >
+            + 新增
+          </button>
+          <button
+            type="button"
+            className="rounded px-1"
+            style={{ border: `1px solid ${BORDER}` }}
+            onClick={() => {
+              if (!onChange) return
+              onChange([])
+              setSelectedId(undefined)
+            }}
+          >
+            清空
+          </button>
+        </div>
         {list.map((subject) => {
           const active = subject.id === selected?.id
           return (
@@ -117,6 +144,17 @@ export function SubjectsTab({
             </label>
             <div className="flex items-center gap-2">
               <Button size="sm" disabled title="下一步：写回画布主体库节点">同步到主体库（下一步）</Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  if (!onChange) return
+                  onChange(subjects.filter((item) => item.id !== selected.id))
+                  setSelectedId(undefined)
+                }}
+              >
+                删除主体
+              </Button>
               <span className="text-[10px] text-muted-foreground">本轮先支持查看与本地编辑，写回在下一版接入。</span>
             </div>
           </>
@@ -126,7 +164,7 @@ export function SubjectsTab({
   )
 }
 
-/** ③ 资源与生成骨架：Input 共享资源 + 本片资源 + 选中清单。 */
+/** ③ 资源与生成：三段式（Input 浏览 / 按分镜规划 / 生成）。 */
 export function ResourcesTab({
   projectResources,
   segments = [],
@@ -165,128 +203,157 @@ export function ResourcesTab({
   }, [kind, query])
 
   const pickedList = useMemo(() => Object.values(picked), [picked])
+  const findByName = (name: string) => items.find((item) => item.name === name)
+
+  const section = (title: string, hint: string) => (
+    <div className="flex shrink-0 items-center gap-2 px-1">
+      <span className="text-[12px] font-medium">{title}</span>
+      <span className="text-[10px] text-muted-foreground">{hint}</span>
+    </div>
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {(['all', 'image', 'audio', 'video'] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setKind(key)}
-            className="rounded px-2 py-0.5 text-[11px]"
-            style={{
-              border: `1px solid ${kind === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
-              color: kind === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
-            }}
-          >
-            {{ all: '全部', image: '图片', audio: '音频', video: '视频' }[key]}
-          </button>
-        ))}
-        <input
-          style={{ ...fieldStyle, width: 200 }}
-          placeholder="按文件名过滤"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <span className="text-[10px] text-muted-foreground">
-          {loading ? '扫描中…' : `${items.length} 个共享资源（ComfyUI/input）`}
-        </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
-          本片已用：{projectResources.length} 项 · 已选：{pickedList.length}
-        </span>
-        <select
-          style={{ ...fieldStyle, width: 150 }}
-          value={targetSegmentId}
-          onChange={(event) => setTargetSegmentId(event.target.value)}
-          title="选择要挂载资源的目标分镜"
-        >
-          {segments.length === 0 ? <option value="">（无任务片段）</option> : null}
-          {segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.label}</option>)}
-        </select>
-        <Button
-          size="sm"
-          disabled={!onAttach || !targetSegmentId || pickedList.length === 0}
-          onClick={() => {
-            if (!onAttach || !targetSegmentId) return
-            const ok = onAttach(targetSegmentId, pickedList.filter((item) => item.kind === 'image'))
-            if (ok) setPicked({})
-          }}
-        >
-          挂到所选片段（图片）
-        </Button>
-      </div>
-
-      {plannedResources.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>
-          <span className="text-muted-foreground">规划需要：</span>
-          {plannedResources.map((resource) => {
-            const found = items.some((item) => item.name === resource.name)
-            const pickedNow = Object.values(picked).some((item) => item.name === resource.name)
-            return (
-              <span
-                key={`${resource.kind}:${resource.name}`}
-                className="rounded-full px-1.5"
-                style={{
-                  border: `1px solid ${found || pickedNow ? 'hsl(var(--primary, 199 89% 48%))' : '#92400e'}`,
-                  color: found || pickedNow ? undefined : '#fbbf24',
-                }}
-                title={resource.purpose || ''}
-              >
-                {found || pickedNow ? '✓' : '缺'} {resource.kind}:{resource.name}
-              </span>
-            )
-          })}
-        </div>
-      ) : null}
-
-      {error ? (
-        <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
-      ) : null}
-
-      <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 overflow-auto">
-        {items.map((item) => {
-          const key = `${item.subfolder}/${item.name}`
-          const active = Boolean(picked[key])
-          return (
+      {/* ① 共享资源浏览 */}
+      <div className="flex min-h-0 flex-col gap-1" style={{ flex: '1 1 46%' }}>
+        {section('共享资源（ComfyUI/input）', '点选加入下方清单；音频/视频暂不支持挂载')}
+        <div className="flex flex-wrap items-center gap-2">
+          {(['all', 'image', 'audio', 'video'] as const).map((key) => (
             <button
               key={key}
               type="button"
-              title={`${key}${item.size ? ` · ${(item.size / 1024).toFixed(0)}KB` : ''}`}
-              onClick={() => setPicked((current) => {
-                const next = { ...current }
-                if (next[key]) delete next[key]
-                else next[key] = item
-                return next
-              })}
-              className="flex flex-col overflow-hidden rounded-md text-left"
+              onClick={() => setKind(key)}
+              className="rounded px-2 py-0.5 text-[11px]"
               style={{
-                border: `1px solid ${active ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
-                background: FIELD_BG,
+                border: `1px solid ${kind === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
+                color: kind === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
               }}
             >
-              <div className="flex h-[72px] items-center justify-center overflow-hidden bg-black/40">
-                {item.kind === 'image' ? (
-                  <img src={item.url} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <span className="text-lg">{item.kind === 'audio' ? '♪' : '▶'}</span>
-                )}
-              </div>
-              <div className="truncate px-1 py-0.5 text-[10px]">{item.name}</div>
+              {{ all: '全部', image: '图片', audio: '音频', video: '视频' }[key]}
             </button>
-          )
-        })}
+          ))}
+          <input
+            style={{ ...fieldStyle, width: 200 }}
+            placeholder="按文件名过滤"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <span className="text-[10px] text-muted-foreground">
+            {loading ? '扫描中…' : `${items.length} 个 · 本片已用 ${projectResources.length} 项`}
+          </span>
+        </div>
+        {error ? (
+          <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>
+        ) : null}
+        <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-2 overflow-auto">
+          {items.map((item) => {
+            const key = `${item.subfolder}/${item.name}`
+            const active = Boolean(picked[key])
+            return (
+              <button
+                key={key}
+                type="button"
+                title={`${key}${item.size ? ` · ${(item.size / 1024).toFixed(0)}KB` : ''}`}
+                onClick={() => setPicked((current) => {
+                  const next = { ...current }
+                  if (next[key]) delete next[key]
+                  else next[key] = item
+                  return next
+                })}
+                className="flex flex-col overflow-hidden rounded-md text-left"
+                style={{
+                  border: `1px solid ${active ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
+                  background: FIELD_BG,
+                }}
+              >
+                <div className="flex h-[58px] items-center justify-center overflow-hidden bg-black/40">
+                  {item.kind === 'image'
+                    ? <img src={item.url} alt={item.name} className="h-full w-full object-cover" loading="lazy" />
+                    : <span className="text-base">{item.kind === 'audio' ? '♪' : '▶'}</span>}
+                </div>
+                <div className="truncate px-1 py-0.5 text-[10px]">{item.name}</div>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1 border-t pt-2 text-[10px]" style={{ borderColor: BORDER }}>
-        <span className="text-muted-foreground">已选：</span>
-        {pickedList.length === 0 ? <span className="text-muted-foreground">（点上方资源加入）</span> : pickedList.slice(0, 8).map((item) => (
-          <span key={`${item.subfolder}/${item.name}`} className="rounded-full px-1.5" style={{ border: `1px solid ${BORDER}` }}>
-            {item.kind}:{item.name}
-          </span>
-        ))}
-        {pickedList.length > 8 ? <span className="text-muted-foreground">+{pickedList.length - 8}</span> : null}
-        <span className="ml-auto text-muted-foreground">音频/视频挂载与缺失资源生成下一步接入</span>
+      {/* ② 按分镜规划的资源 */}
+      <div className="flex min-h-0 flex-col gap-1" style={{ flex: '1 1 34%', borderTop: `1px solid ${BORDER}`, paddingTop: 6 }}>
+        {section('按分镜规划的资源', plannedResources.length ? `${plannedResources.length} 项（✓已有 / 缺=待生成）` : '先在①分镜预览里「导入资源需求」')}
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+          {plannedResources.length === 0 ? (
+            <div className="px-1 text-[11px] text-muted-foreground">（暂无规划需求）</div>
+          ) : plannedResources.map((resource) => {
+            const found = findByName(resource.name)
+            return (
+              <div key={`${resource.kind}:${resource.name}`} className="flex items-center gap-2 rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG }}>
+                <span
+                  className="rounded-full px-1.5"
+                  style={{ border: `1px solid ${found ? 'hsl(var(--primary, 199 89% 48%))' : '#92400e'}`, color: found ? undefined : '#fbbf24' }}
+                >
+                  {found ? '✓' : '缺'}
+                </span>
+                <span className="shrink-0 text-muted-foreground">{resource.kind}</span>
+                <span className="min-w-0 truncate">{resource.name}</span>
+                {resource.purpose ? <span className="shrink-0 text-[10px] text-muted-foreground">（{resource.purpose}）</span> : null}
+                <span className="ml-auto shrink-0">
+                  {found
+                    ? (
+                      <button
+                        type="button"
+                        className="rounded px-1.5"
+                        style={{ border: `1px solid ${BORDER}` }}
+                        onClick={() => setPicked((current) => ({ ...current, [`${found.subfolder}/${found.name}`]: found }))}
+                      >
+                        加入清单
+                      </button>
+                    )
+                    : <span className="text-[10px] text-muted-foreground">待生成</span>}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            style={{ ...fieldStyle, width: 160 }}
+            value={targetSegmentId}
+            onChange={(event) => setTargetSegmentId(event.target.value)}
+          >
+            {segments.length === 0 ? <option value="">（无任务片段）</option> : null}
+            {segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.label}</option>)}
+          </select>
+          <Button
+            size="sm"
+            disabled={!onAttach || !targetSegmentId || pickedList.filter((item) => item.kind === 'image').length === 0}
+            onClick={() => {
+              if (!onAttach || !targetSegmentId) return
+              const ok = onAttach(targetSegmentId, pickedList.filter((item) => item.kind === 'image'))
+              if (ok) setPicked({})
+            }}
+          >
+            把选中图片挂到该片段
+          </Button>
+          <span className="text-[10px] text-muted-foreground">音频/视频挂载下一步接入</span>
+        </div>
+      </div>
+
+      {/* ③ 生成 */}
+      <div className="flex shrink-0 flex-col gap-1" style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 6 }}>
+        {section('生成', '用用户工作流补齐缺失资源（下一步接入）')}
+        <div className="flex flex-wrap items-center gap-1 text-[10px]">
+          <span className="text-muted-foreground">当前清单：</span>
+          {pickedList.length === 0
+            ? <span className="text-muted-foreground">（空）</span>
+            : pickedList.map((item) => (
+              <span key={`${item.subfolder}/${item.name}`} className="rounded-full px-1.5" style={{ border: `1px solid ${BORDER}` }}>
+                {item.kind}:{item.name}
+              </span>
+            ))}
+          <span className="ml-auto" />
+          <Button size="sm" variant="secondary" disabled title="下一步：选择用户工作流并提交生成任务">生成缺失资源</Button>
+        </div>
       </div>
     </div>
   )

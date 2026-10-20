@@ -1297,6 +1297,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         tracks: updatedTracks,
         total_length: calculateTotalLength(updatedTracks, data.frame_rate),
       })
+      // 旧片段已被替换，选中态必须指向新片段，否则编辑器会因选中失效而卸载（弹窗随之关闭）
+      const firstNewId = segments[0]?.id
+      if (firstNewId) {
+        setSelectedTaskMarkerId(null)
+        setSelectedSegmentIds(new Set([firstNewId]))
+        setSelectedSegmentId(firstNewId)
+      }
       return true
     }
     const registry = globalThis as unknown as { __easyMediaApplyStoryboard?: typeof applyStoryboard }

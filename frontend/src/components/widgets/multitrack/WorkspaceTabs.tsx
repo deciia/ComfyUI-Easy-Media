@@ -34,6 +34,8 @@ export interface StoryboardTabProps {
     durationSeconds: number
     ratio: string
     style: string
+    instruction?: string
+    previousPlan?: StoryboardPlan
   }) => Promise<StoryboardPlan | null>
   /** 把规划结果应用到任务轨（由多轨编辑器注册表执行） */
   onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
@@ -111,46 +113,19 @@ export function StoryboardTab({
   const [planSaved, setPlanSaved] = useState(false)
   const [appliedNote, setAppliedNote] = useState('')
   const [importedNote, setImportedNote] = useState('')
+  const [rightTab, setRightTab] = useState<'timeline' | 'chat'>('timeline')
+  const [chatInput, setChatInput] = useState('')
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; savedAt: number; plan: StoryboardPlan }>>(() => {
+    try {
+      const raw = window.localStorage.getItem('easy-media-storyboard-projects')
+      return raw ? JSON.parse(raw) : []
+    } catch {
+      return []
+    }
+  })
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
-
-  if (plan) {
-    return (
-      <PlanPreview
-        plan={plan}
-        saved={planSaved}
-        onBack={() => setPlan(null)}
-        appliedNote={appliedNote}
-        onImportSubjects={onImportPlanSubjects ? () => {
-          onImportPlanSubjects(plan)
-          setImportedNote('已导入主体到「主体定义」页')
-        } : undefined}
-        onImportResources={onImportPlanResources ? () => {
-          onImportPlanResources(plan)
-          setImportedNote('已把资源需求导入「资源与生成」页')
-        } : undefined}
-        importedNote={importedNote}
-        onSaveDraft={() => {
-          try {
-            window.localStorage.setItem('easy-media-storyboard-draft', JSON.stringify(plan))
-            setPlanSaved(true)
-          } catch (error) {
-            console.warn('[EasyMedia] save storyboard draft failed', error)
-          }
-        }}
-        onApply={() => {
-          if (!onApplyPlan) return false
-          const ok = onApplyPlan(plan.segments.map((segment) => ({
-            name: segment.name,
-            durationFrames: segment.duration_frames,
-            brief: formatPlanSegmentBrief(segment),
-          })))
-          setAppliedNote(ok ? '已应用到任务轨（可用 Ctrl+Z 撤销）' : '应用失败：请先在编辑器里选中任务片段')
-          return ok
-        }}
-      />
-    )
-  }
 
   const planner = (
     <div className="flex shrink-0 flex-col gap-1 border-b px-3 py-2" style={{ borderColor: BORDER }}>
@@ -178,6 +153,43 @@ export function StoryboardTab({
           value={style}
           onChange={(event) => setStyle(event.target.value)}
         />
+        <select
+          style={{ ...fieldStyle, width: 140 }}
+          value=""
+          onChange={(event) => {
+            const item = projects.find((entry) => entry.id === event.target.value)
+            if (item) {
+              setPlan(item.plan)
+              setPlanSaved(true)
+              setImportedNote(`已载入项目「${item.name}」`)
+            }
+          }}
+        >
+          <option value="">载入项目…</option>
+          {projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!plan}
+          onClick={() => {
+            if (!plan) return
+            const name = (plan.title || '未命名分镜').slice(0, 30)
+            const next = [
+              { id: `proj-${Date.now()}`, name, savedAt: Date.now(), plan },
+              ...projects.filter((item) => item.name !== name),
+            ].slice(0, 20)
+            setProjects(next)
+            try {
+              window.localStorage.setItem('easy-media-storyboard-projects', JSON.stringify(next))
+              setImportedNote(`已保存项目「${name}」`)
+            } catch (error) {
+              setImportedNote(`保存失败：${String(error)}`)
+            }
+          }}
+        >
+          保存项目
+        </Button>
         <Button
           size="sm"
           disabled={!onPlan || planning || !story.trim()}
@@ -267,7 +279,41 @@ export function StoryboardTab({
 
       {/* 中：单镜详情 */}
       <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-auto p-3">
-        {selected ? (
+        {plan ? (
+          <PlanPreview
+            plan={plan}
+            saved={planSaved}
+            appliedNote={appliedNote}
+            importedNote={importedNote}
+            onBack={() => setPlan(null)}
+            onSaveDraft={() => {
+              try {
+                window.localStorage.setItem('easy-media-storyboard-draft', JSON.stringify(plan))
+                setPlanSaved(true)
+              } catch (error) {
+                console.warn('[EasyMedia] save storyboard draft failed', error)
+              }
+            }}
+            onImportSubjects={onImportPlanSubjects ? () => {
+              onImportPlanSubjects(plan)
+              setImportedNote('已导入主体到「主体定义」页')
+            } : undefined}
+            onImportResources={onImportPlanResources ? () => {
+              onImportPlanResources(plan)
+              setImportedNote('已把资源需求导入「资源与生成」页')
+            } : undefined}
+            onApply={() => {
+              if (!onApplyPlan) return false
+              const ok = onApplyPlan(plan.segments.map((segment) => ({
+                name: segment.name,
+                durationFrames: segment.duration_frames,
+                brief: formatPlanSegmentBrief(segment),
+              })))
+              setAppliedNote(ok ? '已应用到任务轨（可用 Ctrl+Z 撤销）' : '应用失败：请先在编辑器里选中任务片段')
+              return ok
+            }}
+          />
+        ) : selected ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[13px] font-medium">
@@ -341,6 +387,82 @@ export function StoryboardTab({
 
       {/* 右：时间轴联动 */}
       <div className="flex w-[300px] shrink-0 flex-col gap-2 p-3" style={{ borderLeft: `1px solid ${BORDER}` }}>
+        <div className="flex gap-1">
+          {(['timeline', 'chat'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className="rounded px-2 py-0.5 text-[11px]"
+              style={{
+                border: `1px solid ${rightTab === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
+                color: rightTab === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+              }}
+              onClick={() => setRightTab(key)}
+            >
+              {key === 'timeline' ? '时间轴预览' : 'AI 对话'}
+            </button>
+          ))}
+        </div>
+        {rightTab === 'chat' ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+              {chatMessages.length === 0 ? (
+                <div className="text-[11px] leading-relaxed text-muted-foreground">
+                  规划完成后可以在这里继续提要求，例如：
+                  <br />「第 2 段节奏太快，拆成两段」
+                  <br />「把第 1 境的台词改成方言，加一个反应镜头」
+                  <br />「整体更压抑一些，减少空镜」
+                </div>
+              ) : chatMessages.map((message, index) => (
+                <div
+                  key={index}
+                  className="rounded px-2 py-1 text-[11px] leading-relaxed"
+                  style={{
+                    background: message.role === 'user' ? 'hsl(var(--primary, 199 89% 48%) / 0.14)' : FIELD_BG,
+                    border: `1px solid ${BORDER}`,
+                  }}
+                >
+                  <span className="mr-1 text-[10px] text-muted-foreground">{message.role === 'user' ? '我' : 'AI'}</span>
+                  {message.text}
+                </div>
+              ))}
+            </div>
+            <textarea
+              style={{ ...fieldStyle, minHeight: 64, resize: 'vertical' }}
+              placeholder="继续提修改要求（会基于当前分镜整版重写，未要求的部分保持原样）"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+            />
+            <Button
+              size="sm"
+              disabled={!onPlan || planning || !chatInput.trim() || !plan}
+              onClick={async () => {
+                if (!onPlan || !plan) return
+                const instruction = chatInput.trim()
+                setChatInput('')
+                setChatMessages((current) => [...current, { role: 'user', text: instruction }])
+                const next = await onPlan({
+                  brief: story,
+                  durationSeconds,
+                  ratio,
+                  style,
+                  instruction,
+                  previousPlan: plan,
+                })
+                if (next) {
+                  setPlan(next)
+                  setAppliedNote('')
+                  setChatMessages((current) => [...current, { role: 'assistant', text: `已按你的要求重写分镜（${next.segments.length} 段）。` }])
+                } else {
+                  setChatMessages((current) => [...current, { role: 'assistant', text: error || '修改失败，请重试' }])
+                }
+              }}
+            >
+              {planning ? '修改中…' : '发送修改要求'}
+            </Button>
+          </div>
+        ) : (
+        <>
         <div className="text-[11px] text-muted-foreground">时间轴预览（点选定位）</div>
         <div className="flex flex-col gap-1">
           {cards.map((card) => {
@@ -373,8 +495,10 @@ export function StoryboardTab({
           <span>{(totalFrames / frameRate).toFixed(1)}s</span>
         </div>
         <div className="mt-auto rounded-md p-2 text-[10px] leading-relaxed text-muted-foreground" style={{ border: `1px solid ${BORDER}`, background: PANEL_BG }}>
-          四宫格草图预演、拆分/合并镜头、整片 AI 规划将在后续版本加入。
+          四宫格草图预演、拆分/合并镜头将后续版本加入。
         </div>
+        </>
+        )}
       </div>
       </div>
     </div>
