@@ -1185,6 +1185,9 @@ export function TaskSegmentEditor({
                         }
                         window.dispatchEvent(new CustomEvent('easy-media.segment.activate', { detail: { id } }))
                       }}
+                      workspaceSegments={trackSegments}
+                      workspaceFrameRate={frameRate}
+                      onWriteSegmentPrompt={(id, prompt) => onTrackSegmentsContentChange?.([{ segmentId: id, patch: { user_prompt: prompt } }])}
                       onAutosave={({ brief, generated }) => onContentChange?.({
                         user_brief: brief,
                         prompt_meta: {

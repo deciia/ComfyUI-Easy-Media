@@ -4,6 +4,8 @@ import { Maximize2, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
+import { SimpleTab, StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
+import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
 
@@ -37,6 +39,12 @@ export interface PromptEnhancerModalProps {
   onActivateSegment?: (id: string) => void
   /** 自动保存草稿与规范版 */
   onAutosave?: (payload: { brief: string; generated: string }) => void
+  /** 四页签工作台：任务轨完整片段（分镜编排用） */
+  workspaceSegments?: MultiTrackSegment[]
+  /** 时间线帧率（分镜时长换算） */
+  workspaceFrameRate?: number
+  /** 把草稿提示词写入指定任务片段 */
+  onWriteSegmentPrompt?: (segmentId: string, prompt: string) => void
   resourceTokens?: Array<{ token: string; label: string; type?: string; thumbnailUrl?: string }>
 }
 
@@ -281,6 +289,9 @@ export function PromptEnhancerModal({
   segments = [],
   onActivateSegment,
   onAutosave,
+  workspaceSegments = [],
+  workspaceFrameRate = 30,
+  onWriteSegmentPrompt,
   resourceTokens = [],
 }: PromptEnhancerModalProps) {
   const t = useT()
@@ -293,6 +304,9 @@ export function PromptEnhancerModal({
   const [savingConfig, setSavingConfig] = useState(false)
   const [error, setError] = useState('')
   const [failures, setFailures] = useState<string[]>([])
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('storyboard')
+  const [workspaceGenerating, setWorkspaceGenerating] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState(initialResult)
   const [sections, setSections] = useState<Section[]>(() => splitSections(initialResult))
   const [configPath, setConfigPath] = useState('')
@@ -685,6 +699,29 @@ export function PromptEnhancerModal({
           </div>
         </div>
 
+        <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+          {([
+            ['storyboard', '分镜编排'],
+            ['subjects', '主体定义'],
+            ['assets', '资源与生成'],
+            ['enhance', '提示词增强'],
+          ] as Array<[WorkspaceTab, string]>).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className="rounded px-2 py-1 text-[12px]"
+              style={{
+                background: workspaceTab === key ? 'hsl(var(--primary, 199 89% 48%) / 0.18)' : 'transparent',
+                color: workspaceTab === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+                border: `1px solid ${workspaceTab === key ? 'hsl(var(--primary, 199 89% 48%))' : 'transparent'}`,
+              }}
+              onClick={() => setWorkspaceTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {view === 'settings' ? (
           <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
             <div className="grid grid-cols-3 gap-3">
@@ -722,6 +759,50 @@ export function PromptEnhancerModal({
               <Button onClick={() => void handleSaveConfig()} disabled={savingConfig}>{t('common.save')}</Button>
             </div>
           </div>
+        ) : workspaceTab !== 'enhance' ? (
+          workspaceTab === 'storyboard' ? (
+            <StoryboardTab
+              segments={workspaceSegments}
+              frameRate={workspaceFrameRate}
+              selectedSegmentId={segmentId}
+              onSelectSegment={(id) => onActivateSegment?.(id)}
+              onWritePrompt={onWriteSegmentPrompt}
+              onGeneratePrompt={async (_segmentId, brief) => {
+                setWorkspaceGenerating(true)
+                setWorkspaceError('')
+                try {
+                  const { ok, data } = await postGenerate({ language: 'English' }, brief)
+                  if (!ok) {
+                    setWorkspaceError(String((data as { error?: string })?.error || '生成失败'))
+                    return ''
+                  }
+                  return String((data as { prompt?: string })?.prompt || '')
+                } catch (error) {
+                  setWorkspaceError(String(error))
+                  return ''
+                } finally {
+                  setWorkspaceGenerating(false)
+                }
+              }}
+              generating={workspaceGenerating}
+              error={workspaceError}
+            />
+          ) : workspaceTab === 'subjects' ? (
+            <SimpleTab
+              title="主体定义"
+              hint="下一步：对齐 MiniMax Reference Subject 字段，并同步到画布「主体库」节点。"
+              rows={libraryNames.map((name, index) => ({ label: `<Subject ${index + 1}>`, value: name }))}
+            />
+          ) : (
+            <SimpleTab
+              title="资源与生成"
+              hint="下一步：扫描 ComfyUI/input、标记缺失资源、用用户工作流生成并回填。"
+              rows={resourceTokens.map((item) => ({
+                label: item.type === 'audio' ? '音频' : item.type === 'video' ? '视频' : '图片',
+                value: item.label,
+              }))}
+            />
+          )
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '290px minmax(0, 1.4fr) minmax(0, 1fr)', flex: 1, minHeight: 0 }}>
