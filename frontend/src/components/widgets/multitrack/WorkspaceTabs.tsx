@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, formatPlanSegmentBrief, type StoryboardPlan } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
@@ -36,7 +36,7 @@ export interface StoryboardTabProps {
     style: string
     instruction?: string
     previousPlan?: StoryboardPlan
-  }) => Promise<StoryboardPlan | null>
+  }, signal?: AbortSignal) => Promise<StoryboardPlan | null>
   onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
@@ -118,7 +118,17 @@ export function StoryboardTab({
   const [importedNote, setImportedNote] = useState('')
   const [rightTab, setRightTab] = useState<'chat' | 'timeline'>('chat')
   const [chatInput, setChatInput] = useState('')
-  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([])
+  type AgentStep = { label: string; status: 'running' | 'done' | 'failed' }
+  type AgentMessage = {
+    id: string
+    role: 'user' | 'assistant' | 'system'
+    text: string
+    steps?: AgentStep[]
+    status?: 'running' | 'done' | 'failed'
+    elapsedMs?: number
+  }
+  const [chatMessages, setChatMessages] = useState<AgentMessage[]>([])
+  const abortRef = useRef<AbortController | null>(null)
 
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
@@ -128,25 +138,84 @@ export function StoryboardTab({
     setRightTab('timeline')
   }
 
+  const updateMessage = (id: string, patch: Partial<AgentMessage>) => {
+    setChatMessages((current) => current.map((message) => (message.id === id ? { ...message, ...patch } : message)))
+  }
+
   async function sendMessage() {
     const text = chatInput.trim()
     if (!text || !onPlan) return
     setChatInput('')
-    setChatMessages((current) => [...current, { role: 'user', text }])
-    const next = plan
-      ? await onPlan({ brief: '', durationSeconds, ratio, style, instruction: text, previousPlan: plan })
-      : await onPlan({ brief: text, durationSeconds, ratio, style })
-    if (next) {
-      setPlan(next)
-      setAppliedNote('')
-      setPlanSaved(false)
-      setChatMessages((current) => [
-        ...current,
-        { role: 'assistant', text: `已生成分镜（${next.segments.length} 段 / ${next.total_seconds}s）。可以继续提修改要求。` },
-      ])
-    } else {
-      setChatMessages((current) => [...current, { role: 'assistant', text: error || '规划失败，请重试' }])
+    const stamp = Date.now()
+    const userId = `u-${stamp}`
+    const replyId = `a-${stamp}`
+    const controller = new AbortController()
+    abortRef.current = controller
+    const startedAt = Date.now()
+    setChatMessages((current) => [
+      ...current,
+      { id: userId, role: 'user', text },
+      {
+        id: replyId,
+        role: 'assistant',
+        text: '',
+        status: 'running',
+        steps: plan
+          ? [
+              { label: '读取当前分镜与项目上下文', status: 'done' },
+              { label: '按修改要求重写分镜', status: 'running' },
+            ]
+          : [
+              { label: '读取项目上下文（画幅 / 时长 / 主体）', status: 'done' },
+              { label: '导演级规划：叙事骨架 → 分段 → 镜头表', status: 'running' },
+            ],
+      },
+    ])
+    const timer = window.setInterval(() => {
+      updateMessage(replyId, { elapsedMs: Date.now() - startedAt })
+    }, 500)
+    try {
+      const next = plan
+        ? await onPlan({ brief: '', durationSeconds, ratio, style, instruction: text, previousPlan: plan }, controller.signal)
+        : await onPlan({ brief: text, durationSeconds, ratio, style }, controller.signal)
+      if (next) {
+        setPlan(next)
+        setAppliedNote('')
+        setPlanSaved(false)
+        updateMessage(replyId, {
+          status: 'done',
+          elapsedMs: Date.now() - startedAt,
+          steps: (plan
+            ? [{ label: '读取当前分镜与项目上下文', status: 'done' }, { label: '按修改要求重写分镜', status: 'done' }]
+            : [
+                { label: '读取项目上下文（画幅 / 时长 / 主体）', status: 'done' },
+                { label: '导演级规划：叙事骨架 → 分段 → 镜头表', status: 'done' },
+                { label: '推导主体与资源需求', status: 'done' },
+              ]) as AgentStep[],
+          text: `已完成：${next.segments.length} 段 / ${next.total_seconds}s / ${next.total_frames} 帧。\n可在中间预览核对，点「应用到任务轨」落成片段。`,
+        })
+      } else {
+        updateMessage(replyId, {
+          status: controller.signal.aborted ? 'done' : 'failed',
+          elapsedMs: Date.now() - startedAt,
+          text: controller.signal.aborted ? '已停止。' : (error || '规划失败，请重试'),
+        })
+      }
+    } catch (failure) {
+      updateMessage(replyId, {
+        status: controller.signal.aborted ? 'done' : 'failed',
+        elapsedMs: Date.now() - startedAt,
+        text: controller.signal.aborted ? '已停止。' : String(failure),
+      })
+    } finally {
+      window.clearInterval(timer)
+      abortRef.current = null
     }
+  }
+
+  function stopMessage() {
+    abortRef.current?.abort()
+    abortRef.current = null
   }
 
   function saveDraft() {
@@ -179,18 +248,53 @@ export function StoryboardTab({
           </div>
         </>
       )}
-      <div className="flex min-h-0 flex-col gap-1 overflow-auto">
-        {chatMessages.map((message, index) => (
+      <div className="flex min-h-0 flex-col gap-1 overflow-auto px-0.5">
+        {planning && chatMessages.length === 0 ? (
+          <div className="rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+            正在生成分镜…
+          </div>
+        ) : null}
+        {chatMessages.map((message) => (
           <div
-            key={index}
-            className="rounded px-2 py-1 text-[11px] leading-relaxed"
+            key={message.id}
+            className="rounded px-2 py-1.5 text-[11px] leading-relaxed"
             style={{
               background: message.role === 'user' ? `${PRIMARY} / 0.14` : FIELD_BG,
               border: `1px solid ${BORDER}`,
             }}
           >
-            <span className="mr-1 text-[10px] text-muted-foreground">{message.role === 'user' ? '我' : 'AI'}</span>
-            {message.text}
+            <div className="mb-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+              <span>{message.role === 'user' ? '我' : message.role === 'system' ? '系统' : '导演助手'}</span>
+              {message.status === 'running' ? (
+                <span className="rounded px-1" style={{ border: `1px solid ${PRIMARY}`, color: PRIMARY }}>
+                  运行中 {((message.elapsedMs ?? 0) / 1000).toFixed(0)}s
+                </span>
+              ) : message.status === 'failed' ? (
+                <span className="rounded px-1" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>失败</span>
+              ) : message.elapsedMs ? (
+                <span>{(message.elapsedMs / 1000).toFixed(1)}s</span>
+              ) : null}
+            </div>
+            {message.steps?.length ? (
+              <div className="mb-1 flex flex-col gap-0.5">
+                {message.steps.map((step) => (
+                  <div key={step.label} className="flex items-start gap-1 text-[10px] text-muted-foreground">
+                    <span style={{ color: step.status === 'done' ? PRIMARY : step.status === 'failed' ? '#fbbf24' : undefined }}>
+                      {step.status === 'done' ? '✓' : step.status === 'failed' ? '✕' : '●'}
+                    </span>
+                    <span>{step.label}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
+            {message.role === 'assistant' && message.status === 'running' ? (
+              <div className="mt-1 flex gap-2 text-[10px]">
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={stopMessage}>
+                  停止
+                </button>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -226,15 +330,15 @@ export function StoryboardTab({
           onChange={(event) => setStyle(event.target.value)}
         />
         <span className="ml-auto" />
-        <Button size="sm" disabled={!onPlan || planning || !chatInput.trim()} onClick={() => void sendMessage()}>
-          {planning ? '思考中…' : plan ? '发送修改' : '生成分镜'}
+        <Button size="sm" disabled={!onPlan || (!chatInput.trim() && !planning)} onClick={() => (planning ? stopMessage() : void sendMessage())}>
+          {planning ? '停止生成' : plan ? '发送修改' : '生成分镜'}
         </Button>
       </div>
       {error ? <div className="text-[11px]" style={{ color: '#fbbf24' }}>{error}</div> : null}
     </div>
   )
 
-  if (cards.length === 0 && !plan) {
+  if (cards.length === 0 && !plan && !planning) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <div className="flex w-[600px] max-w-full flex-col gap-3 rounded-xl p-5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
@@ -257,9 +361,20 @@ export function StoryboardTab({
         <div className="flex w-[220px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
           <div className="px-1 pb-1 text-[11px] text-muted-foreground">镜头卡</div>
           {cards.length === 0 ? (
-            <div className="px-1 text-[10px] leading-relaxed text-muted-foreground">
-              任务轨还没有片段。先在中间预览点「应用到任务轨」，生成后这里会出现镜头卡。
-            </div>
+            planning ? (
+              <div className="flex flex-col gap-1">
+                {[1, 2, 3, 4, 5].map((index) => (
+                  <div key={index} className="flex items-center gap-2 rounded-md px-2 py-1.5" style={{ background: FIELD_BG, border: `1px solid ${BORDER}`, opacity: 0.55 }}>
+                    <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: PRIMARY }} />
+                    <span className="text-[11px] text-muted-foreground">第 {index} 段 生成中…</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+                任务轨还没有片段。先在中间预览点「应用到任务轨」，生成后这里会出现镜头卡。
+              </div>
+            )
           ) : null}
           {cards.map((card) => {
             const active = card.id === selected?.id
@@ -319,6 +434,14 @@ export function StoryboardTab({
                 return ok
               }}
             />
+          ) : planning ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <div className="text-[13px] font-medium">正在生成分镜…</div>
+              <div className="text-[11px] leading-relaxed text-muted-foreground">
+                理解需求 → 定叙事骨架 → 分段 → 写镜头表 → 推导主体与资源
+                <br />约 1–3 分钟，结果会显示在这里。
+              </div>
+            </div>
           ) : selected ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">

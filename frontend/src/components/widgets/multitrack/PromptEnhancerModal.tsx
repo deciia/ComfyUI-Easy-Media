@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Maximize2, Save, Settings, Sparkles, X } from 'lucide-react'
+import { Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
@@ -416,7 +416,6 @@ export function PromptEnhancerModal({
     return items.slice(0, 200)
   }, [workspaceSegments])
   const [mentionTab, setMentionTab] = useState<'all' | 'subject' | 'picture' | 'video' | 'audio'>('all')
-  const [maximized, setMaximized] = useState(false)
   const [globalDraft, setGlobalDraft] = useState(globalPrompt)
   const [lastGenerated, setLastGenerated] = useState(initialResult)
   const [savedAt, setSavedAt] = useState<number | null>(null)
@@ -744,8 +743,8 @@ export function PromptEnhancerModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: maximized ? 'rgba(0,0,0,0.92)' : 'rgba(0,0,0,0.55)',
-        padding: maximized ? 0 : 10,
+        background: 'rgba(0,0,0,0.92)',
+        padding: 0,
       }}
       onClick={(event) => {
         event.stopPropagation()
@@ -757,11 +756,11 @@ export function PromptEnhancerModal({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          width: maximized ? '100vw' : 'min(96vw, 1480px)',
-          height: maximized ? '100vh' : 'min(92vh, 1000px)',
+          width: '100vw',
+          height: '100vh',
           background: PANEL_BG,
-          border: maximized ? 'none' : `1px solid ${BORDER}`,
-          borderRadius: maximized ? 0 : 10,
+          border: 'none',
+          borderRadius: 0,
           boxShadow: '0 24px 60px rgba(0,0,0,0.65)',
           overflow: 'hidden',
           color: '#e5e5e5',
@@ -870,9 +869,6 @@ export function PromptEnhancerModal({
               onClick={() => setView(view === 'settings' ? 'main' : 'settings')}
             >
               <Settings className="h-4 w-4" />
-            </Button>
-            <Button type="button" variant="ghost" size="icon" title={t('multitrack.enhancerMaximize')} className="h-7 w-7" onClick={() => setMaximized((value) => !value)}>
-              <Maximize2 className="h-4 w-4" />
             </Button>
             <Button type="button" variant="ghost" size="icon" title={t('multitrack.enhancerClose')} className="h-7 w-7" onClick={onClose}>
               <X className="h-4 w-4" />
@@ -1014,13 +1010,14 @@ export function PromptEnhancerModal({
                   return false
                 }
               }}
-              onPlan={async (input) => {
+              onPlan={async (input, signal?: AbortSignal) => {
                 setWorkspaceGenerating(true)
                 setWorkspaceError('')
                 try {
                   const response = await fetch('/easy-media/prompt-studio/plan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal,
                     body: JSON.stringify({
                       brief: input.brief,
                       duration_seconds: input.durationSeconds,
@@ -1069,9 +1066,34 @@ export function PromptEnhancerModal({
               }}
             />
           ) : workspaceTab === 'subjects' ? (
-            <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
+(
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                {<SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />}
+              </div>
+              <div className="flex w-[320px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}` }}>
+                <div className="text-[12px] font-medium">AI 助手</div>
+                <div className="text-[11px] leading-relaxed text-muted-foreground">
+                  {'从分镜推导主体、补描述与保留项、检查跨段一致性。'}
+                </div>
+                <div className="mt-auto flex flex-col gap-1">
+                  <div className="rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                    助手工具接入中：当前可先在「分镜编排」页对话，这里会作为同一项目助手的延伸。
+                  </div>
+                  <textarea
+                    disabled
+                    style={{ ...fieldStyle, minHeight: 56, resize: 'vertical', opacity: 0.6 }}
+                    placeholder="此页签助手下一步接入"
+                  />
+                </div>
+              </div>
+            </div>
+          )
           ) : (
-            <ResourcesTab
+(
+            <div className="flex min-h-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                {            <ResourcesTab
               projectResources={projectResources}
               plannedResources={plannedResources}
               segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
@@ -1080,7 +1102,26 @@ export function PromptEnhancerModal({
                 onAttachImages(segmentId, items.map((item) => ({ name: item.name, subfolder: item.subfolder })))
                 return true
               }}
-            />
+            />}
+              </div>
+              <div className="flex w-[320px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}` }}>
+                <div className="text-[12px] font-medium">AI 助手</div>
+                <div className="text-[11px] leading-relaxed text-muted-foreground">
+                  {'按分镜列资源需求、匹配 input 已有素材、发起生成并挂到片段。'}
+                </div>
+                <div className="mt-auto flex flex-col gap-1">
+                  <div className="rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                    助手工具接入中：当前可先在「分镜编排」页对话，这里会作为同一项目助手的延伸。
+                  </div>
+                  <textarea
+                    disabled
+                    style={{ ...fieldStyle, minHeight: 56, resize: 'vertical', opacity: 0.6 }}
+                    placeholder="此页签助手下一步接入"
+                  />
+                </div>
+              </div>
+            </div>
+          )
           )
         ) : (
           <>
