@@ -6,6 +6,8 @@ import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
+import { AgentRail } from './AgentRail'
+import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
@@ -937,6 +939,8 @@ export function PromptEnhancerModal({
             </div>
           </div>
         ) : workspaceTab !== 'enhance' ? (
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-col">
           workspaceTab === 'storyboard' ? (
             <StoryboardTab
               key={workspaceReloadKey}
@@ -1010,133 +1014,13 @@ export function PromptEnhancerModal({
                   return false
                 }
               }}
-              onAgent={async (
-                payload,
-                handlers,
-                signal?: AbortSignal,
-              ) => {
-                const response = await fetch('/easy-media/agent/chat', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(payload),
-                  signal,
-                })
-                if (!response.ok || !response.body) {
-                  throw new Error(`智能体请求失败（HTTP ${response.status}）`)
-                }
-                const reader = response.body.getReader()
-                const decoder = new TextDecoder()
-                let buffer = ''
-                for (;;) {
-                  const { value, done } = await reader.read()
-                  if (done) break
-                  buffer += decoder.decode(value, { stream: true })
-                  let index = buffer.indexOf('\n\n')
-                  while (index >= 0) {
-                    const block = buffer.slice(0, index)
-                    buffer = buffer.slice(index + 2)
-                    index = buffer.indexOf('\n\n')
-                    const line = block.split('\n').find((item) => item.startsWith('data:'))
-                    if (!line) continue
-                    let event: Record<string, unknown>
-                    try {
-                      event = JSON.parse(line.slice(5).trim())
-                    } catch {
-                      continue
-                    }
-                    const type = String(event.type || '')
-                    if (type === 'step') handlers.onStep(String(event.label || ''))
-                    else if (type === 'text') handlers.onText(String(event.text || ''))
-                    else if (type === 'plan') handlers.onPlan((event.plan as never) || null)
-                    else if (type === 'action') handlers.onAction(String(event.action || ''))
-                    else if (type === 'error') handlers.onText(`\n[错误] ${String(event.message || '')}`)
-                  }
-                }
-              }}
-              onPlan={async (input, signal?: AbortSignal) => {
-                setWorkspaceGenerating(true)
-                setWorkspaceError('')
-                try {
-                  const response = await fetch('/easy-media/prompt-studio/plan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal,
-                    body: JSON.stringify({
-                      brief: input.brief,
-                      duration_seconds: input.durationSeconds,
-                      ratio: input.ratio,
-                      style: input.style,
-                      frame_rate: workspaceFrameRate,
-                      instruction: input.instruction,
-                      previous_plan: input.previousPlan,
-                      subjects: libraryNames.map((name, index) => ({
-                        name,
-                        type: '未分类',
-                        label: `<Subject ${index + 1}>`,
-                      })),
-                    }),
-                  })
-                  if (response.status === 404 || response.status === 405) {
-                    setWorkspaceError(
-                      `后端接口未注册（HTTP ${response.status}）：请重启 ComfyUI 后再试`,
-                    )
-                    return null
-                  }
-                  const rawText = await response.text()
-                  let data: { ok?: boolean; error?: string; plan?: unknown } | null = null
-                  try {
-                    data = JSON.parse(rawText)
-                  } catch {
-                    data = null
-                  }
-                  if (!data) {
-                    setWorkspaceError(
-                      `返回非 JSON（HTTP ${response.status}）：${rawText.slice(0, 200)}`,
-                    )
-                    return null
-                  }
-                  if (!data.ok) {
-                    setWorkspaceError(String(data.error || `规划失败（HTTP ${response.status}）`))
-                    return null
-                  }
-                  return (data as { plan?: never }).plan ?? null
-                } catch (error) {
-                  setWorkspaceError(String(error))
-                  return null
-                } finally {
-                  setWorkspaceGenerating(false)
-                }
-              }}
             />
           ) : workspaceTab === 'subjects' ? (
 (
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col">
-                {<SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />}
-              </div>
-              <div className="flex w-[320px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}` }}>
-                <div className="text-[12px] font-medium">AI 助手</div>
-                <div className="text-[11px] leading-relaxed text-muted-foreground">
-                  {'从分镜推导主体、补描述与保留项、检查跨段一致性。'}
-                </div>
-                <div className="mt-auto flex flex-col gap-1">
-                  <div className="rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
-                    助手工具接入中：当前可先在「分镜编排」页对话，这里会作为同一项目助手的延伸。
-                  </div>
-                  <textarea
-                    disabled
-                    style={{ ...fieldStyle, minHeight: 56, resize: 'vertical', opacity: 0.6 }}
-                    placeholder="此页签助手下一步接入"
-                  />
-                </div>
-              </div>
-            </div>
-          )
-          ) : (
+            <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
+ : (
 (
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-w-0 flex-1 flex-col">
-                {            <ResourcesTab
+            <ResourcesTab
               projectResources={projectResources}
               plannedResources={plannedResources}
               segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
@@ -1145,27 +1029,34 @@ export function PromptEnhancerModal({
                 onAttachImages(segmentId, items.map((item) => ({ name: item.name, subfolder: item.subfolder })))
                 return true
               }}
-            />}
-              </div>
-              <div className="flex w-[320px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}` }}>
-                <div className="text-[12px] font-medium">AI 助手</div>
-                <div className="text-[11px] leading-relaxed text-muted-foreground">
-                  {'按分镜列资源需求、匹配 input 已有素材、发起生成并挂到片段。'}
-                </div>
-                <div className="mt-auto flex flex-col gap-1">
-                  <div className="rounded px-2 py-1 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
-                    助手工具接入中：当前可先在「分镜编排」页对话，这里会作为同一项目助手的延伸。
-                  </div>
-                  <textarea
-                    disabled
-                    style={{ ...fieldStyle, minHeight: 56, resize: 'vertical', opacity: 0.6 }}
-                    placeholder="此页签助手下一步接入"
-                  />
-                </div>
-              </div>
+            />
+
             </div>
-          )
-          )
+            <AgentRail
+              projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
+              tab={workspaceTab}
+              frameRate={workspaceFrameRate}
+              ratio={'16:9'}
+              segments={workspaceSegments.map((segment, index) => ({
+                index: index + 1,
+                name: segment.id,
+                durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
+              }))}
+              subjects={workspaceSubjects.map((subject) => ({ name: subject.name }))}
+              resources={plannedResources.map((resource) => ({ name: resource.name }))}
+              onApplyPlan={(next) => {
+                const registry = (globalThis as unknown as {
+                  __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
+                }).__easyMediaApplyStoryboard
+                if (!registry) return false
+                return registry(next.segments.map((segment) => ({
+                  name: segment.name,
+                  durationFrames: segment.duration_frames,
+                  brief: formatPlanSegmentBrief(segment as never),
+                })))
+              }}
+            />
+          </div>
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '290px minmax(0, 1.4fr) minmax(0, 1fr)', flex: 1, minHeight: 0 }}>
