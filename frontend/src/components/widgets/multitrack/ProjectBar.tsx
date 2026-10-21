@@ -493,13 +493,18 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
           <button
             type="button"
             className={BUTTON_CLASS}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, padding: 0 }}
             title={t('multitrack.projectWorkspaceHint')}
+            aria-label={t('multitrack.projectWorkspace')}
             onClick={() => {
               const open = (globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }).__easyMediaOpenWorkspace
               open?.()
             }}
           >
-            {t('multitrack.projectWorkspace')}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="M6 4v16M10 8h8M10 12h8M10 16h5" />
+            </svg>
           </button>
         </>
       )}

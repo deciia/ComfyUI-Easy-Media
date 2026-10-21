@@ -1265,6 +1265,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const firstSegment = taskTrack?.segments?.[0]
       if (firstSegment) handleSelectSegment(firstSegment.id, 'replace')
+      // 编辑器可能尚未因选中而挂载：写标记让它在挂载后自行打开，同时广播给已挂载实例
+      ;(globalThis as unknown as { __easyMediaPendingWorkspaceOpen?: boolean })
+        .__easyMediaPendingWorkspaceOpen = true
       window.dispatchEvent(new CustomEvent('easy-media.workspace.open'))
     }
     const registry = globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }

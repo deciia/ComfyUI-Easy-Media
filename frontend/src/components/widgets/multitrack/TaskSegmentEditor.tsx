@@ -301,7 +301,15 @@ export function TaskSegmentEditor({
   const [applyPromptToAllOpen, setApplyPromptToAllOpen] = useState(false)
   const [promptEnhancerOpen, setPromptEnhancerOpen] = useState(false)
   useEffect(() => {
-    function openWorkspace() { setPromptEnhancerOpen(true) }
+    const registry = globalThis as unknown as { __easyMediaPendingWorkspaceOpen?: boolean }
+    if (registry.__easyMediaPendingWorkspaceOpen) {
+      delete registry.__easyMediaPendingWorkspaceOpen
+      setPromptEnhancerOpen(true)
+    }
+    function openWorkspace() {
+      delete registry.__easyMediaPendingWorkspaceOpen
+      setPromptEnhancerOpen(true)
+    }
     window.addEventListener('easy-media.workspace.open', openWorkspace)
     return () => window.removeEventListener('easy-media.workspace.open', openWorkspace)
   }, [])
