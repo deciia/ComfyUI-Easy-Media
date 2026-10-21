@@ -95,15 +95,17 @@ export function StoryboardTab({
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
 
-  const [plan, setPlan] = useState<StoryboardPlan | null>(() => (readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [appliedNote, setAppliedNote] = useState('')
   const [importedNote, setImportedNote] = useState('')
-  const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
+  const [, setStoreVersion] = useState(0)
+
+  // 直接读共享存储：避免局部副本与右栏写入不同步
+  const plan = (readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null
+  const busy = Boolean(readWorkspace(projectKey).agentBusy)
 
   useEffect(() => subscribeWorkspace(projectKey, () => {
-    setPlan((readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null)
-    setBusy(Boolean(readWorkspace(projectKey).agentBusy))
+    setStoreVersion((value) => value + 1)
   }), [projectKey])
 
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
