@@ -1010,6 +1010,49 @@ export function PromptEnhancerModal({
                   return false
                 }
               }}
+              onAgent={async (
+                payload,
+                handlers,
+                signal?: AbortSignal,
+              ) => {
+                const response = await fetch('/easy-media/agent/chat', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload),
+                  signal,
+                })
+                if (!response.ok || !response.body) {
+                  throw new Error(`智能体请求失败（HTTP ${response.status}）`)
+                }
+                const reader = response.body.getReader()
+                const decoder = new TextDecoder()
+                let buffer = ''
+                for (;;) {
+                  const { value, done } = await reader.read()
+                  if (done) break
+                  buffer += decoder.decode(value, { stream: true })
+                  let index = buffer.indexOf('\n\n')
+                  while (index >= 0) {
+                    const block = buffer.slice(0, index)
+                    buffer = buffer.slice(index + 2)
+                    index = buffer.indexOf('\n\n')
+                    const line = block.split('\n').find((item) => item.startsWith('data:'))
+                    if (!line) continue
+                    let event: Record<string, unknown>
+                    try {
+                      event = JSON.parse(line.slice(5).trim())
+                    } catch {
+                      continue
+                    }
+                    const type = String(event.type || '')
+                    if (type === 'step') handlers.onStep(String(event.label || ''))
+                    else if (type === 'text') handlers.onText(String(event.text || ''))
+                    else if (type === 'plan') handlers.onPlan((event.plan as never) || null)
+                    else if (type === 'action') handlers.onAction(String(event.action || ''))
+                    else if (type === 'error') handlers.onText(`\n[错误] ${String(event.message || '')}`)
+                  }
+                }
+              }}
               onPlan={async (input, signal?: AbortSignal) => {
                 setWorkspaceGenerating(true)
                 setWorkspaceError('')

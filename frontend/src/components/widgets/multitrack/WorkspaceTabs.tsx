@@ -37,6 +37,16 @@ export interface StoryboardTabProps {
     instruction?: string
     previousPlan?: StoryboardPlan
   }, signal?: AbortSignal) => Promise<StoryboardPlan | null>
+  onAgent?: (
+    payload: { messages: Array<{ role: string; text: string }>; context: Record<string, unknown> },
+    handlers: {
+      onStep: (label: string) => void
+      onText: (text: string) => void
+      onPlan: (plan: StoryboardPlan) => void
+      onAction: (action: string) => void
+    },
+    signal?: AbortSignal,
+  ) => Promise<void>
   onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
@@ -53,6 +63,12 @@ interface Card {
   prompt: string
   shots: number
   tokens: string[]
+}
+
+function titleOf(segment: MultiTrackSegment): string {
+  const content = segment.content as unknown as Record<string, unknown>
+  const prompt = String(content?.user_prompt ?? content?.user_brief ?? '')
+  return (prompt.split('\n').find((line) => line.trim()) ?? '').replace(/<[^>]+>/g, '').trim().slice(0, 18) || '未命名'
 }
 
 function tokensOf(text: string): string[] {
@@ -92,6 +108,7 @@ export function StoryboardTab({
   generating = false,
   error = '',
   onPlan,
+  onAgent,
   onApplyPlan,
   onImportPlanSubjects,
   onImportPlanResources,
@@ -144,7 +161,7 @@ export function StoryboardTab({
 
   async function sendMessage() {
     const text = chatInput.trim()
-    if (!text || !onPlan) return
+    if (!text || (!onPlan && !onAgent)) return
     setChatInput('')
     const stamp = Date.now()
     const userId = `u-${stamp}`
@@ -155,58 +172,99 @@ export function StoryboardTab({
     setChatMessages((current) => [
       ...current,
       { id: userId, role: 'user', text },
-      {
-        id: replyId,
-        role: 'assistant',
-        text: '',
-        status: 'running',
-        steps: plan
-          ? [
-              { label: '读取当前分镜与项目上下文', status: 'done' },
-              { label: '按修改要求重写分镜', status: 'running' },
-            ]
-          : [
-              { label: '读取项目上下文（画幅 / 时长 / 主体）', status: 'done' },
-              { label: '导演级规划：叙事骨架 → 分段 → 镜头表', status: 'running' },
-            ],
-      },
+      { id: replyId, role: 'assistant', text: '', status: 'running', steps: [] },
     ])
     const timer = window.setInterval(() => {
       updateMessage(replyId, { elapsedMs: Date.now() - startedAt })
     }, 500)
+    const pushStep = (label: string) => {
+      setChatMessages((current) => current.map((message) => (
+        message.id === replyId
+          ? {
+              ...message,
+              steps: [
+                ...(message.steps ?? []).map((step) => ({ ...step, status: 'done' as const })),
+                { label, status: 'running' as const },
+              ],
+            }
+          : message
+      )))
+    }
+    const appendText = (chunk: string) => {
+      setChatMessages((current) => current.map((message) => (
+        message.id === replyId ? { ...message, text: `${message.text}${chunk}` } : message
+      )))
+    }
+    const finish = (status: 'done' | 'failed') => {
+      setChatMessages((current) => current.map((message) => (
+        message.id === replyId
+          ? {
+              ...message,
+              status,
+              elapsedMs: Date.now() - startedAt,
+              steps: (message.steps ?? []).map((step) => ({ ...step, status: 'done' as const })),
+            }
+          : message
+      )))
+    }
     try {
-      const next = plan
-        ? await onPlan({ brief: '', durationSeconds, ratio, style, instruction: text, previousPlan: plan }, controller.signal)
-        : await onPlan({ brief: text, durationSeconds, ratio, style }, controller.signal)
-      if (next) {
-        setPlan(next)
-        setAppliedNote('')
-        setPlanSaved(false)
-        updateMessage(replyId, {
-          status: 'done',
-          elapsedMs: Date.now() - startedAt,
-          steps: (plan
-            ? [{ label: '读取当前分镜与项目上下文', status: 'done' }, { label: '按修改要求重写分镜', status: 'done' }]
-            : [
-                { label: '读取项目上下文（画幅 / 时长 / 主体）', status: 'done' },
-                { label: '导演级规划：叙事骨架 → 分段 → 镜头表', status: 'done' },
-                { label: '推导主体与资源需求', status: 'done' },
-              ]) as AgentStep[],
-          text: `已完成：${next.segments.length} 段 / ${next.total_seconds}s / ${next.total_frames} 帧。\n可在中间预览核对，点「应用到任务轨」落成片段。`,
-        })
-      } else {
-        updateMessage(replyId, {
-          status: controller.signal.aborted ? 'done' : 'failed',
-          elapsedMs: Date.now() - startedAt,
-          text: controller.signal.aborted ? '已停止。' : (error || '规划失败，请重试'),
-        })
+      if (onAgent) {
+        await onAgent(
+          {
+            messages: [
+              ...chatMessages.map((message) => ({ role: message.role, text: message.text })),
+              { role: 'user', text },
+            ],
+            context: {
+              project: projectKey,
+              frame_rate: frameRate,
+              ratio,
+              plan,
+              segments: segments.map((segment, index) => ({
+                index: index + 1,
+                name: titleOf(segment),
+                duration_seconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, frameRate),
+              })),
+            },
+          },
+          {
+            onStep: pushStep,
+            onText: appendText,
+            onPlan: (next) => {
+              setPlan(next)
+              setAppliedNote('')
+              setPlanSaved(false)
+            },
+            onAction: (action) => {
+              if (action !== 'apply_storyboard' || !onApplyPlan || !plan) return
+              onApplyPlan(plan.segments.map((segment) => ({
+                name: segment.name,
+                durationFrames: segment.duration_frames,
+                brief: formatPlanSegmentBrief(segment),
+              })))
+              setAppliedNote('已应用到任务轨（可 Ctrl+Z 撤销）')
+            },
+          },
+          controller.signal,
+        )
+        finish(controller.signal.aborted ? 'done' : 'done')
+      } else if (onPlan) {
+        const next = plan
+          ? await onPlan({ brief: '', durationSeconds, ratio, style, instruction: text, previousPlan: plan }, controller.signal)
+          : await onPlan({ brief: text, durationSeconds, ratio, style }, controller.signal)
+        if (next) {
+          setPlan(next)
+          setAppliedNote('')
+          setPlanSaved(false)
+          appendText(`已完成：${next.segments.length} 段 / ${next.total_seconds}s。`)
+        } else {
+          appendText(error || '规划失败，请重试')
+        }
+        finish('done')
       }
     } catch (failure) {
-      updateMessage(replyId, {
-        status: controller.signal.aborted ? 'done' : 'failed',
-        elapsedMs: Date.now() - startedAt,
-        text: controller.signal.aborted ? '已停止。' : String(failure),
-      })
+      appendText(controller.signal.aborted ? '已停止。' : `请求失败：${String(failure)}`)
+      finish(controller.signal.aborted ? 'done' : 'failed')
     } finally {
       window.clearInterval(timer)
       abortRef.current = null

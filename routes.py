@@ -63,6 +63,7 @@ from .utils.prompt_enhancer import (
     masked_config as mask_prompt_enhancer_config,
     save_config as save_prompt_enhancer_config,
 )
+from .utils.agent import run_agent
 from .utils.plan_segments import (
     PlanError,
     generate_plan,
@@ -1048,6 +1049,69 @@ async def handle_prompt_studio_plan(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": f"Failed to plan storyboard: {error}"}, status=500
         )
+
+
+@PromptServer.instance.routes.get("/easy-media/agent/info")
+async def handle_agent_info(request: web.Request) -> web.Response:
+    """返回智能体使用的 provider / 模型与可用工具。"""
+    try:
+        from .utils.prompt_enhancer import resolve_settings
+
+        settings = resolve_settings(None)
+        return web.json_response(
+            {
+                "ok": True,
+                "provider": getattr(settings, "provider", ""),
+                "model": settings.model,
+                "tools": [
+                    {"name": "plan_storyboard", "label": "规划分镜"},
+                    {"name": "revise_storyboard", "label": "修改分镜"},
+                    {"name": "apply_storyboard", "label": "应用到任务轨"},
+                    {"name": "answer", "label": "回答"},
+                ],
+            }
+        )
+    except Exception as error:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/agent/chat")
+async def handle_agent_chat(request: web.Request) -> web.StreamResponse:
+    """项目智能体：SSE 推送决策、工具执行过程与产物（plan / action / text）。"""
+    try:
+        payload = await request.json()
+    except Exception as error:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": f"invalid json: {error}"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"ok": False, "error": "payload must be an object"}, status=400)
+    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+    try:
+        async for chunk in run_agent(messages, context):
+            await response.write(chunk.encode("utf-8"))
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        try:
+            import json as _json
+
+            await response.write(
+                ("data: " + _json.dumps({"type": "error", "message": str(error)}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    await response.write_eof()
+    return response
 
 
 @PromptServer.instance.routes.post("/easy-media/prompt-studio/plan/parse")
