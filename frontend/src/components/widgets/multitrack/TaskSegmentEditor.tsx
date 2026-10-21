@@ -108,7 +108,6 @@ interface TaskSegmentEditorProps {
   format?: string
   onContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
-  workspaceOpenNonce?: number
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onDurationChange?: (duration: number) => void
   onOpenImagePreview?: (imageId: string) => void
@@ -288,7 +287,6 @@ export function TaskSegmentEditor({
   format,
   onContentChange,
   onTrackSegmentsContentChange,
-  workspaceOpenNonce = 0,
   onTrackSegmentsChange,
   onDurationChange,
   onOpenImagePreview,
@@ -303,8 +301,10 @@ export function TaskSegmentEditor({
   const [applyPromptToAllOpen, setApplyPromptToAllOpen] = useState(false)
   const [promptEnhancerOpen, setPromptEnhancerOpen] = useState(false)
   useEffect(() => {
-    if (workspaceOpenNonce > 0) setPromptEnhancerOpen(true)
-  }, [workspaceOpenNonce])
+    function openWorkspace() { setPromptEnhancerOpen(true) }
+    window.addEventListener('easy-media.workspace.open', openWorkspace)
+    return () => window.removeEventListener('easy-media.workspace.open', openWorkspace)
+  }, [])
   const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [isDurationEditing, setIsDurationEditing] = useState(false)

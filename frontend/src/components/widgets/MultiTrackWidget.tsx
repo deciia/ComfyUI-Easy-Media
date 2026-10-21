@@ -152,7 +152,6 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
-  const [workspaceOpenNonce, setWorkspaceOpenNonce] = useState(0)
 
   // 提示词增强器切换任务片段：把切换函数登记到全局，弹窗直接调用（事件作为兜底）
   useEffect(() => {
@@ -1266,7 +1265,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const firstSegment = taskTrack?.segments?.[0]
       if (firstSegment) handleSelectSegment(firstSegment.id, 'replace')
-      setWorkspaceOpenNonce((value) => value + 1)
+      window.dispatchEvent(new CustomEvent('easy-media.workspace.open'))
     }
     const registry = globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }
     registry.__easyMediaOpenWorkspace = openWorkspace
