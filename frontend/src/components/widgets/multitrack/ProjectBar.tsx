@@ -74,6 +74,11 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
   const [pendingNew, setPendingNew] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(false)
+  // 导演工作台读取当前项目名（避免跨层传参）
+  useEffect(() => {
+    const registry = globalThis as unknown as { __easyMediaProjectName?: string }
+    registry.__easyMediaProjectName = currentName
+  }, [currentName])
   const savedSignatureRef = useRef<string | null>(null)
   const lastLoadedAtRef = useRef<number | null>(null)
   // 自动保存：idle=待命 / saving=写盘中 / blocked=有冲突（停止自动保存） / error=失败

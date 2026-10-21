@@ -739,6 +739,10 @@ export function PromptEnhancerModal({
           <div className="flex items-center gap-2 text-sm font-medium">
             <Sparkles className="h-4 w-4 text-primary" />
             {t('multitrack.enhancerTitle')}
+            {(() => {
+              const name = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
+              return name ? <span className="ml-1 text-[11px] text-muted-foreground">· {name}</span> : null
+            })()}
           </div>
           <div className="flex items-center gap-1">
             <Button
