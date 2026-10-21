@@ -344,7 +344,7 @@
     "projectAutoSavedHint": "停止编辑 2.5 秒后自动保存；Ctrl+S 可立即保存",
     "projectAutoSaveFailed": "⚠ 自动保存失败，请用 Ctrl+S 手动保存",
     "enhancerOpen": "提示词增强",
-    "enhancerTitle": "提示词增强器",
+    "enhancerTitle": "导演工作台",
     "enhancerSettings": "API 设置",
     "enhancerClose": "关闭",
     "enhancerProvider": "服务商",
@@ -394,7 +394,8 @@
     "referenceAligned": "对齐片段",
     "referenceGlobal": "全局使用",
     "referenceAlignedTooltip": "参考 · 对齐片段：只作用于与它时间重叠的任务片段（拖动片段改覆盖范围）",
-    "referenceGlobalTooltip": "参考 · 全局使用：所有任务片段都可以选它作为参考"
+    "referenceGlobalTooltip": "参考 · 全局使用：所有任务片段都可以选它作为参考",
+    "projectWorkspace": "工作台"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

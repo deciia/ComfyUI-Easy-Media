@@ -344,7 +344,7 @@
     "projectAutoSavedHint": "Auto-saves 2.5s after you stop editing; Ctrl+S saves immediately",
     "projectAutoSaveFailed": "⚠ Auto-save failed, use Ctrl+S",
     "enhancerOpen": "Enhance prompt",
-    "enhancerTitle": "Prompt enhancer",
+    "enhancerTitle": "Director Workspace",
     "enhancerSettings": "API settings",
     "enhancerClose": "Close",
     "enhancerProvider": "Provider",
@@ -394,7 +394,8 @@
     "referenceAligned": "Aligned to segments",
     "referenceGlobal": "Global",
     "referenceAlignedTooltip": "Reference · aligned: only task segments overlapping this clip can use it (drag to change coverage)",
-    "referenceGlobalTooltip": "Reference · global: every task segment can use it"
+    "referenceGlobalTooltip": "Reference · global: every task segment can use it",
+    "projectWorkspace": "Workspace"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",

@@ -466,6 +466,17 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
             onClick={() => void handleDelete()}>
             {pendingDelete ? t('multitrack.projectDeleteConfirmShort') : t('multitrack.projectDelete')}
           </button>
+          <button
+            type="button"
+            className={BUTTON_CLASS}
+            title={t('multitrack.projectWorkspaceHint')}
+            onClick={() => {
+              const open = (globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }).__easyMediaOpenWorkspace
+              open?.()
+            }}
+          >
+            {t('multitrack.projectWorkspace')}
+          </button>
         </>
       )}
 

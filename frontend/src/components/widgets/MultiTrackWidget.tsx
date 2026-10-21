@@ -152,6 +152,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
+  const [workspaceOpenNonce, setWorkspaceOpenNonce] = useState(0)
 
   // 提示词增强器切换任务片段：把切换函数登记到全局，弹窗直接调用（事件作为兜底）
   useEffect(() => {
@@ -1258,6 +1259,21 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       tracks: updatedTracks,
     })
   }
+
+  // 项目栏「工作台」按钮：选中第一个任务片段并通知编辑器打开弹窗
+  useEffect(() => {
+    const openWorkspace = () => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const firstSegment = taskTrack?.segments?.[0]
+      if (firstSegment) handleSelectSegment(firstSegment.id, 'replace')
+      setWorkspaceOpenNonce((value) => value + 1)
+    }
+    const registry = globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }
+    registry.__easyMediaOpenWorkspace = openWorkspace
+    return () => {
+      if (registry.__easyMediaOpenWorkspace === openWorkspace) delete registry.__easyMediaOpenWorkspace
+    }
+  }, [data])
 
   // 分镜编排：把规划结果落成任务轨片段（只由弹窗「应用到任务轨」调用）
   useEffect(() => {
