@@ -143,12 +143,15 @@ export function StoryboardTab({
     steps?: AgentStep[]
     status?: 'running' | 'done' | 'failed'
     elapsedMs?: number
+    planResult?: { segments: number; seconds: number }
   }
   const [chatMessages, setChatMessages] = useState<AgentMessage[]>([])
+  const [agentBusy, setAgentBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
+  const running = planning || agentBusy
 
   const selectCard = (id: string) => {
     onSelectSegment?.(id)
@@ -168,6 +171,7 @@ export function StoryboardTab({
     const replyId = `a-${stamp}`
     const controller = new AbortController()
     abortRef.current = controller
+    setAgentBusy(true)
     const startedAt = Date.now()
     setChatMessages((current) => [
       ...current,
@@ -234,6 +238,9 @@ export function StoryboardTab({
               setPlan(next)
               setAppliedNote('')
               setPlanSaved(false)
+              updateMessage(replyId, {
+                planResult: { segments: next.segments.length, seconds: next.total_seconds },
+              })
             },
             onAction: (action) => {
               if (action !== 'apply_storyboard' || !onApplyPlan || !plan) return
@@ -268,6 +275,7 @@ export function StoryboardTab({
     } finally {
       window.clearInterval(timer)
       abortRef.current = null
+      setAgentBusy(false)
     }
   }
 
@@ -346,6 +354,33 @@ export function StoryboardTab({
               </div>
             ) : null}
             {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
+            {message.planResult ? (
+              <div
+                className="mt-1.5 rounded-md p-2"
+                style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}
+              >
+                <div className="mb-1 text-[11px]">
+                  分镜产物：{message.planResult.segments} 段 · {message.planResult.seconds}s
+                </div>
+                {onApplyPlan ? (
+                  <Button
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => {
+                      if (!plan || !onApplyPlan) return
+                      const ok = onApplyPlan(plan.segments.map((segment) => ({
+                        name: segment.name,
+                        durationFrames: segment.duration_frames,
+                        brief: formatPlanSegmentBrief(segment),
+                      })))
+                      setAppliedNote(ok ? '已应用到任务轨（可 Ctrl+Z 撤销）' : '应用失败：请先选中任务片段')
+                    }}
+                  >
+                    应用到任务轨
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             {message.role === 'assistant' && message.status === 'running' ? (
               <div className="mt-1 flex gap-2 text-[10px]">
                 <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={stopMessage}>
@@ -396,7 +431,7 @@ export function StoryboardTab({
     </div>
   )
 
-  if (cards.length === 0 && !plan && !planning) {
+  if (cards.length === 0 && !plan && !running) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <div className="flex w-[600px] max-w-full flex-col gap-3 rounded-xl p-5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
@@ -419,7 +454,7 @@ export function StoryboardTab({
         <div className="flex w-[220px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
           <div className="px-1 pb-1 text-[11px] text-muted-foreground">镜头卡</div>
           {cards.length === 0 ? (
-            planning ? (
+            running ? (
               <div className="flex flex-col gap-1">
                 {[1, 2, 3, 4, 5].map((index) => (
                   <div key={index} className="flex items-center gap-2 rounded-md px-2 py-1.5" style={{ background: FIELD_BG, border: `1px solid ${BORDER}`, opacity: 0.55 }}>
@@ -492,7 +527,7 @@ export function StoryboardTab({
                 return ok
               }}
             />
-          ) : planning ? (
+          ) : running ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
               <div className="text-[13px] font-medium">正在生成分镜…</div>
               <div className="text-[11px] leading-relaxed text-muted-foreground">
