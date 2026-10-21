@@ -234,7 +234,7 @@ export function StoryboardTab({
     </div>
   )
 
-  if (cards.length === 0) {
+  if (cards.length === 0 && !plan) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <div className="flex w-[600px] max-w-full flex-col gap-3 rounded-xl p-5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
@@ -256,6 +256,11 @@ export function StoryboardTab({
       <div className="flex min-h-0 flex-1">
         <div className="flex w-[220px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
           <div className="px-1 pb-1 text-[11px] text-muted-foreground">镜头卡</div>
+          {cards.length === 0 ? (
+            <div className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+              任务轨还没有片段。先在中间预览点「应用到任务轨」，生成后这里会出现镜头卡。
+            </div>
+          ) : null}
           {cards.map((card) => {
             const active = card.id === selected?.id
             return (
