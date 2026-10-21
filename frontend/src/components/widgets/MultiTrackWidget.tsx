@@ -1283,6 +1283,15 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }, [data])
 
+  // 片段 ✦ 或项目栏图标：统一打开节点层工作台（弹窗不随片段卸载）
+  useEffect(() => {
+    function open() {
+      setWorkspaceModalOpen(true)
+    }
+    window.addEventListener('easy-media.workspace.open', open)
+    return () => window.removeEventListener('easy-media.workspace.open', open)
+  }, [])
+
   // 分镜编排：把规划结果落成任务轨片段（只由弹窗「应用到任务轨」调用）
   useEffect(() => {
     const applyStoryboard = (items: Array<{

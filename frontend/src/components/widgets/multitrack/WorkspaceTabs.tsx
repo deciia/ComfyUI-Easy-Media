@@ -159,12 +159,53 @@ export function StoryboardTab({
     </div>
   )
 
+
+
   if (cards.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        {planner}
-        <div className="flex flex-1 items-center justify-center p-8 text-center text-xs text-muted-foreground">
-          任务轨还没有片段。可以直接用上面的「AI 规划整片」生成分镜，或先在多轨编辑器里添加任务片段。
+      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+        <div className="flex w-[560px] max-w-full flex-col gap-3 rounded-xl p-5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
+          <div className="text-center text-[16px] font-medium">今天要做点什么？</div>
+          <div className="text-center text-[11px] text-muted-foreground">
+            说出你的想法，AI 负责分镜、台词、节奏与微表情；生成后可直接应用到任务轨。
+          </div>
+          <textarea
+            style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', fontSize: 13, lineHeight: 1.6 }}
+            placeholder="例：写一个天空鲸落掉深海回家的故事。"
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault()
+                void sendMessage()
+              }
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            总时长
+            <input
+              style={{ ...fieldStyle, width: 56, padding: '2px 4px' }}
+              value={String(durationSeconds)}
+              onChange={(event) => setDurationSeconds(Math.max(3, Number(event.target.value) || 30))}
+            />
+            秒
+            <select style={{ ...fieldStyle, width: 70, padding: '2px 4px' }} value={ratio} onChange={(event) => setRatio(event.target.value)}>
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select>
+            <input
+              style={{ ...fieldStyle, width: 120, padding: '2px 4px' }}
+              placeholder="风格（可选）"
+              value={style}
+              onChange={(event) => setStyle(event.target.value)}
+            />
+            <span className="ml-auto" />
+            <Button size="sm" disabled={!onPlan || planning || !chatInput.trim()} onClick={() => void sendMessage()}>
+              {planning ? '思考中…（最长 5 分钟）' : '生成分镜'}
+            </Button>
+          </div>
+          {error ? <div className="text-[11px]" style={{ color: '#fbbf24' }}>{error}</div> : null}
         </div>
       </div>
     )
