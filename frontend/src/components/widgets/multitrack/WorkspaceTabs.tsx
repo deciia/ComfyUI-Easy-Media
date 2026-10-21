@@ -176,6 +176,44 @@ export function StoryboardTab({
           <option value="">载入项目…</option>
           {projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
+        <span className="text-muted-foreground">新建</span>
+        <input
+          style={{ ...fieldStyle, width: 120, padding: '2px 4px' }}
+          placeholder="新项目名"
+          value={newProjectName}
+          onChange={(event) => setNewProjectName(event.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-6 px-2 text-[11px]"
+          disabled={!newProjectName.trim() || creatingProject}
+          onClick={async () => {
+            const create = (globalThis as unknown as {
+              __easyMediaCreateProject?: (name: string) => Promise<boolean>
+            }).__easyMediaCreateProject
+            if (!create) {
+              setImportedNote('新建失败：编辑器未就绪')
+              return
+            }
+            setCreatingProject(true)
+            try {
+              const name = newProjectName.trim()
+              const ok = await create(name)
+              setImportedNote(ok ? `已新建项目「${name}」` : '新建失败（可能已存在或名称非法）')
+              if (ok) {
+                setNewProjectName('')
+                setPlan(null)
+                setChatMessages([])
+                window.localStorage.removeItem(`easy-media-storyboard:${name}`)
+              }
+            } finally {
+              setCreatingProject(false)
+            }
+          }}
+        >
+          {creatingProject ? '创建中…' : '新建项目'}
+        </Button>
         <Button
           size="sm"
           variant="secondary"
