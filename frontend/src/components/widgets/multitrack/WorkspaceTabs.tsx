@@ -33,6 +33,7 @@ export interface StoryboardTabProps {
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
   planning?: boolean
+  projectKey?: string
   /** 已废弃：对话移到常驻右栏，保留字段避免调用方类型报错 */
   onPlan?: any
   onAgent?: any
@@ -90,8 +91,9 @@ export function StoryboardTab({
   onApplyPlan,
   onImportPlanSubjects,
   onImportPlanResources,
+  projectKey: incomingProjectKey,
 }: StoryboardTabProps) {
-  const projectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
+  const projectKey = incomingProjectKey || (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
 

@@ -944,6 +944,7 @@ export function PromptEnhancerModal({
             {workspaceTab === 'storyboard' ? (
 <StoryboardTab
               key={workspaceReloadKey}
+              projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
               segments={workspaceSegments}
               frameRate={workspaceFrameRate}
               selectedSegmentId={segmentId}
