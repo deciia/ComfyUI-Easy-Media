@@ -10,6 +10,25 @@ const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const PRIMARY = 'hsl(var(--primary, 199 89% 48%))'
 
+/** 分镜页会话级缓存：切页签/关闭弹窗后保持不丢。 */
+interface StoryboardCache {
+  plan?: StoryboardPlan | null
+  messages?: Array<{
+    id: string
+    role: 'user' | 'assistant' | 'system'
+    text: string
+    steps?: Array<{ label: string; status: 'running' | 'done' | 'failed' }>
+    status?: 'running' | 'done' | 'failed'
+    elapsedMs?: number
+    planResult?: { segments: number; seconds: number }
+  }>
+  durationSeconds?: number
+  ratio?: string
+  style?: string
+  chatInput?: string
+}
+const storyboardCache = new Map<string, StoryboardCache>()
+
 const fieldStyle: React.CSSProperties = {
   background: FIELD_BG,
   border: `1px solid ${BORDER}`,
@@ -119,10 +138,12 @@ export function StoryboardTab({
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
 
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [durationSeconds, setDurationSeconds] = useState(30)
-  const [ratio, setRatio] = useState('16:9')
-  const [style, setStyle] = useState('')
+  const [durationSeconds, setDurationSeconds] = useState(() => storyboardCache.get(projectKey)?.durationSeconds ?? 30)
+  const [ratio, setRatio] = useState(() => storyboardCache.get(projectKey)?.ratio ?? '16:9')
+  const [style, setStyle] = useState(() => storyboardCache.get(projectKey)?.style ?? '')
   const [plan, setPlan] = useState<StoryboardPlan | null>(() => {
+    const cached = storyboardCache.get(projectKey)
+    if (cached && 'plan' in cached) return cached.plan ?? null
     try {
       const raw = window.localStorage.getItem(`easy-media-storyboard:${projectKey}`)
       return raw ? JSON.parse(raw) : null
@@ -134,7 +155,7 @@ export function StoryboardTab({
   const [appliedNote, setAppliedNote] = useState('')
   const [importedNote, setImportedNote] = useState('')
   const [rightTab, setRightTab] = useState<'chat' | 'timeline'>('chat')
-  const [chatInput, setChatInput] = useState('')
+  const [chatInput, setChatInput] = useState(() => storyboardCache.get(projectKey)?.chatInput ?? '')
   type AgentStep = { label: string; status: 'running' | 'done' | 'failed' }
   type AgentMessage = {
     id: string
@@ -145,7 +166,7 @@ export function StoryboardTab({
     elapsedMs?: number
     planResult?: { segments: number; seconds: number }
   }
-  const [chatMessages, setChatMessages] = useState<AgentMessage[]>([])
+  const [chatMessages, setChatMessages] = useState<AgentMessage[]>(() => (storyboardCache.get(projectKey)?.messages as AgentMessage[] | undefined) ?? [])
   const [agentBusy, setAgentBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -294,6 +315,17 @@ export function StoryboardTab({
       setImportedNote(`保存失败：${String(saveError)}`)
     }
   }
+
+  useEffect(() => {
+    storyboardCache.set(projectKey, {
+      plan,
+      messages: chatMessages,
+      durationSeconds,
+      ratio,
+      style,
+      chatInput,
+    })
+  }, [projectKey, plan, chatMessages, durationSeconds, ratio, style, chatInput])
 
   useEffect(() => {
     function onSave() {
