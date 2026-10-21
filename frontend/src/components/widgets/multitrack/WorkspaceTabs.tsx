@@ -26,8 +26,29 @@ interface StoryboardCache {
   ratio?: string
   style?: string
   chatInput?: string
+  agentBusy?: boolean
 }
 const storyboardCache = new Map<string, StoryboardCache>()
+
+const storyboardListeners = new Map<string, Set<() => void>>()
+
+function readStoryboard(key: string): StoryboardCache {
+  return storyboardCache.get(key) ?? {}
+}
+
+function writeStoryboard(key: string, patch: Partial<StoryboardCache>) {
+  storyboardCache.set(key, { ...readStoryboard(key), ...patch })
+  for (const listener of storyboardListeners.get(key) ?? []) listener()
+}
+
+function subscribeStoryboard(key: string, listener: () => void) {
+  const set = storyboardListeners.get(key) ?? new Set<() => void>()
+  set.add(listener)
+  storyboardListeners.set(key, set)
+  return () => {
+    set.delete(listener)
+  }
+}
 
 const fieldStyle: React.CSSProperties = {
   background: FIELD_BG,
@@ -167,7 +188,7 @@ export function StoryboardTab({
     planResult?: { segments: number; seconds: number }
   }
   const [chatMessages, setChatMessages] = useState<AgentMessage[]>(() => (storyboardCache.get(projectKey)?.messages as AgentMessage[] | undefined) ?? [])
-  const [agentBusy, setAgentBusy] = useState(false)
+  const [agentBusy, setAgentBusy] = useState(() => Boolean(readStoryboard(projectKey).agentBusy))
   const abortRef = useRef<AbortController | null>(null)
 
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
@@ -179,8 +200,19 @@ export function StoryboardTab({
     setRightTab('timeline')
   }
 
+  const patchMessages = (fn: (current: AgentMessage[]) => AgentMessage[]) => {
+    const next = fn(readStoryboard(projectKey).messages ?? [])
+    writeStoryboard(projectKey, { messages: next })
+    setChatMessages(next)
+  }
+
   const updateMessage = (id: string, patch: Partial<AgentMessage>) => {
-    setChatMessages((current) => current.map((message) => (message.id === id ? { ...message, ...patch } : message)))
+    patchMessages((current) => current.map((message) => (message.id === id ? { ...message, ...patch } : message)))
+  }
+
+  const applyPlan = (next: StoryboardPlan | null) => {
+    writeStoryboard(projectKey, { plan: next })
+    setPlan(next)
   }
 
   async function sendMessage() {
@@ -192,9 +224,10 @@ export function StoryboardTab({
     const replyId = `a-${stamp}`
     const controller = new AbortController()
     abortRef.current = controller
+    writeStoryboard(projectKey, { agentBusy: true })
     setAgentBusy(true)
     const startedAt = Date.now()
-    setChatMessages((current) => [
+    patchMessages((current) => [
       ...current,
       { id: userId, role: 'user', text },
       { id: replyId, role: 'assistant', text: '', status: 'running', steps: [] },
@@ -203,7 +236,7 @@ export function StoryboardTab({
       updateMessage(replyId, { elapsedMs: Date.now() - startedAt })
     }, 500)
     const pushStep = (label: string) => {
-      setChatMessages((current) => current.map((message) => (
+      patchMessages((current) => current.map((message) => (
         message.id === replyId
           ? {
               ...message,
@@ -216,12 +249,12 @@ export function StoryboardTab({
       )))
     }
     const appendText = (chunk: string) => {
-      setChatMessages((current) => current.map((message) => (
+      patchMessages((current) => current.map((message) => (
         message.id === replyId ? { ...message, text: `${message.text}${chunk}` } : message
       )))
     }
     const finish = (status: 'done' | 'failed') => {
-      setChatMessages((current) => current.map((message) => (
+      patchMessages((current) => current.map((message) => (
         message.id === replyId
           ? {
               ...message,
@@ -256,7 +289,7 @@ export function StoryboardTab({
             onStep: pushStep,
             onText: appendText,
             onPlan: (next) => {
-              setPlan(next)
+              applyPlan(next)
               setAppliedNote('')
               setPlanSaved(false)
               updateMessage(replyId, {
@@ -281,7 +314,7 @@ export function StoryboardTab({
           ? await onPlan({ brief: '', durationSeconds, ratio, style, instruction: text, previousPlan: plan }, controller.signal)
           : await onPlan({ brief: text, durationSeconds, ratio, style }, controller.signal)
         if (next) {
-          setPlan(next)
+          applyPlan(next)
           setAppliedNote('')
           setPlanSaved(false)
           appendText(`已完成：${next.segments.length} 段 / ${next.total_seconds}s。`)
@@ -296,6 +329,7 @@ export function StoryboardTab({
     } finally {
       window.clearInterval(timer)
       abortRef.current = null
+      writeStoryboard(projectKey, { agentBusy: false })
       setAgentBusy(false)
     }
   }
@@ -315,6 +349,13 @@ export function StoryboardTab({
       setImportedNote(`保存失败：${String(saveError)}`)
     }
   }
+
+  useEffect(() => subscribeStoryboard(projectKey, () => {
+    const cached = readStoryboard(projectKey)
+    setChatMessages((cached.messages as AgentMessage[] | undefined) ?? [])
+    if ('plan' in cached) setPlan(cached.plan ?? null)
+    setAgentBusy(Boolean(cached.agentBusy))
+  }), [projectKey])
 
   useEffect(() => {
     storyboardCache.set(projectKey, {
