@@ -43,7 +43,7 @@ export interface AgentRailProps {
   onApplyPlan?: (plan: StoryboardPlanLike) => boolean
 }
 
-/** 常驻右侧 AI 助手：由弹窗持有，切页签不卸载。 */
+/** 常驻右侧 AI 助手：弹窗持有，切页签不卸载；内含 对话/轨迹/上下文 三个标签页。 */
 export function AgentRail({
   projectKey,
   tab,
@@ -58,8 +58,8 @@ export function AgentRail({
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
   const [model, setModel] = useState('')
+  const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
-  const plan = readWorkspace(projectKey).plan ?? null
 
   useEffect(() => subscribeWorkspace(projectKey, () => {
     setMessages(readWorkspace(projectKey).messages ?? [])
@@ -83,26 +83,20 @@ export function AgentRail({
     writeWorkspace(projectKey, { chatInput: input })
   }, [projectKey, input])
 
+  const plan = readWorkspace(projectKey).plan ?? null
   const contextChips = useMemo(() => {
     const chips = [`项目 ${projectKey || '未命名'}`, `${segments.length} 段`, `${frameRate}fps`, ratio]
     if (subjects.length) chips.push(`${subjects.length} 主体`)
-    if (resources.length) chips.push(`${resources.length} 资源需求`)
+    if (resources.length) chips.push(`${resources.length} 资源`)
     return chips
   }, [projectKey, segments.length, frameRate, ratio, subjects.length, resources.length])
 
-  function pushStep(replyId: string, label: string) {
-    patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
-      message.id === replyId
-        ? {
-            ...message,
-            steps: [
-              ...(message.steps ?? []).map((step) => ({ ...step, status: 'done' as const })),
-              { label, status: 'running' as const },
-            ],
-          }
-        : message
-    )))
-  }
+  const traceRows = useMemo(
+    () => messages.flatMap((message, messageIndex) => (
+      (message.steps ?? []).map((step) => ({ key: `${message.id}-${step.label}-${messageIndex}`, messageIndex, label: step.label, status: step.status }))
+    )),
+    [messages],
+  )
 
   async function send() {
     const text = input.trim()
@@ -120,6 +114,7 @@ export function AgentRail({
       { id: `u-${stamp}`, role: 'user', text },
       { id: replyId, role: 'assistant', text: '', status: 'running', steps: [] },
     ])
+    setRailTab('chat')
     const timer = window.setInterval(() => {
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === replyId ? { ...message, elapsedMs: Date.now() - startedAt } : message
@@ -130,6 +125,7 @@ export function AgentRail({
         message.id === replyId ? { ...message, ...patch } : message
       )))
     }
+    const textOf = () => (readWorkspace(projectKey).messages ?? []).find((message) => message.id === replyId)?.text ?? ''
     try {
       const response = await fetch('/easy-media/agent/chat', {
         method: 'POST',
@@ -178,15 +174,26 @@ export function AgentRail({
             continue
           }
           const type = String(event.type || '')
-          if (type === 'step') pushStep(replyId, String(event.label || ''))
-          else if (type === 'text') {
-            update({ text: `${(readWorkspace(projectKey).messages ?? []).find((message) => message.id === replyId)?.text ?? ''}${String(event.text || '')}` })
+          if (type === 'step') {
+            patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+              message.id === replyId
+                ? {
+                    ...message,
+                    steps: [
+                      ...(message.steps ?? []).map((step) => ({ ...step, status: 'done' as const })),
+                      { label: String(event.label || ''), status: 'running' as const },
+                    ],
+                  }
+                : message
+            )))
+          } else if (type === 'text') {
+            update({ text: `${textOf()}${String(event.text || '')}` })
           } else if (type === 'plan') {
             const next = event.plan as StoryboardPlanLike
             writeWorkspace(projectKey, { plan: next })
             update({ planResult: { segments: next.segments.length, seconds: next.total_seconds } })
           } else if (type === 'action') {
-            update({ text: `已执行：${String(event.label || event.action || '')}` })
+            update({ text: `${textOf()}\n已执行：${String(event.label || event.action || '')}` })
           } else if (type === 'error') {
             update({ status: 'failed', text: `[错误] ${String(event.message || '')}` })
           }
@@ -213,6 +220,7 @@ export function AgentRail({
   }
 
   const activePlan = readWorkspace(projectKey).plan
+
   return (
     <div className="flex w-[360px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
@@ -228,71 +236,138 @@ export function AgentRail({
           </span>
         ) : null}
       </div>
+      <div className="flex gap-1 text-[11px]">
+        {(['chat', 'trace', 'context'] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className="rounded px-2 py-0.5"
+            style={{
+              border: `1px solid ${railTab === key ? PRIMARY : BORDER}`,
+              color: railTab === key ? PRIMARY : undefined,
+            }}
+            onClick={() => setRailTab(key)}
+          >
+            {key === 'chat' ? '对话' : key === 'trace' ? '轨迹' : '上下文'}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">
         {contextChips.map((chip) => (
           <span key={chip} className="rounded-full px-1.5" style={{ border: `1px solid ${BORDER}` }}>{chip}</span>
         ))}
       </div>
-      <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
-        {messages.length === 0 ? (
-          <div className="rounded px-2 py-1 text-[11px] leading-relaxed text-muted-foreground" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
-            直接说想法，例如「写一个天空鲸落掉深海回家的故事」。生成后可以说「拆第 2 段」「台词改方言」「应用」。
-          </div>
-        ) : null}
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className="rounded px-2 py-1.5 text-[11px] leading-relaxed"
-            style={{
-              background: message.role === 'user' ? `${PRIMARY} / 0.14` : FIELD_BG,
-              border: `1px solid ${BORDER}`,
-            }}
-          >
-            <div className="mb-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
-              <span>{message.role === 'user' ? '我' : '导演助手'}</span>
-              {message.status === 'running' ? (
-                <span className="rounded px-1" style={{ border: `1px solid ${PRIMARY}`, color: PRIMARY }}>
-                  {((message.elapsedMs ?? 0) / 1000).toFixed(0)}s
-                </span>
-              ) : message.status === 'failed' ? (
-                <span className="rounded px-1" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>失败</span>
-              ) : message.elapsedMs ? (
-                <span>{(message.elapsedMs / 1000).toFixed(1)}s</span>
-              ) : null}
-            </div>
-            {message.steps?.length ? (
-              <div className="mb-1 flex flex-col gap-0.5">
-                {message.steps.map((step) => (
-                  <div key={step.label} className="flex items-start gap-1 text-[10px] text-muted-foreground">
-                    <span style={{ color: step.status === 'done' ? PRIMARY : step.status === 'failed' ? '#fbbf24' : undefined }}>
-                      {step.status === 'done' ? '✓' : step.status === 'failed' ? '✕' : '●'}
-                    </span>
-                    <span>{step.label}</span>
-                  </div>
-                ))}
+        {railTab === 'chat' ? (
+          <>
+            <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
+            {messages.length === 0 ? (
+              <div className="rounded px-2 py-1 text-[11px] leading-relaxed text-muted-foreground" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                直接说想法，例如「写一个天空鲸落掉深海回家的故事」。生成后可以说「拆第 2 段」「台词改方言」「应用」。
               </div>
             ) : null}
-            {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
-            {message.planResult ? (
-              <div className="mt-1.5 flex items-center gap-2 rounded p-1.5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
-                <span className="text-[10px]">分镜 {message.planResult.segments} 段 · {message.planResult.seconds}s</span>
-                {onApplyPlan && activePlan ? (
-                  <Button
-                    size="sm"
-                    className="ml-auto h-6 px-2 text-[10px]"
-                    onClick={() => {
-                      if (activePlan) onApplyPlan(activePlan)
-                    }}
-                  >
-                    应用到任务轨
-                  </Button>
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className="rounded px-2 py-1.5 text-[11px] leading-relaxed"
+                style={{
+                  background: message.role === 'user' ? `${PRIMARY} / 0.14` : FIELD_BG,
+                  border: `1px solid ${BORDER}`,
+                }}
+              >
+                <div className="mb-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <span>{message.role === 'user' ? '我' : '导演助手'}</span>
+                  {message.status === 'running' ? (
+                    <span className="rounded px-1" style={{ border: `1px solid ${PRIMARY}`, color: PRIMARY }}>
+                      {((message.elapsedMs ?? 0) / 1000).toFixed(0)}s
+                    </span>
+                  ) : message.status === 'failed' ? (
+                    <span className="rounded px-1" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>失败</span>
+                  ) : message.elapsedMs ? (
+                    <span>{(message.elapsedMs / 1000).toFixed(1)}s</span>
+                  ) : null}
+                </div>
+                {message.steps?.length ? (
+                  <div className="mb-1 flex flex-col gap-0.5">
+                    {message.steps.map((step, stepIndex) => (
+                      <div key={`${step.label}-${stepIndex}`} className="flex items-start gap-1 text-[10px] text-muted-foreground">
+                        <span style={{ color: step.status === 'done' ? PRIMARY : step.status === 'failed' ? '#fbbf24' : undefined }}>
+                          {step.status === 'done' ? '✓' : step.status === 'failed' ? '✕' : '●'}
+                        </span>
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
+                {message.planResult ? (
+                  <div className="mt-1.5 flex items-center gap-2 rounded p-1.5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
+                    <span className="text-[10px]">分镜 {message.planResult.segments} 段 · {message.planResult.seconds}s</span>
+                    {onApplyPlan && activePlan ? (
+                      <Button
+                        size="sm"
+                        className="ml-auto h-6 px-2 text-[10px]"
+                        onClick={() => {
+                          if (activePlan) onApplyPlan(activePlan)
+                        }}
+                      >
+                        应用
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
-            ) : null}
+            ))}
+          </>
+        ) : railTab === 'trace' ? (
+          <div className="flex flex-col gap-1">
+            {traceRows.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground">还没有执行轨迹。</div>
+            ) : traceRows.map((row) => (
+              <div key={row.key} className="flex items-start gap-1 rounded px-2 py-1 text-[10px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                <span style={{ color: row.status === 'done' ? PRIMARY : row.status === 'failed' ? '#fbbf24' : undefined }}>
+                  {row.status === 'done' ? '✓' : row.status === 'failed' ? '✕' : '●'}
+                </span>
+                <span className="text-muted-foreground">#{row.messageIndex + 1}</span>
+                <span>{row.label}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        ) : (
+          <div className="flex flex-col gap-2 text-[11px]">
+            <div className="rounded p-2" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+              <div className="text-muted-foreground">项目</div>
+              <div>{projectKey || '未命名'}</div>
+              <div className="mt-1 text-muted-foreground">当前分镜</div>
+              <div>{plan ? `${plan.title || '未命名'} · ${plan.segments.length} 段 · ${plan.total_seconds}s` : '（无）'}</div>
+            </div>
+            <div className="rounded p-2" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+              <div className="text-muted-foreground">任务片段（{segments.length}）</div>
+              {segments.length === 0
+                ? <div className="text-muted-foreground">（空任务轨）</div>
+                : segments.map((segment) => (
+                  <div key={`${segment.index}-${segment.name}`} className="truncate">{segment.index}. {segment.name} · {segment.durationSeconds.toFixed(1)}s</div>
+                ))}
+            </div>
+            <div className="rounded p-2" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+              <div className="text-muted-foreground">主体（{subjects.length}）</div>
+              <div>{subjects.map((subject) => subject.name).join('、') || '（空）'}</div>
+            </div>
+            <div className="rounded p-2" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+              <div className="text-muted-foreground">资源需求（{resources.length}）</div>
+              <div>{resources.map((resource) => resource.name).join('、') || '（空）'}</div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" disabled={!plan} onClick={() => writeWorkspace(projectKey, { plan: null })}>
+                丢弃分镜
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => writeWorkspace(projectKey, { messages: [] })}>
+                清空对话
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <textarea

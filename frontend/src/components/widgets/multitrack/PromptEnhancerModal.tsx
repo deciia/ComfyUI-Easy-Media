@@ -941,8 +941,8 @@ export function PromptEnhancerModal({
         ) : workspaceTab !== 'enhance' ? (
           <div className="flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
-          workspaceTab === 'storyboard' ? (
-            <StoryboardTab
+            {workspaceTab === 'storyboard' ? (
+<StoryboardTab
               key={workspaceReloadKey}
               segments={workspaceSegments}
               frameRate={workspaceFrameRate}
@@ -1015,12 +1015,10 @@ export function PromptEnhancerModal({
                 }
               }}
             />
-          ) : workspaceTab === 'subjects' ? (
-(
-            <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
- : (
-(
-            <ResourcesTab
+            ) : workspaceTab === 'subjects' ? (
+              <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
+            ) : (
+<ResourcesTab
               projectResources={projectResources}
               plannedResources={plannedResources}
               segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
@@ -1030,7 +1028,7 @@ export function PromptEnhancerModal({
                 return true
               }}
             />
-
+            )}
             </div>
             <AgentRail
               projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
