@@ -102,22 +102,32 @@ export function StoryboardTab({
   onImportPlanResources,
   planning = false,
 }: StoryboardTabProps) {
+  const projectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [durationSeconds, setDurationSeconds] = useState(30)
   const [ratio, setRatio] = useState('16:9')
   const [style, setStyle] = useState('')
-  const [plan, setPlan] = useState<StoryboardPlan | null>(null)
+  const [plan, setPlan] = useState<StoryboardPlan | null>(() => {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-storyboard:${projectKey}`)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
   const [planSaved, setPlanSaved] = useState(false)
   const [appliedNote, setAppliedNote] = useState('')
+  const [newProjectName, setNewProjectName] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
   const [importedNote, setImportedNote] = useState('')
   const [rightTab, setRightTab] = useState<'timeline' | 'chat'>('chat')
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([])
   const [projects, setProjects] = useState<Array<{ id: string; name: string; savedAt: number; plan: StoryboardPlan }>>(() => {
     try {
-      const raw = window.localStorage.getItem('easy-media-storyboard-projects')
+      const raw = window.localStorage.getItem(`easy-media-storyboard-projects:${projectKey}`)
       return raw ? JSON.parse(raw) : []
     } catch {
       return []
@@ -179,7 +189,7 @@ export function StoryboardTab({
             ].slice(0, 20)
             setProjects(next)
             try {
-              window.localStorage.setItem('easy-media-storyboard-projects', JSON.stringify(next))
+              window.localStorage.setItem(`easy-media-storyboard-projects:${projectKey}`, JSON.stringify(next))
               setImportedNote(`已保存项目「${name}」`)
             } catch (error) {
               setImportedNote(`保存失败：${String(error)}`)
@@ -266,7 +276,7 @@ export function StoryboardTab({
             onBack={() => setPlan(null)}
             onSaveDraft={() => {
               try {
-                window.localStorage.setItem('easy-media-storyboard-draft', JSON.stringify(plan))
+                window.localStorage.setItem(`easy-media-storyboard:${projectKey}`, JSON.stringify(plan))
                 setPlanSaved(true)
               } catch (error) {
                 console.warn('[EasyMedia] save storyboard draft failed', error)

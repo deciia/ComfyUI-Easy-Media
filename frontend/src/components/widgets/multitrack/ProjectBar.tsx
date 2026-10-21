@@ -74,6 +74,18 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
   const [pendingNew, setPendingNew] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(false)
+  const createProjectRef = useRef<(name: string) => Promise<boolean>>(async () => false)
+  createProjectRef.current = createProjectByName
+  useEffect(() => {
+    const registry = globalThis as unknown as {
+      __easyMediaCreateProject?: (name: string) => Promise<boolean>
+    }
+    const handler = (name: string) => createProjectRef.current(name)
+    registry.__easyMediaCreateProject = handler
+    return () => {
+      if (registry.__easyMediaCreateProject === handler) delete registry.__easyMediaCreateProject
+    }
+  }, [])
   // 导演工作台读取当前项目名（避免跨层传参）
   useEffect(() => {
     const registry = globalThis as unknown as { __easyMediaProjectName?: string }
@@ -290,19 +302,12 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     }
   }
 
-  async function handleCreate() {
-    const name = editing?.value.trim() ?? ''
+  async function createProjectByName(name: string): Promise<boolean> {
     const invalid = validateProjectName(name)
     if (invalid) {
       setMessage(invalid === 'too_long' ? t('multitrack.projectNameTooLong') : t('multitrack.projectNameInvalid'))
-      return
+      return false
     }
-    if (data.tracks.length > 0 && !pendingNew) {
-      setPendingNew(true)
-      setMessage(t('multitrack.projectConfirmNew'))
-      return
-    }
-    setPendingNew(false)
     setBusy(true)
     setMessage('')
     try {
@@ -314,12 +319,26 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       setEditing(null)
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
       void refreshProjects()
+      return true
     } catch (error) {
-      const text = error instanceof Error ? error.message : ''
-      setMessage(text === 'exists' ? t('multitrack.projectExists') : (text || t('multitrack.projectFailed')))
+      const detail = error instanceof Error ? error.message : ''
+      setMessage(detail === 'exists' ? t('multitrack.projectExists') : (detail || t('multitrack.projectFailed')))
+      return false
     } finally {
       setBusy(false)
     }
+  }
+
+  async function handleCreate() {
+    const name = editing?.value.trim() ?? ''
+    if (!name) return
+    if (data.tracks.length > 0 && !pendingNew) {
+      setPendingNew(true)
+      setMessage(t('multitrack.projectConfirmNew'))
+      return
+    }
+    setPendingNew(false)
+    await createProjectByName(name)
   }
 
   async function handleDelete() {
