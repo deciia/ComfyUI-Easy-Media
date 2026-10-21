@@ -83,6 +83,7 @@ import { stripProjectMeta } from '@/lib/project-timeline'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { ProjectBar } from './multitrack/ProjectBar'
+import { PromptEnhancerModal } from './multitrack/PromptEnhancerModal'
 import { PreviewArea } from './multitrack/PreviewArea'
 import { SplitTaskSegmentDialog } from './multitrack/SplitTaskSegmentDialog'
 import { TrackArea } from './multitrack/TrackArea'
@@ -152,6 +153,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
+  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
 
   // 提示词增强器切换任务片段：把切换函数登记到全局，弹窗直接调用（事件作为兜底）
   useEffect(() => {
@@ -1264,7 +1266,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     const openWorkspace = () => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const firstSegment = taskTrack?.segments?.[0]
-      if (firstSegment) handleSelectSegment(firstSegment.id, 'replace')
+      if (!firstSegment) {
+        setWorkspaceModalOpen(true)
+        return
+      }
+      handleSelectSegment(firstSegment.id, 'replace')
       // 编辑器可能尚未因选中而挂载：写标记让它在挂载后自行打开，同时广播给已挂载实例
       ;(globalThis as unknown as { __easyMediaPendingWorkspaceOpen?: boolean })
         .__easyMediaPendingWorkspaceOpen = true
@@ -1332,6 +1338,43 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     }
   }, [data])
+
+  function patchTaskSegmentContent(segmentId: string, patch: Record<string, unknown>) {
+    const taskTrack = data.tracks.find((track) => track.type === 'task')
+    if (!taskTrack) return
+    const updatedTracks = data.tracks.map((track) => (
+      track.id === taskTrack.id
+        ? {
+            ...track,
+            segments: track.segments.map((segment) => (
+              segment.id === segmentId
+                ? { ...segment, content: { ...segment.content, ...patch } as MultiTrackSegment['content'] }
+                : segment
+            )),
+          }
+        : track
+    ))
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+    })
+  }
+
+  function attachTaskSegmentImages(segmentId: string, items: Array<{ name: string; subfolder: string }>) {
+    const taskTrack = data.tracks.find((track) => track.type === 'task')
+    const segment = taskTrack?.segments.find((item) => item.id === segmentId)
+    if (!segment) return
+    const current = ((segment.content as unknown as { images?: unknown[] }).images ?? []) as unknown[]
+    const stamp = Date.now()
+    const appended = items.map((item, index) => ({
+      id: `img-${stamp}-${index + 1}`,
+      source_type: 'input',
+      file_name: item.name,
+      subfolder: item.subfolder || undefined,
+    }))
+    patchTaskSegmentContent(segmentId, { images: [...current, ...appended] })
+  }
 
   function handleTaskTrackSegmentsChange(segments: MultiTrackSegment[]) {
     if (selectedSegment?.trackType !== 'task') return
@@ -1641,6 +1684,21 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             resolution={resolutionInput}
             onApply={applyProjectTimeline}
           />
+
+      {workspaceModalOpen ? (
+        <PromptEnhancerModal
+          initialBrief=""
+          initialResult=""
+          onApply={() => {}}
+          onClose={() => setWorkspaceModalOpen(false)}
+          workspaceSegments={data.tracks.find((track) => track.type === 'task')?.segments ?? []}
+          workspaceFrameRate={data.frame_rate}
+          segmentId={selectedSegmentId ?? undefined}
+          onActivateSegment={(id) => handleSelectSegment(id, 'replace')}
+          onWriteSegmentPrompt={(id, prompt) => patchTaskSegmentContent(id, { user_prompt: prompt })}
+          onAttachImages={(id, images) => attachTaskSegmentImages(id, images)}
+        />
+      ) : null}
           <MultiTrackToolbar
             currentTime={currentTime}
             totalLength={data.total_length}

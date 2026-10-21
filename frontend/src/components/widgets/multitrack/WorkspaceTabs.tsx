@@ -119,20 +119,10 @@ export function StoryboardTab({
   })
   const [planSaved, setPlanSaved] = useState(false)
   const [appliedNote, setAppliedNote] = useState('')
-  const [newProjectName, setNewProjectName] = useState('')
-  const [creatingProject, setCreatingProject] = useState(false)
   const [importedNote, setImportedNote] = useState('')
   const [rightTab, setRightTab] = useState<'timeline' | 'chat'>('chat')
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([])
-  const [projects, setProjects] = useState<Array<{ id: string; name: string; savedAt: number; plan: StoryboardPlan }>>(() => {
-    try {
-      const raw = window.localStorage.getItem(`easy-media-storyboard-projects:${projectKey}`)
-      return raw ? JSON.parse(raw) : []
-    } catch {
-      return []
-    }
-  })
   const draft = selected ? (drafts[selected.id] ?? selected.prompt) : ''
   const totalFrames = Math.max(1, ...cards.map((card) => card.endFrame))
 
@@ -161,81 +151,7 @@ export function StoryboardTab({
           value={style}
           onChange={(event) => setStyle(event.target.value)}
         />
-        <select
-          style={{ ...fieldStyle, width: 140 }}
-          value=""
-          onChange={(event) => {
-            const item = projects.find((entry) => entry.id === event.target.value)
-            if (item) {
-              setPlan(item.plan)
-              setPlanSaved(true)
-              setImportedNote(`已载入项目「${item.name}」`)
-            }
-          }}
-        >
-          <option value="">载入项目…</option>
-          {projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <span className="text-muted-foreground">新建</span>
-        <input
-          style={{ ...fieldStyle, width: 120, padding: '2px 4px' }}
-          placeholder="新项目名"
-          value={newProjectName}
-          onChange={(event) => setNewProjectName(event.target.value)}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          className="h-6 px-2 text-[11px]"
-          disabled={!newProjectName.trim() || creatingProject}
-          onClick={async () => {
-            const create = (globalThis as unknown as {
-              __easyMediaCreateProject?: (name: string) => Promise<boolean>
-            }).__easyMediaCreateProject
-            if (!create) {
-              setImportedNote('新建失败：编辑器未就绪')
-              return
-            }
-            setCreatingProject(true)
-            try {
-              const name = newProjectName.trim()
-              const ok = await create(name)
-              setImportedNote(ok ? `已新建项目「${name}」` : '新建失败（可能已存在或名称非法）')
-              if (ok) {
-                setNewProjectName('')
-                setPlan(null)
-                setChatMessages([])
-                window.localStorage.removeItem(`easy-media-storyboard:${name}`)
-              }
-            } finally {
-              setCreatingProject(false)
-            }
-          }}
-        >
-          {creatingProject ? '创建中…' : '新建项目'}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={!plan}
-          onClick={() => {
-            if (!plan) return
-            const name = (plan.title || '未命名分镜').slice(0, 30)
-            const next = [
-              { id: `proj-${Date.now()}`, name, savedAt: Date.now(), plan },
-              ...projects.filter((item) => item.name !== name),
-            ].slice(0, 20)
-            setProjects(next)
-            try {
-              window.localStorage.setItem(`easy-media-storyboard-projects:${projectKey}`, JSON.stringify(next))
-              setImportedNote(`已保存项目「${name}」`)
-            } catch (error) {
-              setImportedNote(`保存失败：${String(error)}`)
-            }
-          }}
-        >
-          保存项目
-        </Button>
+
       </div>
       {error ? (
         <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', color: '#fbbf24' }}>{error}</div>

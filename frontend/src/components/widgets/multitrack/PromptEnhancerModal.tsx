@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Maximize2, Settings, Sparkles, X } from 'lucide-react'
+import { Maximize2, Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
@@ -851,6 +851,16 @@ export function PromptEnhancerModal({
             )}
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="保存分镜草稿"
+              className="h-7 w-7"
+              onClick={() => window.dispatchEvent(new CustomEvent('easy-media.workspace.save'))}
+            >
+              <Save className="h-4 w-4" />
+            </Button>
             <Button
               type="button"
               variant="ghost"
