@@ -352,6 +352,39 @@ export function PromptEnhancerModal({
   const [error, setError] = useState('')
   const [failures, setFailures] = useState<string[]>([])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('storyboard')
+  const [projectName, setProjectName] = useState(() => {
+    try {
+      return (globalThis as unknown as { __easyMediaWorkspaceProject?: { name: string } })
+        .__easyMediaWorkspaceProject?.name || ''
+    } catch {
+      return ''
+    }
+  })
+  const [projectMenu, setProjectMenu] = useState<string[]>([])
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
+  const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
+
+  async function confirmCreateProject() {
+    const create = (globalThis as unknown as {
+      __easyMediaCreateProject?: (name: string) => Promise<boolean>
+    }).__easyMediaCreateProject
+    const name = newProjectName.trim()
+    if (!create || !name) return
+    const ok = await create(name)
+    if (ok) {
+      setProjectName(name)
+      setCreatingProject(false)
+      try {
+        window.localStorage.removeItem(`easy-media-storyboard:${name}`)
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setCreatingProject(false)
+    }
+  }
   const [workspaceGenerating, setWorkspaceGenerating] = useState(false)
   const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState(initialResult)
@@ -739,10 +772,83 @@ export function PromptEnhancerModal({
           <div className="flex items-center gap-2 text-sm font-medium">
             <Sparkles className="h-4 w-4 text-primary" />
             {t('multitrack.enhancerTitle')}
-            {(() => {
-              const name = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
-              return name ? <span className="ml-1 text-[11px] text-muted-foreground">· {name}</span> : null
-            })()}
+            <div className="relative ml-1">
+              <button
+                type="button"
+                className="rounded border px-2 py-0.5 text-[11px]"
+                style={{ borderColor: BORDER }}
+                onClick={() => {
+                  const bridge = (globalThis as unknown as {
+                    __easyMediaWorkspaceProject?: { list: () => string[] }
+                  }).__easyMediaWorkspaceProject
+                  setProjectMenu(bridge ? bridge.list() : [])
+                  setProjectMenuOpen((value) => !value)
+                }}
+              >
+                {projectName || '未选择项目'} ▾
+              </button>
+              {projectMenuOpen ? (
+                <div
+                  className="absolute left-0 top-7 z-10 max-h-64 w-56 overflow-auto rounded border p-1 text-[11px]"
+                  style={{ background: PANEL_BG, borderColor: BORDER }}
+                >
+                  {projectMenu.length === 0 ? (
+                    <div className="px-2 py-1 text-muted-foreground">（没有可载入的项目）</div>
+                  ) : projectMenu.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      className="block w-full rounded px-2 py-1 text-left hover:bg-white/10"
+                      onClick={async () => {
+                        setProjectMenuOpen(false)
+                        const bridge = (globalThis as unknown as {
+                          __easyMediaWorkspaceProject?: { switch: (value: string) => Promise<void> }
+                        }).__easyMediaWorkspaceProject
+                        if (!bridge) return
+                        await bridge.switch(name)
+                        setProjectName(name)
+                        setWorkspaceReloadKey((value) => value + 1)
+                      }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            {creatingProject ? (
+              <>
+                <input
+                  style={{ ...fieldStyle, width: 120, padding: '2px 4px' }}
+                  placeholder="新项目名"
+                  value={newProjectName}
+                  autoFocus
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void confirmCreateProject()
+                    if (event.key === 'Escape') setCreatingProject(false)
+                  }}
+                />
+                <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => void confirmCreateProject()}>
+                  确认
+                </Button>
+                <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => setCreatingProject(false)}>
+                  取消
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => {
+                  setCreatingProject(true)
+                  setNewProjectName('')
+                }}
+              >
+                + 新建
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -827,6 +933,7 @@ export function PromptEnhancerModal({
         ) : workspaceTab !== 'enhance' ? (
           workspaceTab === 'storyboard' ? (
             <StoryboardTab
+              key={workspaceReloadKey}
               segments={workspaceSegments}
               frameRate={workspaceFrameRate}
               selectedSegmentId={segmentId}

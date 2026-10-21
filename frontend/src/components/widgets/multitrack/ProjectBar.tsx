@@ -76,14 +76,36 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [pendingDelete, setPendingDelete] = useState(false)
   const createProjectRef = useRef<(name: string) => Promise<boolean>>(async () => false)
   createProjectRef.current = createProjectByName
+  const switchProjectRef = useRef<(name: string) => Promise<void>>(async () => {})
+  switchProjectRef.current = handleSelect
+  const projectListRef = useRef<string[]>([])
+  projectListRef.current = projects.map((item) => item.project_name)
+  const nameRef = useRef('')
+  nameRef.current = currentName
   useEffect(() => {
     const registry = globalThis as unknown as {
       __easyMediaCreateProject?: (name: string) => Promise<boolean>
+      __easyMediaWorkspaceProject?: {
+        name: string
+        list: () => string[]
+        switch: (name: string) => Promise<void>
+        create: (name: string) => Promise<boolean>
+      }
     }
     const handler = (name: string) => createProjectRef.current(name)
+    const workspace = {
+      get name() {
+        return nameRef.current
+      },
+      list: () => [...projectListRef.current],
+      switch: (name: string) => switchProjectRef.current(name),
+      create: (name: string) => createProjectRef.current(name),
+    }
     registry.__easyMediaCreateProject = handler
+    registry.__easyMediaWorkspaceProject = workspace
     return () => {
       if (registry.__easyMediaCreateProject === handler) delete registry.__easyMediaCreateProject
+      if (registry.__easyMediaWorkspaceProject === workspace) delete registry.__easyMediaWorkspaceProject
     }
   }, [])
   // 导演工作台读取当前项目名（避免跨层传参）
