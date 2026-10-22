@@ -295,8 +295,12 @@ export function StoryboardTab({
           })}
           <button
             type="button"
-            className="mt-0.5 rounded px-2 py-1 text-left text-[10px] text-muted-foreground"
-            style={{ border: `1px dashed ${BORDER}` }}
+            className="mt-0.5 rounded px-2 py-1 text-left text-[11px]"
+            style={{
+              border: planFocus === null ? '1px solid hsl(var(--primary, 199 89% 48%))' : '1px solid hsl(var(--border, 240 6% 25%))',
+              color: planFocus === null ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+              background: planFocus === null ? 'hsl(var(--primary, 199 89% 48%) / 0.14)' : FIELD_BG,
+            }}
             onClick={() => setPlanFocus(null)}
           >
             整版预览
