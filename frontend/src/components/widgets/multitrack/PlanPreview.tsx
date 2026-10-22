@@ -110,6 +110,7 @@ export function PlanPreview({
         <Button size="sm" variant="secondary" onClick={onSaveDraft} disabled={saved}>
           {saved ? '已保存为草稿' : '保存为草稿'}
         </Button>
+        {onApply ? (
         <Button
           size="sm"
           variant={confirmApply ? 'default' : 'secondary'}
@@ -126,6 +127,7 @@ export function PlanPreview({
         >
           {confirmApply ? '确认替换任务轨？' : '应用到任务轨'}
         </Button>
+        ) : null}
       </div>
 
       {importedNote ? (

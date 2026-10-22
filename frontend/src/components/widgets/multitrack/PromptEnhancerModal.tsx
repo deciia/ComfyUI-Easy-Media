@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Save, Settings, Sparkles, X } from 'lucide-react'
+import { ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
 import { AgentRail } from './AgentRail'
+import { readWorkspace } from './agentStore'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
@@ -367,6 +368,7 @@ export function PromptEnhancerModal({
   const [newProjectName, setNewProjectName] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
+  const [saveCheckOpen, setSaveCheckOpen] = useState(false)
 
   async function confirmCreateProject() {
     const create = (globalThis as unknown as {
@@ -856,6 +858,16 @@ export function PromptEnhancerModal({
               type="button"
               variant="ghost"
               size="icon"
+              title="保存到任务轨（先检测完善度）"
+              className="h-7 w-7"
+              onClick={() => setSaveCheckOpen((value) => !value)}
+            >
+              <ListPlus className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
               title="保存分镜草稿"
               className="h-7 w-7"
               onClick={() => window.dispatchEvent(new CustomEvent('easy-media.workspace.save'))}
@@ -901,6 +913,61 @@ export function PromptEnhancerModal({
           ))}
         </div>
 
+        {saveCheckOpen ? (
+          (() => {
+            const storeKey = projectName || 'default'
+            const plan = readWorkspace(storeKey).plan
+            const segs = workspaceSegments
+            const prompted = segs.filter((segment) => String((segment.content as unknown as { user_prompt?: string } | null)?.user_prompt ?? '').trim()).length
+            const subjects = workspaceSubjects
+            const noDesc = subjects.filter((subject) => !(subject.description ?? '').trim()).length
+            const planned = plannedResources.length
+            const rows: Array<{ ok: boolean; text: string }> = [
+              { ok: Boolean(plan), text: plan ? `分镜脚本：${plan.segments.length} 段 · ${plan.total_seconds}s` : '分镜脚本：未生成（将只保留现有任务分段）' },
+              { ok: segs.length > 0, text: `任务分段：${segs.length} 段${segs.length ? `，已写提示词 ${prompted}/${segs.length}` : ''}` },
+              { ok: subjects.length > 0, text: `主体：${subjects.length} 个${noDesc ? `，${noDesc} 个缺描述` : ''}` },
+              { ok: true, text: `资源需求：${planned} 项（匹配情况见「资源与生成」页）` },
+            ]
+            const registry = (globalThis as unknown as {
+              __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
+            }).__easyMediaApplyStoryboard
+            return (
+              <div
+                className="fixed right-3 top-12 z-50 flex w-[380px] flex-col gap-2 rounded-lg p-3 text-[12px]"
+                style={{ background: PANEL_BG, border: `1px solid ${BORDER}`, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}
+              >
+                <div className="text-[13px] font-medium">保存到任务轨 · 完善度检测</div>
+                {rows.map((row) => (
+                  <div key={row.text} className="flex items-start gap-2">
+                    <span style={{ color: row.ok ? 'hsl(var(--primary, 199 89% 48%))' : '#fbbf24' }}>{row.ok ? '✓' : '⚠'}</span>
+                    <span>{row.text}</span>
+                  </div>
+                ))}
+                {prompted < segs.length ? (
+                  <div className="text-[11px] text-muted-foreground">提示：还有 {segs.length - prompted} 段没写提示词，可在「提示词增强」页补齐。</div>
+                ) : null}
+                <div className="mt-1 flex justify-end gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setSaveCheckOpen(false)}>返回完善</Button>
+                  <Button
+                    size="sm"
+                    disabled={!plan || !registry}
+                    onClick={() => {
+                      if (!plan || !registry) return
+                      registry(plan.segments.map((segment) => ({
+                        name: segment.name,
+                        durationFrames: segment.duration_frames,
+                        brief: formatPlanSegmentBrief(segment as never),
+                      })))
+                      setSaveCheckOpen(false)
+                    }}
+                  >
+                    仍然保存
+                  </Button>
+                </div>
+              </div>
+            )
+          })()
+        ) : null}
         {view === 'settings' ? (
           <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
             <div className="grid grid-cols-3 gap-3">

@@ -52,7 +52,6 @@ export function AgentRail({
   resources,
   frameRate,
   ratio,
-  onApplyPlan,
 }: AgentRailProps) {
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
@@ -219,7 +218,6 @@ export function AgentRail({
     }
   }
 
-  const activePlan = readWorkspace(projectKey).plan
 
   return (
     <div className="flex w-[360px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
@@ -304,17 +302,7 @@ export function AgentRail({
                 {message.planResult ? (
                   <div className="mt-1.5 flex items-center gap-2 rounded p-1.5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
                     <span className="text-[10px]">分镜 {message.planResult.segments} 段 · {message.planResult.seconds}s</span>
-                    {onApplyPlan && activePlan ? (
-                      <Button
-                        size="sm"
-                        className="ml-auto h-6 px-2 text-[10px]"
-                        onClick={() => {
-                          if (activePlan) onApplyPlan(activePlan)
-                        }}
-                      >
-                        应用
-                      </Button>
-                    ) : null}
+
                   </div>
                 ) : null}
               </div>
@@ -398,18 +386,7 @@ export function AgentRail({
         >
           {busy ? '停止' : '发送'}
         </Button>
-        {plan ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!onApplyPlan || !activePlan) return
-              onApplyPlan(activePlan)
-            }}
-          >
-            应用到任务轨
-          </Button>
-        ) : null}
+
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { PlanPreview, formatPlanSegmentBrief, type StoryboardPlan } from './PlanPreview'
+import { PlanPreview, type StoryboardPlan } from './PlanPreview'
 import { readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
@@ -88,7 +88,6 @@ export function StoryboardTab({
   onGeneratePrompt,
   generating = false,
   error = '',
-  onApplyPlan,
   onImportPlanSubjects,
   onImportPlanResources,
   projectKey: incomingProjectKey,
@@ -98,7 +97,7 @@ export function StoryboardTab({
   const selected = cards.find((card) => card.id === selectedSegmentId) ?? cards[0]
 
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [appliedNote, setAppliedNote] = useState('')
+  const [appliedNote] = useState('')
   const [importedNote, setImportedNote] = useState('')
   const [, setStoreVersion] = useState(0)
 
@@ -135,16 +134,8 @@ export function StoryboardTab({
         onImportPlanResources(value)
         setImportedNote('已把资源需求导入「资源与生成」页')
       } : undefined}
-      onApply={() => {
-        if (!onApplyPlan) return false
-        const ok = onApplyPlan(value.segments.map((segment) => ({
-          name: segment.name,
-          durationFrames: segment.duration_frames,
-          brief: formatPlanSegmentBrief(segment),
-        })))
-        setAppliedNote(ok ? '已应用到任务轨（可 Ctrl+Z 撤销）' : '应用失败：请先选中任务片段')
-        return ok
-      }}
+      onApply={undefined}
+
     />
   )
 
@@ -167,9 +158,9 @@ export function StoryboardTab({
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-center">
             <div className="max-w-[420px] text-[12px] leading-relaxed text-muted-foreground">
-              任务轨还没有片段。
+              在右侧对助手说出想法即可生成分镜脚本；它会保存为项目草稿。
               <br />在右侧告诉助手你的想法（例如「写一个天空鲸落掉深海回家的故事」），
-              生成分镜后点「应用到任务轨」就会落成片段。
+              之后可导入主体、资源需求，最后用标题栏的保存按钮落到任务轨。
             </div>
           </div>
         )}
