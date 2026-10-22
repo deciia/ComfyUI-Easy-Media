@@ -35,8 +35,9 @@ const TAB_HINTS: Record<string, string> = {
 export interface AgentRailProps {
   projectKey: string
   tab: string
-  segments: Array<{ index: number; name: string; durationSeconds: number }>
-  subjects: Array<{ name: string }>
+  segments: Array<{ index: number; name: string; durationSeconds: number; images?: string[]; hasPrompt?: boolean }>
+  subjects: Array<{ name: string; desc?: string }>
+  audioTracks?: string[]
   resources: Array<{ name: string }>
   frameRate: number
   ratio: string
@@ -52,6 +53,7 @@ export function AgentRail({
   resources,
   frameRate,
   ratio,
+  audioTracks = [],
 }: AgentRailProps) {
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
@@ -144,8 +146,11 @@ export function AgentRail({
               index: segment.index,
               name: segment.name,
               duration_seconds: segment.durationSeconds,
+              images: segment.images ?? [],
+              has_prompt: Boolean(segment.hasPrompt),
             })),
-            subjects: subjects.map((subject) => subject.name),
+            subjects: subjects.map((subject) => ({ name: subject.name, description: subject.desc ?? '' })),
+            audio_tracks: audioTracks,
             planned_resources: resources.map((resource) => resource.name),
           },
         }),

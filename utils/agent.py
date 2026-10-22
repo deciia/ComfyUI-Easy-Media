@@ -39,6 +39,8 @@ AGENT_SYSTEM_PROMPT = """你是 EasyMedia「导演工作台」里的项目智能
 - 上下文里已有资源需求（planned_resources 非空）：视为既定清单，修改分镜时保持资源需求连续，
   只在用户要求时增删。
 - 用户只是补充信息或问问题 → answer，不要顺手执行写操作。
+- 段上的 images 是已绑定的参考素材，audio_tracks 是时间线音轨（很可能是参考音色）：
+  这些是既定事实，修改分镜时保持绑定关系不变，不随意增删或重命名引用。
 - 一切写操作前，reply 里用一句话说清楚你将改什么、影响哪几段。
 
 只输出一个 JSON 对象，不要 Markdown 代码块，不要多余文字：
@@ -63,7 +65,8 @@ def _compact_context(context: dict | None) -> dict:
                 "index": segment.get("index"),
                 "name": segment.get("name"),
                 "duration": segment.get("duration_seconds") or segment.get("duration"),
-                "summary": (segment.get("summary") or "")[:120],
+                "images": [str(item) for item in (segment.get("images") or [])][:8],
+                "has_prompt": bool(segment.get("has_prompt")),
             }
         )
     plan = context.get("plan") or {}
@@ -79,7 +82,15 @@ def _compact_context(context: dict | None) -> dict:
         }
         if plan
         else None,
-        "subjects": [str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("subjects") or [])][:30],
+        "subjects": [
+            (
+                {"name": str(item.get("name")), "description": str(item.get("description") or "")[:120]}
+                if isinstance(item, dict)
+                else {"name": str(item)}
+            )
+            for item in (context.get("subjects") or [])
+        ][:30],
+        "audio_tracks": [str(item) for item in (context.get("audio_tracks") or [])][:10],
         "planned_resources": [
             str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("planned_resources") or [])
         ][:30],

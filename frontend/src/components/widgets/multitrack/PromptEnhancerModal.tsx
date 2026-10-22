@@ -1104,12 +1104,23 @@ export function PromptEnhancerModal({
               tab={workspaceTab}
               frameRate={workspaceFrameRate}
               ratio={'16:9'}
-              segments={workspaceSegments.map((segment, index) => ({
-                index: index + 1,
-                name: segment.id,
-                durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
-              }))}
-              subjects={workspaceSubjects.map((subject) => ({ name: subject.name }))}
+              segments={workspaceSegments.map((segment, index) => {
+                const content = segment.content as unknown as { user_prompt?: string; images?: Array<{ file_name?: string; name?: string }> }
+                const promptText = String(content?.user_prompt ?? '')
+                const label = promptText.split('\n').find((line) => line.trim())?.replace(/<[^>]+>/g, '').trim().slice(0, 18) || `镜头 ${index + 1}`
+                return {
+                  index: index + 1,
+                  name: label,
+                  durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
+                  images: (content?.images ?? []).map((item) => String(item?.file_name ?? item?.name ?? '')).filter(Boolean),
+                  hasPrompt: promptText.trim().length > 0,
+                }
+              })}
+              subjects={workspaceSubjects.map((subject) => ({ name: subject.name, desc: String(subject.description ?? '').slice(0, 120) }))}
+              audioTracks={(() => {
+                const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { audio: string[] } }).__easyMediaTimelineSummary
+                try { return summary?.().audio ?? [] } catch { return [] }
+              })()}
               resources={plannedResources.map((resource) => ({ name: resource.name }))}
               onApplyPlan={(next) => {
                 const registry = (globalThis as unknown as {

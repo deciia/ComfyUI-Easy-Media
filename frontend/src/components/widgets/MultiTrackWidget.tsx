@@ -1276,8 +1276,21 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         .__easyMediaPendingWorkspaceOpen = true
       window.dispatchEvent(new CustomEvent('easy-media.workspace.open'))
     }
-    const registry = globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }
+    const registry = globalThis as unknown as {
+      __easyMediaOpenWorkspace?: () => void
+      __easyMediaTimelineSummary?: () => { audio: string[]; video: string[] }
+    }
     registry.__easyMediaOpenWorkspace = openWorkspace
+    registry.__easyMediaTimelineSummary = () => ({
+      audio: data.tracks
+        .filter((track) => track.type === 'audio')
+        .flatMap((track) => track.segments.map((segment) => String(((segment.content as unknown as { file_name?: string; user_prompt?: string })?.file_name || (segment.content as unknown as { user_prompt?: string })?.user_prompt || '').split('\n')[0].slice(0, 40))))
+        .filter(Boolean),
+      video: data.tracks
+        .filter((track) => track.type === 'video')
+        .flatMap((track) => track.segments.map((segment) => String(((segment.content as unknown as { file_name?: string; user_prompt?: string })?.file_name || (segment.content as unknown as { user_prompt?: string })?.user_prompt || '').split('\n')[0].slice(0, 40))))
+        .filter(Boolean),
+    })
     return () => {
       if (registry.__easyMediaOpenWorkspace === openWorkspace) delete registry.__easyMediaOpenWorkspace
     }
