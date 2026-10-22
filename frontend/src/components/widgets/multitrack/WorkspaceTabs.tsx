@@ -348,41 +348,6 @@ export function StoryboardTab({
         planDetail
       ) : plan ? (
         preview(plan)
-      ) : timelineSelected ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-medium">镜头 {timelineSelected.index} · {timelineSelected.label}</span>
-            <span className="text-[11px] text-muted-foreground tabular-nums">
-              {timelineSelected.startFrame}–{timelineSelected.endFrame} 帧（{timelineSelected.seconds.toFixed(2)}s）
-            </span>
-          </div>
-          <textarea
-            style={{ ...fieldStyle, minHeight: 300, resize: 'vertical', fontSize: 12, lineHeight: 1.6 }}
-            value={draft}
-            placeholder="这一段的提示词草稿（可引用 <Subject n> / <Picture n>）"
-            onChange={(event) => {
-              if (!timelineSelected) return
-              setDrafts((current) => ({ ...current, [timelineSelected.id]: event.target.value }))
-            }}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => timelineSelected && onWritePrompt?.(timelineSelected.id, draft)} disabled={!onWritePrompt || draft === timelineSelected.prompt}>
-              写入本段
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={!onGeneratePrompt || generating}
-              onClick={async () => {
-                if (!timelineSelected || !onGeneratePrompt) return
-                const next = await onGeneratePrompt(timelineSelected.id, draft)
-                if (next) setDrafts((current) => ({ ...current, [timelineSelected.id]: next }))
-              }}
-            >
-              {generating ? '生成中…' : 'AI 优化本段'}
-            </Button>
-          </div>
-        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
           <div className="flex max-w-[460px] flex-col items-center gap-3 text-[12px] leading-relaxed text-muted-foreground">
