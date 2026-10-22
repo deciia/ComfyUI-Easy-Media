@@ -48,6 +48,8 @@ export interface WorkspaceCache {
   style?: string
   chatInput?: string
   tab?: string
+  subjects?: unknown[]
+  plannedResources?: Array<{ kind: string; name: string; purpose?: string }>
 }
 
 const cache = new Map<string, WorkspaceCache>()
@@ -61,32 +63,61 @@ const DRAFT_KEY = 'easy-media-storyboard'
 
 export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   cache.set(key, { ...readWorkspace(key), ...patch })
-  // 分镜变更自动镜像到 localStorage：刷新浏览器不丢
-  if ('plan' in patch) {
+  // 分镜/主体/资源需求变更自动镜像到 localStorage：刷新浏览器不丢
+  const mirror = (lsKey: string, value: unknown) => {
     try {
-      if (patch.plan) window.localStorage.setItem(`${DRAFT_KEY}:${key}`, JSON.stringify(patch.plan))
-      else window.localStorage.removeItem(`${DRAFT_KEY}:${key}`)
+      if (value) window.localStorage.setItem(lsKey, JSON.stringify(value))
+      else window.localStorage.removeItem(lsKey)
     } catch {
       /* 存储失败不阻断 */
     }
   }
+  if ('plan' in patch) mirror(`${DRAFT_KEY}:${key}`, patch.plan)
+  if ('subjects' in patch) mirror(`easy-media-workspace-subjects:${key}`, patch.subjects)
+  if ('plannedResources' in patch) mirror(`easy-media-workspace-resources:${key}`, patch.plannedResources)
   for (const listener of listeners.get(key) ?? []) listener()
 }
 
 /** 挂载时若内存无 plan，从 localStorage 恢复分镜草稿。 */
 export function ensureHydrated(key: string) {
-  const current = cache.get(key)
-  if (current && 'plan' in current) return
-  try {
-    const raw = window.localStorage.getItem(`${DRAFT_KEY}:${key}`)
-    if (!raw) return
-    const plan = JSON.parse(raw)
-    if (plan && Array.isArray(plan.segments)) {
-      cache.set(key, { ...(current ?? {}), plan })
+  const current = cache.get(key) ?? {}
+  let changed = false
+  const next: WorkspaceCache = { ...current }
+  if (!('plan' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`${DRAFT_KEY}:${key}`)
+      const plan = raw ? JSON.parse(raw) : null
+      if (plan && Array.isArray(plan.segments)) {
+        next.plan = plan
+        changed = true
+      }
+    } catch {
+      /* 忽略坏草稿 */
     }
-  } catch {
-    /* 忽略坏草稿 */
   }
+  if (!('subjects' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-workspace-subjects:${key}`)
+      if (raw) {
+        next.subjects = JSON.parse(raw)
+        changed = true
+      }
+    } catch {
+      /* 忽略坏数据 */
+    }
+  }
+  if (!('plannedResources' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-workspace-resources:${key}`)
+      if (raw) {
+        next.plannedResources = JSON.parse(raw)
+        changed = true
+      }
+    } catch {
+      /* 忽略坏数据 */
+    }
+  }
+  if (changed) cache.set(key, next)
 }
 
 export function subscribeWorkspace(key: string, listener: () => void) {

@@ -7,7 +7,7 @@ import { PromptContentEditor, type PromptReferenceResource } from './PromptConte
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
 import { AgentRail } from './AgentRail'
-import { readWorkspace } from './agentStore'
+import { ensureHydrated, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
@@ -405,8 +405,34 @@ export function PromptEnhancerModal({
   })
 
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
-  const [workspaceSubjects, setWorkspaceSubjects] = useState<WorkspaceSubject[]>(() => readSubjectLibrarySubjects())
-  const [plannedResources, setPlannedResources] = useState<Array<{ kind: string; name: string; purpose?: string }>>([])
+  // 主体/资源需求放共享存储：关弹窗、刷新都不丢
+  const workspaceKey = projectName || 'default'
+  const [, setWorkspaceStoreVersion] = useState(0)
+  useEffect(() => {
+    ensureHydrated(workspaceKey)
+    if (!('subjects' in readWorkspace(workspaceKey))) {
+      // 首次进入该项目：从画布主体库播种
+      writeWorkspace(workspaceKey, { subjects: readSubjectLibrarySubjects() })
+    }
+    setWorkspaceStoreVersion((value) => value + 1)
+    return subscribeWorkspace(workspaceKey, () => setWorkspaceStoreVersion((value) => value + 1))
+  }, [workspaceKey])
+  const workspaceSubjects = (readWorkspace(workspaceKey).subjects as WorkspaceSubject[] | undefined) ?? []
+  const plannedResources = readWorkspace(workspaceKey).plannedResources ?? []
+  const setWorkspaceSubjects: React.Dispatch<React.SetStateAction<WorkspaceSubject[]>> = (action) => {
+    const current = (readWorkspace(workspaceKey).subjects as WorkspaceSubject[] | undefined) ?? []
+    writeWorkspace(workspaceKey, {
+      subjects: typeof action === 'function' ? (action as (prev: WorkspaceSubject[]) => WorkspaceSubject[])(current) : action,
+    })
+  }
+  const setPlannedResources: React.Dispatch<React.SetStateAction<Array<{ kind: string; name: string; purpose?: string }>>> = (action) => {
+    const current = readWorkspace(workspaceKey).plannedResources ?? []
+    writeWorkspace(workspaceKey, {
+      plannedResources: typeof action === 'function'
+        ? (action as (prev: Array<{ kind: string; name: string; purpose?: string }>) => Array<{ kind: string; name: string; purpose?: string }>)(current)
+        : action,
+    })
+  }
   const projectResources = useMemo(() => {
     const items: Array<{ kind: string; name: string; scope?: string }> = []
     for (const segment of workspaceSegments) {
