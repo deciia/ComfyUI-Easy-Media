@@ -152,7 +152,7 @@ export function PlanPreview({
             <div className="flex flex-wrap items-center gap-2">
               {field('ratio', '比例', [['9:16', '9:16'], ['16:9', '16:9'], ['1:1', '1:1'], ['4:3', '4:3']])}
               {field('refImageSize', '参考图', [['match', 'match'], ['max', 'max']])}
-              {field('taskType', '任务', [['R2V', 'R2V'], ['T2V', 'T2V'], ['I2V', 'I2V']])}
+              {field('taskType', '任务', [['ref', 'ref 参考生视频'], ['default', 'default 自动'], ['edit', 'edit 编辑'], ['l2v', 'l2v 首尾帧'], ['passthrough', 'passthrough 直通']])}
             </div>
           )
         })() : null}
@@ -242,8 +242,9 @@ export function PlanPreview({
                   <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                     <label className="flex items-center gap-1">衔接
                       <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.contextMode} onChange={(event) => setEditDraft({ ...editDraft, contextMode: event.target.value })}>
-                        <option value="shot">shot（独立镜头）</option>
-                        <option value="context">context（带上一段上下文）</option>
+                        <option value="shot">shot 独立镜头</option>
+                        <option value="context">context 带上一段上下文</option>
+                        <option value="context_drift">context_drift 上下文漂移</option>
                       </select>
                     </label>
                     <label className="flex items-center gap-1">参考图
@@ -256,9 +257,11 @@ export function PlanPreview({
                     <label className="flex items-center gap-1">任务
                       <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.taskType} onChange={(event) => setEditDraft({ ...editDraft, taskType: event.target.value })}>
                         <option value="">跟随脚本</option>
-                        <option value="R2V">R2V</option>
-                        <option value="T2V">T2V</option>
-                        <option value="I2V">I2V</option>
+                        <option value="default">default 自动</option>
+                        <option value="ref">ref 参考生视频</option>
+                        <option value="edit">edit 编辑</option>
+                        <option value="l2v">l2v 首尾帧</option>
+                        <option value="passthrough">passthrough 直通</option>
                       </select>
                     </label>
                   </div>
