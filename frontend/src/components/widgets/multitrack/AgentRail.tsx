@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import {
+  ensureHydrated,
   patchWorkspaceMessages,
   readWorkspace,
   subscribeWorkspace,
@@ -63,10 +64,13 @@ export function AgentRail({
   const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => subscribeWorkspace(projectKey, () => {
-    setMessages(readWorkspace(projectKey).messages ?? [])
-    setBusy(Boolean(readWorkspace(projectKey).agentBusy))
-  }), [projectKey])
+  useEffect(() => {
+    ensureHydrated(projectKey)
+    return subscribeWorkspace(projectKey, () => {
+      setMessages(readWorkspace(projectKey).messages ?? [])
+      setBusy(Boolean(readWorkspace(projectKey).agentBusy))
+    })
+  }, [projectKey])
 
   useEffect(() => {
     let cancelled = false

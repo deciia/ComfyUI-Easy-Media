@@ -57,9 +57,36 @@ export function readWorkspace(key: string): WorkspaceCache {
   return cache.get(key) ?? {}
 }
 
+const DRAFT_KEY = 'easy-media-storyboard'
+
 export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   cache.set(key, { ...readWorkspace(key), ...patch })
+  // 分镜变更自动镜像到 localStorage：刷新浏览器不丢
+  if ('plan' in patch) {
+    try {
+      if (patch.plan) window.localStorage.setItem(`${DRAFT_KEY}:${key}`, JSON.stringify(patch.plan))
+      else window.localStorage.removeItem(`${DRAFT_KEY}:${key}`)
+    } catch {
+      /* 存储失败不阻断 */
+    }
+  }
   for (const listener of listeners.get(key) ?? []) listener()
+}
+
+/** 挂载时若内存无 plan，从 localStorage 恢复分镜草稿。 */
+export function ensureHydrated(key: string) {
+  const current = cache.get(key)
+  if (current && 'plan' in current) return
+  try {
+    const raw = window.localStorage.getItem(`${DRAFT_KEY}:${key}`)
+    if (!raw) return
+    const plan = JSON.parse(raw)
+    if (plan && Array.isArray(plan.segments)) {
+      cache.set(key, { ...(current ?? {}), plan })
+    }
+  } catch {
+    /* 忽略坏草稿 */
+  }
 }
 
 export function subscribeWorkspace(key: string, listener: () => void) {

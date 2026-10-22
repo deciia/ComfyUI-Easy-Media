@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
-import { createEmptyPlan, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
+import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
@@ -103,9 +103,22 @@ export function StoryboardTab({
   const plan = (readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null
   const busy = Boolean(readWorkspace(projectKey).agentBusy)
 
-  useEffect(() => subscribeWorkspace(projectKey, () => {
+  useEffect(() => {
+    ensureHydrated(projectKey)
     setStoreVersion((value) => value + 1)
-  }), [projectKey])
+    return subscribeWorkspace(projectKey, () => {
+      setStoreVersion((value) => value + 1)
+    })
+  }, [projectKey])
+
+  // 标题栏 💾：草稿已自动持久化，这里给个确认反馈
+  useEffect(() => {
+    function onSave() {
+      setImportedNote('分镜草稿已自动保存 ✓')
+    }
+    window.addEventListener('easy-media.workspace.save', onSave)
+    return () => window.removeEventListener('easy-media.workspace.save', onSave)
+  }, [])
 
   const draft = timelineSelected ? (drafts[timelineSelected.id] ?? timelineSelected.prompt) : ''
 
