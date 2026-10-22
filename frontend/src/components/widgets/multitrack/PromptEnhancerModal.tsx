@@ -466,13 +466,25 @@ export function PromptEnhancerModal({
 
   // 主体编辑 → 写回资源表（含增删与子资源引用）
   const setWorkspaceSubjects: React.Dispatch<React.SetStateAction<WorkspaceSubject[]>> = (action) => {
-    const current = workspaceSubjects
+    // 必须以存储里的最新资源表为基准：同一事件里可能刚新增过资源，
+    // 用渲染快照重建会把它覆盖掉（表现为"已添加但引用数仍为 0"）。
+    const freshResources = readWorkspace(workspaceKey).resources ?? []
+    const current: WorkspaceSubject[] = freshResources
+      .filter((item) => item.type === 'Subject')
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        type: item.subjectKind || '人物',
+        description: item.description,
+        retention: item.retention,
+        childResourceIds: item.childResourceIds ?? [],
+      }))
     const next = typeof action === 'function'
       ? (action as (prev: WorkspaceSubject[]) => WorkspaceSubject[])(current)
       : action
     const now = Date.now()
     const keepIds = new Set(next.map((item) => item.id))
-    const nextResources: ProjectResource[] = resources
+    const nextResources: ProjectResource[] = freshResources
       .filter((item) => item.type !== 'Subject' || keepIds.has(item.id))
       .map((item) => {
         if (item.type !== 'Subject') return item
@@ -518,7 +530,7 @@ export function PromptEnhancerModal({
     const keyOf = (item: { kind: string; name: string }) => `${item.kind}::${item.name}`
     const wanted = new Map(next.map((item) => [keyOf(item), item]))
     const now = Date.now()
-    const nextResources: ProjectResource[] = resources
+    const nextResources: ProjectResource[] = (readWorkspace(workspaceKey).resources ?? [])
       .filter((item) => item.type === 'Subject' || wanted.has(`${typeToKind(item.type)}::${item.name}`))
       .map((item) => {
         if (item.type === 'Subject') return item
