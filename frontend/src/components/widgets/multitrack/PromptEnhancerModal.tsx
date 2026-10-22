@@ -8,13 +8,17 @@ import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
 import { AgentRail } from './AgentRail'
 import {
+  addResourceFromShared,
   defaultRelationship,
   ensureHydrated,
   kindToType,
+  patchResource,
   readWorkspace,
+  removeResource,
   resourceUid,
   subscribeWorkspace,
   typeToKind,
+  upsertResource,
   writeWorkspace,
   type ProjectResource,
 } from './agentStore'
@@ -351,7 +355,6 @@ export function PromptEnhancerModal({
   workspaceSegments = [],
   workspaceFrameRate = 30,
   onWriteSegmentPrompt,
-  onAttachImages,
   resourceTokens = [],
 }: PromptEnhancerModalProps) {
   const t = useT()
@@ -545,18 +548,31 @@ export function PromptEnhancerModal({
     writeWorkspace(workspaceKey, { resources: nextResources })
   }
 
-  const projectResources = useMemo(() => {
-    const items: Array<{ kind: string; name: string; scope?: string }> = []
-    for (const segment of workspaceSegments) {
-      const content = segment.content as unknown as { images?: Array<Record<string, unknown>> }
-      for (const image of content?.images ?? []) {
-        const record = image as Record<string, unknown>
-        const name = String(record.file_name ?? record.file_path ?? record.slot_name ?? 'image')
-        items.push({ kind: 'image', name })
-      }
-    }
-    return items.slice(0, 200)
-  }, [workspaceSegments])
+  const onAddSharedResource = (item: { name: string; subfolder: string; kind: 'image' | 'audio' | 'video' }) => {
+    addResourceFromShared(workspaceKey, item)
+  }
+  const onPatchProjectResource = (id: string, patch: Partial<ProjectResource>) => {
+    patchResource(workspaceKey, id, patch)
+  }
+  const onRemoveProjectResource = (id: string) => {
+    removeResource(workspaceKey, id)
+  }
+  const onCreateProjectResource = () => {
+    const now = Date.now()
+    upsertResource(workspaceKey, {
+      id: resourceUid('res'),
+      type: 'Picture',
+      name: '新资源',
+      relationship: 'fully_preserved',
+      description: '',
+      retention: [],
+      status: 'need',
+      source: 'manual',
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
   const [mentionTab, setMentionTab] = useState<'all' | 'subject' | 'picture' | 'video' | 'audio'>('all')
   const [globalDraft, setGlobalDraft] = useState(globalPrompt)
   const [lastGenerated, setLastGenerated] = useState(initialResult)
@@ -1224,17 +1240,13 @@ export function PromptEnhancerModal({
             ) : workspaceTab === 'subjects' ? (
               <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} resources={resources} />
             ) : (
-<ResourcesTab
-              projectResources={projectResources}
-              plannedResources={plannedResources}
-              onAddPlanned={(item) => setPlannedResources((current) => [...current, item])}
-              segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
-              onAttach={(segmentId, items) => {
-                if (!onAttachImages) return false
-                onAttachImages(segmentId, items.map((item) => ({ name: item.name, subfolder: item.subfolder })))
-                return true
-              }}
-            />
+              <ResourcesTab
+                resources={resources}
+                onAddFromShared={onAddSharedResource}
+                onPatch={onPatchProjectResource}
+                onRemove={onRemoveProjectResource}
+                onCreateEmpty={onCreateProjectResource}
+              />
             )}
             </div>
             <AgentRail
