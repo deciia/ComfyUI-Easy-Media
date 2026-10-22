@@ -83,6 +83,7 @@ export function PlanPreview({
   onBack,
   onSaveDraft,
   onOpenEnhance,
+  onPatchPlan,
   saved,
   onApply,
   editable = false,
@@ -96,6 +97,7 @@ export function PlanPreview({
   onBack?: () => void
   onSaveDraft: () => void
   onOpenEnhance?: () => void
+  onPatchPlan?: (settings: Record<string, string>) => void
   saved: boolean
   onApply?: () => boolean
   /** 手动编辑：传入后段支持增删改/排序 */
@@ -129,6 +131,28 @@ export function PlanPreview({
           {plan.segments.length} 段 · {plan.total_seconds}s · {plan.frame_rate}fps
         </span>
         {plan.genre ? <span className="rounded border px-1 text-[10px]" style={{ borderColor: BORDER }}>{plan.genre}</span> : null}
+        {onPatchPlan ? (() => {
+          const settings = ((plan as unknown as { settings?: Record<string, string> }).settings) ?? {}
+          const field = (key: string, label: string, options: Array<[string, string]>) => (
+            <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              {label}
+              <select
+                style={{ background: FIELD_BG, border: '1px solid ' + BORDER, borderRadius: 4, color: '#e5e5e5', fontSize: 10, padding: '1px 3px' }}
+                value={settings[key] ?? options[0][0]}
+                onChange={(event) => onPatchPlan({ ...settings, [key]: event.target.value })}
+              >
+                {options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+              </select>
+            </label>
+          )
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              {field('ratio', '比例', [['9:16', '9:16'], ['16:9', '16:9'], ['1:1', '1:1'], ['4:3', '4:3']])}
+              {field('refImageSize', '参考图', [['match', 'match'], ['max', 'max']])}
+              {field('taskType', '任务', [['R2V', 'R2V'], ['T2V', 'T2V'], ['I2V', 'I2V']])}
+            </div>
+          )
+        })() : null}
         <span className="ml-auto" />
         {onImportSubjects || onImportResources ? (
           <Button size="sm" variant="secondary" onClick={() => { onImportSubjects?.(); onImportResources?.() }}>

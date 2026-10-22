@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
-import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace } from './agentStore'
+import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
@@ -142,6 +142,11 @@ export function StoryboardTab({
         }
       }}
       onOpenEnhance={onOpenEnhance}
+      onPatchPlan={(settings) => {
+        const current = readWorkspace(projectKey).plan as StoryboardPlan | null
+        if (!current) return
+        writeWorkspace(projectKey, { plan: { ...(current as unknown as Record<string, unknown>), settings } as unknown as StoryboardPlan })
+      }}
       onImportSubjects={onImportPlanSubjects ? () => {
         onImportPlanSubjects(value)
         setImportedNote('已把主体导入「主体与资源」页')
