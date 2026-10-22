@@ -130,7 +130,7 @@ export function StoryboardTab({
       saved={false}
       appliedNote={appliedNote}
       importedNote={importedNote}
-      onBack={() => writeWorkspace(projectKey, { plan: null })}
+      onBack={() => setPlanFocus(null)}
       onSaveDraft={() => {
         try {
           window.localStorage.setItem(`easy-media-storyboard:${projectKey}`, JSON.stringify(value))
