@@ -7,7 +7,17 @@ import { PromptContentEditor, type PromptReferenceResource } from './PromptConte
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
 import { AgentRail } from './AgentRail'
-import { ensureHydrated, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
+import {
+  defaultRelationship,
+  ensureHydrated,
+  kindToType,
+  readWorkspace,
+  resourceUid,
+  subscribeWorkspace,
+  typeToKind,
+  writeWorkspace,
+  type ProjectResource,
+} from './agentStore'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
@@ -405,34 +415,136 @@ export function PromptEnhancerModal({
   })
 
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
-  // 主体/资源需求放共享存储：关弹窗、刷新都不丢
+  // 主体/资源统一走「项目资源」表（含迁移）：关弹窗、刷新都不丢
   const workspaceKey = projectName || 'default'
   const [, setWorkspaceStoreVersion] = useState(0)
   useEffect(() => {
     ensureHydrated(workspaceKey)
-    if (!('subjects' in readWorkspace(workspaceKey))) {
-      // 首次进入该项目：从画布主体库播种
-      writeWorkspace(workspaceKey, { subjects: readSubjectLibrarySubjects() })
+    const cached = readWorkspace(workspaceKey)
+    if (!('resources' in cached) && !('subjects' in cached)) {
+      // 首次进入该项目：从画布主体库播种为 Subject 资源
+      const now = Date.now()
+      writeWorkspace(workspaceKey, {
+        resources: readSubjectLibrarySubjects().map((subject) => ({
+          id: subject.id || resourceUid('res-subject'),
+          type: 'Subject' as const,
+          name: subject.name,
+          subjectKind: subject.type || '人物',
+          relationship: 'fully_preserved',
+          description: subject.description ?? '',
+          retention: subject.retention ?? [],
+          status: 'ready' as const,
+          childResourceIds: [],
+          source: 'manual' as const,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      })
     }
     setWorkspaceStoreVersion((value) => value + 1)
     return subscribeWorkspace(workspaceKey, () => setWorkspaceStoreVersion((value) => value + 1))
   }, [workspaceKey])
-  const workspaceSubjects = (readWorkspace(workspaceKey).subjects as WorkspaceSubject[] | undefined) ?? []
-  const plannedResources = readWorkspace(workspaceKey).plannedResources ?? []
+
+  const resources = readWorkspace(workspaceKey).resources ?? []
+  const workspaceSubjects: WorkspaceSubject[] = resources
+    .filter((item) => item.type === 'Subject')
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      type: item.subjectKind || '人物',
+      description: item.description,
+      retention: item.retention,
+      childResourceIds: item.childResourceIds ?? [],
+    }))
+  const plannedResources = resources
+    .filter((item) => item.type !== 'Subject')
+    .map((item) => ({ kind: typeToKind(item.type), name: item.name, purpose: item.description }))
+
+  // 主体编辑 → 写回资源表（含增删与子资源引用）
   const setWorkspaceSubjects: React.Dispatch<React.SetStateAction<WorkspaceSubject[]>> = (action) => {
-    const current = (readWorkspace(workspaceKey).subjects as WorkspaceSubject[] | undefined) ?? []
-    writeWorkspace(workspaceKey, {
-      subjects: typeof action === 'function' ? (action as (prev: WorkspaceSubject[]) => WorkspaceSubject[])(current) : action,
-    })
+    const current = workspaceSubjects
+    const next = typeof action === 'function'
+      ? (action as (prev: WorkspaceSubject[]) => WorkspaceSubject[])(current)
+      : action
+    const now = Date.now()
+    const keepIds = new Set(next.map((item) => item.id))
+    const nextResources: ProjectResource[] = resources
+      .filter((item) => item.type !== 'Subject' || keepIds.has(item.id))
+      .map((item) => {
+        if (item.type !== 'Subject') return item
+        const updated = next.find((subject) => subject.id === item.id)
+        if (!updated) return item
+        return {
+          ...item,
+          name: updated.name,
+          subjectKind: updated.type,
+          description: updated.description,
+          retention: updated.retention,
+          childResourceIds: updated.childResourceIds ?? item.childResourceIds ?? [],
+          updatedAt: now,
+        }
+      })
+    const existing = new Set(nextResources.filter((item) => item.type === 'Subject').map((item) => item.id))
+    for (const subject of next) {
+      if (existing.has(subject.id)) continue
+      nextResources.push({
+        id: subject.id || resourceUid('res-subject'),
+        type: 'Subject',
+        name: subject.name,
+        subjectKind: subject.type,
+        relationship: 'fully_preserved',
+        description: subject.description,
+        retention: subject.retention ?? [],
+        status: 'ready',
+        childResourceIds: subject.childResourceIds ?? [],
+        source: 'manual',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    writeWorkspace(workspaceKey, { resources: nextResources })
   }
+
+  // 资源需求编辑 → 写回资源表（kind+name 作匹配键）
   const setPlannedResources: React.Dispatch<React.SetStateAction<Array<{ kind: string; name: string; purpose?: string }>>> = (action) => {
-    const current = readWorkspace(workspaceKey).plannedResources ?? []
-    writeWorkspace(workspaceKey, {
-      plannedResources: typeof action === 'function'
-        ? (action as (prev: Array<{ kind: string; name: string; purpose?: string }>) => Array<{ kind: string; name: string; purpose?: string }>)(current)
-        : action,
-    })
+    const current = plannedResources
+    const next = typeof action === 'function'
+      ? (action as (prev: Array<{ kind: string; name: string; purpose?: string }>) => Array<{ kind: string; name: string; purpose?: string }>)(current)
+      : action
+    const keyOf = (item: { kind: string; name: string }) => `${item.kind}::${item.name}`
+    const wanted = new Map(next.map((item) => [keyOf(item), item]))
+    const now = Date.now()
+    const nextResources: ProjectResource[] = resources
+      .filter((item) => item.type === 'Subject' || wanted.has(`${typeToKind(item.type)}::${item.name}`))
+      .map((item) => {
+        if (item.type === 'Subject') return item
+        const target = wanted.get(`${typeToKind(item.type)}::${item.name}`)
+        if (!target) return item
+        return { ...item, name: target.name, description: target.purpose ?? item.description, updatedAt: now }
+      })
+    const existing = new Set(
+      nextResources.filter((item) => item.type !== 'Subject').map((item) => `${typeToKind(item.type)}::${item.name}`),
+    )
+    for (const item of next) {
+      const key = keyOf(item)
+      if (existing.has(key)) continue
+      const type = kindToType(item.kind)
+      nextResources.push({
+        id: resourceUid('res-need'),
+        type,
+        name: item.name,
+        relationship: defaultRelationship(type),
+        description: item.purpose ?? '',
+        retention: [],
+        status: 'need',
+        source: 'manual',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    writeWorkspace(workspaceKey, { resources: nextResources })
   }
+
   const projectResources = useMemo(() => {
     const items: Array<{ kind: string; name: string; scope?: string }> = []
     for (const segment of workspaceSegments) {
@@ -919,8 +1031,8 @@ export function PromptEnhancerModal({
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
           {([
             ['storyboard', '分镜编排'],
-            ['subjects', '主体定义'],
-            ['assets', '资源与生成'],
+            ['subjects', '主体'],
+            ['assets', '项目资源'],
             ['enhance', '提示词增强'],
           ] as Array<[WorkspaceTab, string]>).map(([key, label]) => (
             <button
@@ -952,7 +1064,7 @@ export function PromptEnhancerModal({
               { ok: Boolean(plan), text: plan ? `分镜脚本：${plan.segments.length} 段 · ${plan.total_seconds}s` : '分镜脚本：未生成（将只保留现有任务分段）' },
               { ok: segs.length > 0, text: `任务分段：${segs.length} 段${segs.length ? `，已写提示词 ${prompted}/${segs.length}` : ''}` },
               { ok: subjects.length > 0, text: `主体：${subjects.length} 个${noDesc ? `，${noDesc} 个缺描述` : ''}` },
-              { ok: true, text: `资源需求：${planned} 项（匹配情况见「资源与生成」页）` },
+              { ok: true, text: `资源需求：${planned} 项（匹配情况见「项目资源」页）` },
             ]
             const registry = (globalThis as unknown as {
               __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
@@ -1110,7 +1222,7 @@ export function PromptEnhancerModal({
               }}
             />
             ) : workspaceTab === 'subjects' ? (
-              <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} />
+              <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} resources={resources} />
             ) : (
 <ResourcesTab
               projectResources={projectResources}

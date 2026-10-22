@@ -1,3 +1,4 @@
+import type { ProjectResource } from './agentStore'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
@@ -7,6 +8,8 @@ export interface WorkspaceSubject {
   type: string
   description: string
   retention: string[]
+  /** 关联的项目资源（图片/视频/音频）id */
+  childResourceIds?: string[]
 }
 
 export interface WorkspaceResourceItem {
@@ -34,9 +37,11 @@ const fieldStyle: React.CSSProperties = {
 export function SubjectsTab({
   subjects,
   onChange,
+  resources,
 }: {
   subjects: WorkspaceSubject[]
   onChange?: (next: WorkspaceSubject[]) => void
+  resources?: ProjectResource[]
 }) {
   const [selectedId, setSelectedId] = useState<string | undefined>(subjects[0]?.id)
   const list = subjects
@@ -57,7 +62,7 @@ export function SubjectsTab({
           onClick={() => {
             if (!onChange) return
             const id = `subject-local-${Date.now()}`
-            onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [] }])
+            onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [], childResourceIds: [] }])
             setSelectedId(id)
           }}
         >
@@ -78,7 +83,7 @@ export function SubjectsTab({
             onClick={() => {
               if (!onChange) return
               const id = `subject-local-${Date.now()}`
-              onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [] }])
+              onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [], childResourceIds: [] }])
               setSelectedId(id)
             }}
           >
@@ -151,6 +156,40 @@ export function SubjectsTab({
                 })}
               />
             </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted-foreground">关联资源（生成时作为该主体的参考图片/视频/音频）</span>
+              <div className="flex flex-wrap items-center gap-1">
+                {(selected.childResourceIds ?? []).length === 0 ? (
+                  <span className="text-[10px] text-muted-foreground">（未关联）</span>
+                ) : (selected.childResourceIds ?? []).map((childId) => {
+                  const child = (resources ?? []).find((item) => item.id === childId)
+                  return (
+                    <span
+                      key={childId}
+                      className="flex items-center gap-1 rounded-full px-1.5 text-[10px]"
+                      style={{ border: `1px solid ${BORDER}` }}
+                      title={child ? `${child.type} · ${child.relationship}` : childId}
+                    >
+                      {child ? `${child.type}:${child.name}` : childId}
+                      <button
+                        type="button"
+                        className="text-muted-foreground"
+                        onClick={() => patch(selected.id, {
+                          childResourceIds: (selected.childResourceIds ?? []).filter((id) => id !== childId),
+                        })}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )
+                })}
+              </div>
+              <BindingPicker
+                resources={resources ?? []}
+                selected={selected.childResourceIds ?? []}
+                onAdd={(id) => patch(selected.id, { childResourceIds: [...(selected.childResourceIds ?? []), id] })}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Button size="sm" disabled title="下一步：写回画布主体库节点">同步到主体库（下一步）</Button>
               <Button
@@ -418,5 +457,38 @@ export function ResourcesTab({
         </div>
       </div>
     </div>
+  )
+}
+
+
+/** 主体关联资源选择器：从项目资源中挑图片/视频/音频 */
+function BindingPicker({
+  resources,
+  selected,
+  onAdd,
+}: {
+  resources: ProjectResource[]
+  selected: string[]
+  onAdd: (id: string) => void
+}) {
+  const candidates = resources.filter((item) => item.type !== 'Subject' && !selected.includes(item.id))
+  if (candidates.length === 0) {
+    return <span className="text-[10px] text-muted-foreground">（项目资源里还没有可关联的图片/视频/音频）</span>
+  }
+  return (
+    <select
+      style={{ ...fieldStyle, width: 260 }}
+      value=""
+      onChange={(event) => {
+        if (event.target.value) onAdd(event.target.value)
+      }}
+    >
+      <option value="">＋ 关联一个项目资源…</option>
+      {candidates.map((item) => (
+        <option key={item.id} value={item.id}>
+          {item.type}：{item.name}{item.status === 'need' ? '（未生成）' : ''}
+        </option>
+      ))}
+    </select>
   )
 }

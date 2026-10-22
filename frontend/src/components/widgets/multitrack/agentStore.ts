@@ -39,6 +39,69 @@ export interface StoryboardPlanLike {
   [key: string]: unknown
 }
 
+export type ResourceType = 'Subject' | 'Picture' | 'Video' | 'Audio'
+export type ResourceStatus = 'need' | 'generating' | 'ready' | 'failed'
+
+export interface ProjectResource {
+  id: string
+  type: ResourceType
+  name: string
+  /** 仅 Subject：人物/物体/场景（自由文本，与旧主体库 type 对齐） */
+  subjectKind?: string
+  relationship: string
+  description: string
+  retention: string[]
+  status: ResourceStatus
+  imageFile?: string
+  videoFile?: string
+  audioFile?: string
+  /** 仅 Subject：引用的图片/视频/音频资源 id */
+  childResourceIds?: string[]
+  source: 'shared' | 'generated' | 'manual'
+  sharedPath?: string
+  subfolder?: string
+  generator?: { workflow?: string; brief?: string; seed?: number }
+  createdAt: number
+  updatedAt: number
+}
+
+export function resourceUid(prefix = 'res'): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+export function defaultRelationship(type: ResourceType): string {
+  return type === 'Audio' ? 'reference' : 'fully_preserved'
+}
+
+export function relationshipOptions(type: ResourceType): Array<{ value: string; label: string }> {
+  if (type === 'Audio') {
+    return [
+      { value: 'fully_copy', label: 'fully copy（整体照搬音轨）' },
+      { value: 'partially_copy', label: 'partially copy（部分复制/增删）' },
+      { value: 'reference', label: 'reference（只引音色/节奏）' },
+      { value: 'weak_reference', label: 'weak reference（仅氛围相似）' },
+    ]
+  }
+  return [
+    { value: 'fully_preserved', label: 'fully preserved（完整保留）' },
+    { value: 'partially_preserved', label: 'partially preserved（部分保留）' },
+    { value: 'attribute_transfer', label: 'attribute transfer（特征转移）' },
+    { value: 'weak_reference', label: 'weak reference（仅弱参考）' },
+  ]
+}
+
+export function kindToType(kind: string): ResourceType {
+  if (kind === 'audio') return 'Audio'
+  if (kind === 'video') return 'Video'
+  return 'Picture'
+}
+
+export function typeToKind(type: ResourceType): 'image' | 'audio' | 'video' {
+  if (type === 'Audio') return 'audio'
+  if (type === 'Video') return 'video'
+  return 'image'
+}
+
 export interface WorkspaceCache {
   plan?: StoryboardPlanLike | null
   messages?: AgentMessage[]
@@ -50,6 +113,7 @@ export interface WorkspaceCache {
   tab?: string
   subjects?: unknown[]
   plannedResources?: Array<{ kind: string; name: string; purpose?: string }>
+  resources?: ProjectResource[]
 }
 
 const cache = new Map<string, WorkspaceCache>()
@@ -75,6 +139,7 @@ export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   if ('plan' in patch) mirror(`${DRAFT_KEY}:${key}`, patch.plan)
   if ('subjects' in patch) mirror(`easy-media-workspace-subjects:${key}`, patch.subjects)
   if ('plannedResources' in patch) mirror(`easy-media-workspace-resources:${key}`, patch.plannedResources)
+  if ('resources' in patch) mirror(`easy-media-project-resources:${key}`, patch.resources)
   for (const listener of listeners.get(key) ?? []) listener()
 }
 
@@ -117,7 +182,134 @@ export function ensureHydrated(key: string) {
       /* 忽略坏数据 */
     }
   }
+  if (!('resources' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-project-resources:${key}`)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          next.resources = parsed
+          changed = true
+        }
+      }
+    } catch {
+      /* 忽略坏数据 */
+    }
+  }
+  // 一次性迁移：旧主体 / 旧资源需求 → 统一资源表
+  if (!('resources' in next)) {
+    const now = Date.now()
+    const migrated: ProjectResource[] = []
+    for (const raw of (next.subjects as Array<Record<string, unknown>> | undefined) ?? []) {
+      migrated.push({
+        id: String(raw.id ?? resourceUid('res-subject')),
+        type: 'Subject',
+        name: String(raw.name ?? ''),
+        subjectKind: String(raw.type ?? '人物'),
+        relationship: 'fully_preserved',
+        description: String(raw.description ?? ''),
+        retention: Array.isArray(raw.retention) ? (raw.retention as string[]) : [],
+        status: 'ready',
+        childResourceIds: [],
+        source: 'manual',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    for (const raw of (next.plannedResources as Array<{ kind: string; name: string; purpose?: string }> | undefined) ?? []) {
+      const type = kindToType(String(raw.kind ?? 'image'))
+      migrated.push({
+        id: resourceUid('res-need'),
+        type,
+        name: String(raw.name ?? ''),
+        relationship: defaultRelationship(type),
+        description: String(raw.purpose ?? ''),
+        retention: [],
+        status: 'need',
+        source: 'manual',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+    if (migrated.length > 0) {
+      next.resources = migrated
+      changed = true
+    }
+  }
   if (changed) cache.set(key, next)
+}
+
+export function readResources(key: string): ProjectResource[] {
+  return readWorkspace(key).resources ?? []
+}
+
+export function writeResources(key: string, resources: ProjectResource[]) {
+  writeWorkspace(key, { resources })
+}
+
+export function upsertResource(key: string, resource: ProjectResource) {
+  const current = readResources(key)
+  const index = current.findIndex((item) => item.id === resource.id)
+  const next = index >= 0
+    ? current.map((item, i) => (i === index ? { ...item, ...resource, updatedAt: Date.now() } : item))
+    : [...current, resource]
+  writeResources(key, next)
+}
+
+export function patchResource(key: string, id: string, patch: Partial<ProjectResource>) {
+  writeResources(
+    key,
+    readResources(key).map((item) => (item.id === id ? { ...item, ...patch, updatedAt: Date.now() } : item)),
+  )
+}
+
+export function removeResource(key: string, id: string) {
+  const current = readResources(key)
+  writeResources(
+    key,
+    current
+      .filter((item) => item.id !== id)
+      .map((item) => (
+        item.childResourceIds?.includes(id)
+          ? { ...item, childResourceIds: item.childResourceIds.filter((child) => child !== id) }
+          : item
+      )),
+  )
+}
+
+/** 从共享资源新建一条项目资源（图片/音频/视频） */
+export function addResourceFromShared(
+  key: string,
+  item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video' },
+  patch: Partial<ProjectResource> = {},
+): ProjectResource {
+  const type = kindToType(item.kind)
+  const bare = item.name.replace(/\.[^.]+$/, '')
+  const resource: ProjectResource = {
+    id: resourceUid('res-shared'),
+    type,
+    name: patch.name ?? bare,
+    relationship: patch.relationship ?? defaultRelationship(type),
+    description: patch.description ?? '',
+    retention: patch.retention ?? [],
+    status: 'ready',
+    source: 'shared',
+    sharedPath: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
+    subfolder: item.subfolder,
+    imageFile: type === 'Picture' ? item.name : undefined,
+    audioFile: type === 'Audio' ? item.name : undefined,
+    videoFile: type === 'Video' ? item.name : undefined,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...patch,
+  }
+  upsertResource(key, resource)
+  return resource
+}
+
+/** 主体挂/卸子资源 */
+export function setSubjectChildren(key: string, subjectId: string, childIds: string[]) {
+  patchResource(key, subjectId, { childResourceIds: childIds })
 }
 
 export function subscribeWorkspace(key: string, listener: () => void) {
