@@ -49,13 +49,22 @@ export function SubjectsTab({
 
   if (list.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-xs text-muted-foreground">
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-xs text-muted-foreground">
         <div>主体库还是空的。</div>
-        <div>下一步：从分镜规划结果一键导入主体，或直接在这里新增后同步到画布「主体库」节点。</div>
-        <Button size="sm" variant="secondary" disabled>新增主体（下一步）</Button>
+        <div>可以直接新增主体；也可以在「分镜编排」生成后一键导入主体。</div>
+        <Button
+          size="sm"
+          onClick={() => {
+            if (!onChange) return
+            const id = `subject-local-${Date.now()}`
+            onChange([...subjects, { id, name: '新主体', type: '人物', description: '', retention: [] }])
+            setSelectedId(id)
+          }}
+        >
+          ＋ 新增主体
+        </Button>
       </div>
-    )
-  }
+    )  }
 
   return (
     <div className="flex min-h-0 flex-1">
