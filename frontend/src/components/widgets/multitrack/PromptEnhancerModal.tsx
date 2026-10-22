@@ -367,6 +367,17 @@ export function PromptEnhancerModal({
   const [finalDraft, setFinalDraft] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
   const [abTab, setAbTab] = useState<'a' | 'b'>('a')
+  const activePrompt = abTab === 'a' ? brief : draftPrompt
+  const draftStoreKey = `easy-media-brief-b:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(draftStoreKey)
+      if (raw) setDraftPrompt(raw)
+    } catch { /* ignore */ }
+  }, [draftStoreKey])
+  useEffect(() => {
+    try { window.localStorage.setItem(draftStoreKey, draftPrompt) } catch { /* ignore */ }
+  }, [draftPrompt, draftStoreKey])
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
@@ -853,7 +864,7 @@ export function PromptEnhancerModal({
     setSections(splitSections(text))
   }
 
-  async function handleGenerate(language?: '中文' | 'English') {
+  async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: string) {
     const outputLanguage = language ?? options.output_language
     setBusy(true)
     setError('')
@@ -861,7 +872,7 @@ export function PromptEnhancerModal({
     setResult('')
     setSections([])
     try {
-      const { ok, data } = await postGenerate({ output_language: outputLanguage }, brief)
+      const { ok, data } = await postGenerate({ output_language: outputLanguage }, sourcePrompt ?? brief)
       if (!ok) {
         setError(String(data?.error || t('multitrack.enhancerFailed')))
         return
@@ -1621,13 +1632,13 @@ export function PromptEnhancerModal({
                       variant="secondary"
                       className="h-6 px-2 text-[11px]"
                       title="把 A 栏的片段提示词直接作为最终提示词"
-                      disabled={!brief.trim()}
-                      onClick={() => setFinalDraft(brief)}
+                      disabled={!activePrompt.trim()}
+                      onClick={() => setFinalDraft(activePrompt)}
                     >
                       从片段提示词导入
                     </Button>
-                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !brief.trim()} onClick={() => void handleGenerate('English')}>生成英文</Button>
-                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !brief.trim()} onClick={() => void handleGenerate('中文')}>生成中文</Button>
+                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !activePrompt.trim()} onClick={() => void handleGenerate('English', activePrompt)}>生成英文</Button>
+                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !activePrompt.trim()} onClick={() => void handleGenerate('中文', activePrompt)}>生成中文</Button>
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
