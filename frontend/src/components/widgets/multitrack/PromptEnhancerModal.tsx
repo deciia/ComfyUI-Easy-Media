@@ -10,6 +10,7 @@ import { AssetsTab } from './AssetsTab'
 import { AgentRail } from './AgentRail'
 import {
   addResourceFromShared,
+  bindResourceFile,
   defaultRelationship,
   ensureHydrated,
   kindToType,
@@ -17,6 +18,7 @@ import {
   readWorkspace,
   removeResource,
   resourceUid,
+  unbindResourceFile,
   subscribeWorkspace,
   typeToKind,
   upsertResource,
@@ -570,6 +572,16 @@ export function PromptEnhancerModal({
   const onRemoveProjectResource = (id: string) => {
     removeResource(workspaceKey, id)
   }
+  const onBindProjectResourceFile = (
+    id: string,
+    item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video'; root?: 'input' | 'output' | 'temp' },
+  ) => {
+    bindResourceFile(workspaceKey, id, item)
+  }
+  const onUnbindProjectResourceFile = (id: string) => {
+    unbindResourceFile(workspaceKey, id)
+  }
+
   const onCreateProjectResource = () => {
     const now = Date.now()
     upsertResource(workspaceKey, {
@@ -1258,6 +1270,8 @@ export function PromptEnhancerModal({
                 onPatch={onPatchProjectResource}
                 onRemove={onRemoveProjectResource}
                 onCreateEmpty={onCreateProjectResource}
+                onBindFile={onBindProjectResourceFile}
+                onUnbindFile={onUnbindProjectResourceFile}
               />
             )}
             </div>

@@ -309,6 +309,40 @@ export function addResourceFromShared(
   return resource
 }
 
+/** 把共享资源文件绑定到一条已存在的项目资源（缺件补齐） */
+export function bindResourceFile(
+  key: string,
+  resourceId: string,
+  item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video'; root?: 'input' | 'output' | 'temp' },
+) {
+  const resource = readResources(key).find((entry) => entry.id === resourceId)
+  if (!resource) return
+  const subfolder = item.subfolder ?? ''
+  patchResource(key, resourceId, {
+    status: 'ready',
+    source: 'shared',
+    sharedRoot: item.root ?? 'input',
+    sharedPath: subfolder ? `${subfolder}/${item.name}` : item.name,
+    subfolder,
+    imageFile: resource.type === 'Picture' ? item.name : undefined,
+    videoFile: resource.type === 'Video' ? item.name : undefined,
+    audioFile: resource.type === 'Audio' ? item.name : undefined,
+  })
+}
+
+/** 解绑共享文件：回到缺件状态 */
+export function unbindResourceFile(key: string, resourceId: string) {
+  patchResource(key, resourceId, {
+    status: 'need',
+    sharedRoot: undefined,
+    sharedPath: undefined,
+    subfolder: undefined,
+    imageFile: undefined,
+    videoFile: undefined,
+    audioFile: undefined,
+  })
+}
+
 /** 主体挂/卸子资源 */
 export function setSubjectChildren(key: string, subjectId: string, childIds: string[]) {
   patchResource(key, subjectId, { childResourceIds: childIds })

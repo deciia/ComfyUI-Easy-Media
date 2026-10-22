@@ -27,6 +27,8 @@ export interface AssetsTabProps {
   onPatch?: (id: string, patch: Partial<ProjectResource>) => void
   onRemove?: (id: string) => void
   onCreateEmpty?: () => void
+  onBindFile?: (id: string, item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video'; root?: 'input' | 'output' | 'temp' }) => void
+  onUnbindFile?: (id: string) => void
 }
 
 /** 主体与资源：左=主体/资源列表，中=详情（定义+引用资源），右=共享资源浏览器；AI 助手在弹窗右栏。 */
@@ -38,6 +40,8 @@ export function AssetsTab({
   onPatch,
   onRemove,
   onCreateEmpty,
+  onBindFile,
+  onUnbindFile,
 }: AssetsTabProps) {
   const [selection, setSelection] = useState<Selection>(null)
   const [resType, setResType] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
@@ -495,12 +499,78 @@ export function AssetsTab({
           {relationshipOptions(resource.type).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       </div>
-      <textarea
-        style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', lineHeight: 1.6 }}
-        placeholder="定义描述（会作为参考语义写进提示词）"
-        value={resource.description}
-        onChange={(event) => onPatch?.(resource.id, { description: event.target.value })}
-      />
+      {(() => {
+        const mediaKind: 'image' | 'audio' | 'video' = resource.type === 'Picture' ? 'image' : resource.type === 'Video' ? 'video' : 'audio'
+        const boundFile = resource.type === 'Picture' ? resource.imageFile : resource.type === 'Video' ? resource.videoFile : resource.audioFile
+        const viewUrl = boundFile
+          ? `/view?filename=${encodeURIComponent(boundFile)}&type=${resource.sharedRoot ?? 'input'}${resource.subfolder ? `&subfolder=${encodeURIComponent(resource.subfolder)}` : ''}`
+          : ''
+        const slotActive = dropTarget === 'resource-slot'
+        return (
+          <div className="flex items-start gap-2">
+            <textarea
+              style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', lineHeight: 1.6, flex: 1 }}
+              placeholder="定义描述（会作为参考语义写进提示词）"
+              value={resource.description}
+              onChange={(event) => onPatch?.(resource.id, { description: event.target.value })}
+            />
+            <div
+              className="relative flex shrink-0 items-center justify-center rounded p-1"
+              style={{ width: 120, height: 108, border: `1px dashed ${slotActive ? PRIMARY : BORDER}`, background: slotActive ? `${PRIMARY} / 0.08` : FIELD_BG }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setDropTarget('resource-slot')
+              }}
+              onDragLeave={() => setDropTarget(null)}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setDropTarget(null)
+                const shared = parseShared(event)
+                if (!shared) {
+                  setChildHint('请从右侧共享资源拖入文件')
+                  return
+                }
+                if (shared.kind !== mediaKind) {
+                  const label = { image: '图片', audio: '音频', video: '视频' }[mediaKind]
+                  setChildHint(`类型不匹配：这里是${label}槽，拖入的是${{ image: '图片', audio: '音频', video: '视频' }[shared.kind]}`)
+                  return
+                }
+                onBindFile?.(resource.id, shared)
+                setChildHint(`已绑定：${shared.name}`)
+              }}
+            >
+              {boundFile ? (
+                <>
+                  {mediaKind === 'image' && viewUrl ? (
+                    <img src={viewUrl} alt={boundFile} className="h-full w-full rounded object-cover" />
+                  ) : (
+                    <span className="text-2xl">{mediaKind === 'audio' ? '♪' : '▶'}</span>
+                  )}
+                  <button
+                    type="button"
+                    title="清除绑定（恢复缺件）"
+                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px]"
+                    style={{ background: '#7f1d1d', color: '#fff', border: '1px solid #ef4444' }}
+                    onClick={() => {
+                      onUnbindFile?.(resource.id)
+                      setChildHint('已清除绑定，资源恢复为「缺」')
+                    }}
+                  >
+                    ×
+                  </button>
+                </>
+              ) : (
+                <span className="px-1 text-center text-[10px] leading-relaxed text-muted-foreground">
+                  拖{{ image: '图片', audio: '音频', video: '视频' }[mediaKind]}到这里
+                  <br />绑定后清除「缺」
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })()}
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-muted-foreground">保留项（逗号分隔）</span>
         <textarea
