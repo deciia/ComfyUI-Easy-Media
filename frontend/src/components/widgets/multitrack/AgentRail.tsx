@@ -194,7 +194,7 @@ export function AgentRail({
           } else if (type === 'gen') {
             patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
               message.id === replyId
-                ? { ...message, text: `${message.text}${String(event.text || '')}` }
+                ? { ...message, gen: `${message.gen ?? ''}${String(event.text || '')}` }
                 : message
             )))
           } else if (type === 'text') {
@@ -205,6 +205,7 @@ export function AgentRail({
             update({
               text: '',
               thinking: undefined,
+              gen: undefined,
               planResult: { segments: next.segments.length, seconds: next.total_seconds },
             })
           } else if (type === 'action') {
@@ -302,6 +303,22 @@ export function AgentRail({
                     <span>{(message.elapsedMs / 1000).toFixed(1)}s</span>
                   ) : null}
                 </div>
+                {message.thinking ? (
+                  <details className="mb-1 rounded px-1.5 py-1 text-[10px]" style={{ background: FIELD_BG, opacity: 0.8 }}>
+                    <summary className="cursor-pointer text-muted-foreground">
+                      💭 思考过程（{message.thinking.length} 字）
+                    </summary>
+                    <div className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{message.thinking}</div>
+                  </details>
+                ) : null}
+                {message.gen ? (
+                  <details className="mb-1 rounded px-1.5 py-1 text-[10px]" style={{ background: FIELD_BG, opacity: 0.8 }}>
+                    <summary className="cursor-pointer text-muted-foreground">
+                      📝 生成过程（{message.gen.length} 字）
+                    </summary>
+                    <div className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap leading-relaxed">{message.gen}</div>
+                  </details>
+                ) : null}
                 {message.steps?.length ? (
                   <div className="mb-1 flex flex-col gap-0.5">
                     {message.steps.map((step, stepIndex) => (
