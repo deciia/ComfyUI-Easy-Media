@@ -53,6 +53,7 @@ export function AgentRail({
   resources,
   frameRate,
   ratio,
+  onApplyPlan,
   audioTracks = [],
 }: AgentRailProps) {
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
@@ -214,7 +215,18 @@ export function AgentRail({
               planResult: { segments: next.segments.length, seconds: next.total_seconds },
             })
           } else if (type === 'action') {
-            update({ text: `${textOf()}\n已执行：${String(event.label || event.action || '')}` })
+            const action = String(event.action || '')
+            if (action === 'apply_storyboard') {
+              const planNow = readWorkspace(projectKey).plan
+              if (planNow && onApplyPlan) {
+                const ok = onApplyPlan(planNow)
+                update({ text: `${textOf()}\n${ok ? '已应用到任务轨（可 Ctrl+Z 撤销）。' : '应用失败：请确认编辑器处于可用状态。'}` })
+              } else {
+                update({ text: `${textOf()}\n[错误] 当前没有可应用的分镜脚本。` })
+              }
+            } else {
+              update({ text: `${textOf()}\n已执行：${String(event.label || event.action || '')}` })
+            }
           } else if (type === 'error') {
             update({ status: 'failed', text: `[错误] ${String(event.message || '')}` })
           }
