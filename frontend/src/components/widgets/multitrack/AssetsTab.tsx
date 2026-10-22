@@ -23,7 +23,7 @@ export interface AssetsTabProps {
   subjects: WorkspaceSubject[]
   onSubjectsChange?: (next: WorkspaceSubject[]) => void
   resources: ProjectResource[]
-  onAddFromShared?: (item: { name: string; subfolder: string; kind: 'image' | 'audio' | 'video' }) => void
+  onAddFromShared?: (item: { name: string; subfolder: string; kind: 'image' | 'audio' | 'video' }) => ProjectResource | void
   onPatch?: (id: string, patch: Partial<ProjectResource>) => void
   onRemove?: (id: string) => void
   onCreateEmpty?: () => void
@@ -43,6 +43,11 @@ export function AssetsTab({
   const [resType, setResType] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
   const [leftTab, setLeftTab] = useState<'subject' | 'resource'>('subject')
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [childTab, setChildTab] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
+  const [selectedChildId, setSelectedChildId] = useState<string | null>(null)
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const descRef = useRef<HTMLTextAreaElement | null>(null)
 
   // 共享资源浏览器
   const [root, setRoot] = useState<'input' | 'output' | 'temp'>('input')
@@ -193,12 +198,81 @@ export function AssetsTab({
           删除主体
         </Button>
       </div>
-      <textarea
-        style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', lineHeight: 1.6 }}
-        placeholder="外观、身份、性格、与其它主体的关系…"
-        value={subject.description}
-        onChange={(event) => patchSubject(subject.id, { description: event.target.value })}
-      />
+      <div className="flex flex-col gap-1">
+        <textarea
+          ref={descRef}
+          style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', lineHeight: 1.6 }}
+          placeholder="外观、身份、性格、与其它主体的关系…（输入 @ 可引用已定义的主体/资源）"
+          value={subject.description}
+          onChange={(event) => {
+            const value = event.target.value
+            patchSubject(subject.id, { description: value })
+            const caret = event.target.selectionStart ?? value.length
+            const before = value.slice(0, caret)
+            const at = before.lastIndexOf('@')
+            if (at >= 0 && !/\s/.test(before.slice(at + 1))) {
+              setMentionQuery(before.slice(at + 1))
+              setMentionOpen(true)
+            } else {
+              setMentionOpen(false)
+            }
+          }}
+          onBlur={() => {
+            window.setTimeout(() => setMentionOpen(false), 150)
+            const mentions = Array.from(subject.description.matchAll(/<@([^>]+)>/g)).map((match) => match[1].trim())
+            if (mentions.length === 0) return
+            const childIds = new Set(subject.childResourceIds ?? [])
+            for (const name of mentions) {
+              const media = resources.find((item) => item.type !== 'Subject' && item.name === name)
+              if (media) childIds.add(media.id)
+            }
+            if (childIds.size !== (subject.childResourceIds ?? []).length) {
+              patchSubject(subject.id, { childResourceIds: Array.from(childIds) })
+            }
+          }}
+        />
+        {(() => {
+          const names = Array.from(subject.description.matchAll(/<@([^>]+)>/g)).map((match) => match[1].trim())
+          const unmatched = names.filter((name) => !subjects.some((item) => item.name === name) && !resources.some((item) => item.name === name))
+          if (unmatched.length === 0) return null
+          return <div className="text-[10px]" style={{ color: '#fbbf24' }}>未匹配引用：{unmatched.map((name) => `<@${name}>`).join('、')}</div>
+        })()}
+        {mentionOpen ? (
+          <div className="max-h-40 overflow-auto rounded border p-1 text-[11px]" style={{ borderColor: BORDER, background: FIELD_BG }}>
+            {(() => {
+              const candidates = [
+                ...subjects.filter((item) => item.id !== subject.id).map((item) => ({ name: item.name, kind: `主体·${item.type}` })),
+                ...resources.filter((item) => item.type !== 'Subject').map((item) => ({ name: item.name, kind: item.type })),
+              ].filter((item) => !mentionQuery || item.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+              if (candidates.length === 0) return <div className="px-1 text-muted-foreground">（没有匹配的主体/资源）</div>
+              return candidates.slice(0, 30).map((item) => (
+                <button
+                  key={`${item.kind}-${item.name}`}
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-white/10"
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    const textarea = descRef.current
+                    const value = subject.description
+                    const caret = textarea?.selectionStart ?? value.length
+                    const before = value.slice(0, caret)
+                    const at = before.lastIndexOf('@')
+                    const next = at >= 0
+                      ? `${value.slice(0, at)}<@${item.name}> ${value.slice(caret)}`
+                      : `${value}<@${item.name}> `
+                    patchSubject(subject.id, { description: next })
+                    setMentionOpen(false)
+                    setMentionQuery('')
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  <span className="shrink-0 text-[9px] text-muted-foreground">{item.kind}</span>
+                </button>
+              ))
+            })()}
+          </div>
+        ) : null}
+      </div>
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-muted-foreground">保留项（逗号分隔）</span>
         <input
@@ -209,34 +283,127 @@ export function AssetsTab({
           })}
         />
       </label>
-      <div
-        className="flex flex-col gap-1 rounded p-2"
-        style={{ border: `1px dashed ${dropTarget === 'subject' ? PRIMARY : BORDER}` }}
-        {...dropProps((event) => {
-          const shared = parseShared(event)
-          if (shared) {
-            onAddFromShared?.(shared)
-            return
+      <div className="flex flex-col gap-2">
+        <span className="text-[11px] text-muted-foreground">引用资源（可把左侧资源卡或右侧共享资源拖到对应类型行）</span>
+        {(['Picture', 'Audio', 'Video'] as const).map((type) => {
+          const children = (subject.childResourceIds ?? [])
+            .map((id) => resources.find((item) => item.id === id))
+            .filter((item): item is ProjectResource => Boolean(item) && item!.type === type)
+          const label = { Picture: '图片', Audio: '音频', Video: '视频' }[type]
+          return (
+            <div
+              key={type}
+              className="flex flex-col gap-1 rounded p-1.5"
+              style={{ border: `1px dashed ${dropTarget === `child-${type}` ? PRIMARY : BORDER}` }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDropTarget(`child-${type}`)
+              }}
+              onDragLeave={() => setDropTarget(null)}
+              onDrop={(event) => {
+                setDropTarget(null)
+                event.preventDefault()
+                const shared = parseShared(event)
+                if (shared) {
+                  const created = onAddFromShared?.(shared)
+                  const createdId = (created as ProjectResource | undefined)?.id
+                  if (createdId) bindChild(subject.id, createdId)
+                  return
+                }
+                const id = event.dataTransfer.getData('text/easymedia-resource-id')
+                const target = id ? resources.find((item) => item.id === id) : undefined
+                if (target && target.type === type) bindChild(subject.id, id)
+              }}
+            >
+              <button
+                type="button"
+                className="flex items-center gap-2 text-left text-[11px]"
+                onClick={() => setChildTab(type)}
+              >
+                <span className="rounded px-1.5 py-0.5" style={{ border: `1px solid ${childTab === type ? PRIMARY : BORDER}`, color: childTab === type ? PRIMARY : undefined }}>
+                  {label} {children.length}
+                </span>
+                <span className="text-[10px] text-muted-foreground">拖到此行添加{label}</span>
+              </button>
+              <div className="flex flex-wrap items-center gap-1">
+                {children.map((child) => {
+                  const active = selectedChildId === child.id
+                  return (
+                    <span key={child.id} className="flex flex-col items-center gap-0.5">
+                      <button
+                        type="button"
+                        title={`${child.name}（点击查看/编辑保留项）`}
+                        className="flex h-12 w-12 items-center justify-center overflow-hidden rounded"
+                        style={{ border: `1px solid ${active ? PRIMARY : BORDER}`, background: FIELD_BG }}
+                        onClick={() => {
+                          setChildTab(type)
+                          setSelectedChildId(child.id)
+                        }}
+                      >
+                        {type === 'Picture' && child.sharedPath ? (
+                          <img
+                            src={`/view?filename=${encodeURIComponent(child.imageFile ?? child.name)}&type=${child.sharedRoot ?? 'input'}${child.subfolder ? `&subfolder=${encodeURIComponent(child.subfolder)}` : ''}`}
+                            alt={child.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-[10px]">{type === 'Audio' ? '♪' : type === 'Video' ? '▶' : '🖼'}</span>
+                        )}
+                      </button>
+                      <span className="w-12 truncate text-center text-[9px] text-muted-foreground">{child.name}</span>
+                    </span>
+                  )
+                })}
+                <BindingPicker
+                  resources={resources.filter((item) => item.type === type)}
+                  selected={subject.childResourceIds ?? []}
+                  onAdd={(id) => bindChild(subject.id, id)}
+                />
+              </div>
+            </div>
+          )
+        })}
+
+        {(() => {
+          const activeChild = (subject.childResourceIds ?? [])
+            .map((id) => resources.find((item) => item.id === id))
+            .find((item): item is ProjectResource => Boolean(item) && item!.id === selectedChildId)
+          if (!activeChild) {
+            return <span className="text-[10px] text-muted-foreground">点上方缩略图可编辑该资源的定义/保留项。</span>
           }
-          const id = event.dataTransfer.getData('text/easymedia-resource-id')
-          if (id) bindChild(subject.id, id)
-        }, true)}
-      >
-        <span className="text-[11px] text-muted-foreground">引用资源（可把左侧资源或右侧共享资源拖到这里）</span>
-        <div className="flex flex-wrap items-center gap-1">
-          {(subject.childResourceIds ?? []).length === 0 ? (
-            <span className="text-[10px] text-muted-foreground">（未引用）</span>
-          ) : (subject.childResourceIds ?? []).map((childId) => {
-            const child = resources.find((item) => item.id === childId)
-            return (
-              <span key={childId} className="flex items-center gap-1 rounded-full px-1.5 text-[10px]" style={{ border: `1px solid ${BORDER}` }} title={child ? `${child.type} · ${child.relationship}` : childId}>
-                {child ? `${child.type}：${child.name}` : childId}
-                <button type="button" className="text-muted-foreground" onClick={() => patchSubject(subject.id, { childResourceIds: (subject.childResourceIds ?? []).filter((id) => id !== childId) })}>×</button>
-              </span>
-            )
-          })}
-        </div>
-        <BindingPicker resources={resources} selected={subject.childResourceIds ?? []} onAdd={(id) => bindChild(subject.id, id)} />
+          return (
+            <div className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}`, background: FIELD_BG }}>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="min-w-0 flex-1 truncate">{activeChild.type}：{activeChild.name}</span>
+                <button
+                  type="button"
+                  className="rounded px-1 text-[10px] text-muted-foreground"
+                  style={{ border: `1px solid ${BORDER}` }}
+                  onClick={() => patchSubject(subject.id, { childResourceIds: (subject.childResourceIds ?? []).filter((id) => id !== activeChild.id) })}
+                >
+                  解除引用
+                </button>
+              </div>
+              <input
+                style={{ ...fieldStyle, padding: '2px 4px' }}
+                placeholder="保留项（该资源在这段视频里要保持什么，逗号分隔）"
+                value={(activeChild.retention ?? []).join('，')}
+                onChange={(event) => onPatch?.(activeChild.id, {
+                  retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+                })}
+              />
+              <select
+                style={{ ...fieldStyle, padding: '2px 4px' }}
+                value={activeChild.relationship}
+                onChange={(event) => onPatch?.(activeChild.id, { relationship: event.target.value })}
+              >
+                {relationshipOptions(activeChild.type).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          )
+        })()}
       </div>
     </div>
   ) : resource ? (
@@ -668,7 +835,7 @@ export function AssetsTab({
   )
 }
 
-function BindingPicker({
+export function BindingPicker({
   resources,
   selected,
   onAdd,

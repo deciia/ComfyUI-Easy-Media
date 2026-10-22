@@ -549,9 +549,9 @@ export function PromptEnhancerModal({
     writeWorkspace(workspaceKey, { resources: nextResources })
   }
 
-  const onAddSharedResource = (item: { name: string; subfolder: string; kind: 'image' | 'audio' | 'video' }) => {
+  const onAddSharedResource = (item: { name: string; subfolder: string; kind: 'image' | 'audio' | 'video' }) => (
     addResourceFromShared(workspaceKey, item)
-  }
+  )
   const onPatchProjectResource = (id: string, patch: Partial<ProjectResource>) => {
     patchResource(workspaceKey, id, patch)
   }
