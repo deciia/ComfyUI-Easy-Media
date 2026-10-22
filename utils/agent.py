@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""导演工作台的项目智能体：一次决策 + 服务端执行工具，SSE 推进过程与产物。"""
+"""导演工作台的项目智能体：决策 + 流式规划（思考/正文实时透传，不设总时限）。"""
 from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
 
-from .plan_segments import PlanError, generate_plan, normalize_plan
+from .plan_segments import PlanError, build_plan_messages, plan_from_response
 
 
 class AgentError(RuntimeError):
@@ -165,12 +165,66 @@ def _sse(event: dict) -> str:
     return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
 
 
+async def _stream_plan(payload: dict, config: dict | None) -> AsyncIterator[tuple[str, str]]:
+    """流式调用规划模型；yield ('think'|'content', delta)。不设总时限。"""
+    from .prompt_enhancer import PromptEnhancerError, resolve_settings
+
+    settings = resolve_settings(config)
+    messages = build_plan_messages(payload)
+    body = {
+        "model": settings.model,
+        "messages": messages,
+        "temperature": 0.8,
+        "stream": True,
+    }
+    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+    import aiohttp
+
+    # 不限总时长：连接保持即持续产出；仅防呆——30 秒连不上 / 300 秒无任何字节才断
+    timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=300)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(settings.base_url, json=body, headers=headers) as response:
+                if response.status >= 400:
+                    raw = await response.text()
+                    raise AgentError(f"规划请求失败（{response.status}）：{raw[:300]}")
+                buffer = ""
+                async for chunk in response.content.iter_any():
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            return
+                        try:
+                            item = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = item.get("choices") or []
+                        delta = (choices[0].get("delta") or {}) if choices else {}
+                        reasoning = delta.get("reasoning_content")
+                        if reasoning:
+                            yield ("think", str(reasoning))
+                        content = delta.get("content")
+                        if content:
+                            yield ("content", str(content))
+    except AgentError:
+        raise
+    except PromptEnhancerError as error:
+        raise AgentError(str(error)) from error
+    except Exception as error:  # noqa: BLE001
+        raise AgentError(f"流式规划异常（{type(error).__name__}）：{error}") from error
+
+
 async def run_agent(
     messages: list[dict],
     context: dict | None = None,
     config: dict | None = None,
 ) -> AsyncIterator[str]:
-    """产出 SSE 文本流：step / text / plan / action / done / error。"""
+    """产出 SSE 文本流：step / think / gen / text / plan / action / done / error。"""
     try:
         yield _sse({"type": "step", "label": "理解需求并选择动作"})
         decision = await _decide(messages, context, config)
@@ -187,8 +241,6 @@ async def run_agent(
                 "ratio": params.get("ratio"),
                 "style": params.get("style"),
                 "frame_rate": (context or {}).get("frame_rate") or 24,
-                # 长文案分镜实测需要 4–10 分钟，给足上限（generate_plan 夹取 ≤600）
-                "timeout_seconds": 600,
             }
             if action == "revise_storyboard":
                 payload["previous_plan"] = (context or {}).get("plan")
@@ -197,9 +249,18 @@ async def run_agent(
             else:
                 if not payload["brief"]:
                     raise AgentError("缺少故事想法")
-            yield _sse({"type": "step", "label": "调用规划模型（长文案约 3–10 分钟，可点停止）"})
-            plan = await generate_plan(payload, config)
+            yield _sse({"type": "step", "label": "调用规划模型（流式生成，不限时，可点停止）"})
+            raw = ""
+            async for kind, delta in _stream_plan(payload, config):
+                if kind == "think":
+                    yield _sse({"type": "think", "text": delta})
+                else:
+                    raw += delta
+                    yield _sse({"type": "gen", "text": delta})
+            if not raw.strip():
+                raise AgentError("规划模型没有返回内容")
             yield _sse({"type": "step", "label": "解析并校验分镜 JSON"})
+            plan = plan_from_response(raw, payload["frame_rate"])
             yield _sse({"type": "plan", "plan": plan})
             yield _sse({"type": "text", "text": reply or f"分镜已生成：{len(plan.get('segments') or [])} 段。"})
             yield _sse({"type": "done"})

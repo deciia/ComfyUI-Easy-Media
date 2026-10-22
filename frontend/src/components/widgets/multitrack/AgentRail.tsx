@@ -185,12 +185,28 @@ export function AgentRail({
                   }
                 : message
             )))
+          } else if (type === 'think') {
+            patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+              message.id === replyId
+                ? { ...message, thinking: `${message.thinking ?? ''}${String(event.text || '')}` }
+                : message
+            )))
+          } else if (type === 'gen') {
+            patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+              message.id === replyId
+                ? { ...message, text: `${message.text}${String(event.text || '')}` }
+                : message
+            )))
           } else if (type === 'text') {
             update({ text: `${textOf()}${String(event.text || '')}` })
           } else if (type === 'plan') {
             const next = event.plan as StoryboardPlanLike
             writeWorkspace(projectKey, { plan: next })
-            update({ planResult: { segments: next.segments.length, seconds: next.total_seconds } })
+            update({
+              text: '',
+              thinking: undefined,
+              planResult: { segments: next.segments.length, seconds: next.total_seconds },
+            })
           } else if (type === 'action') {
             update({ text: `${textOf()}\n已执行：${String(event.label || event.action || '')}` })
           } else if (type === 'error') {
