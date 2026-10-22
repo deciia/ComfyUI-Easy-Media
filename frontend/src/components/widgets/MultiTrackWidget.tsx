@@ -196,6 +196,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const scaledTimelineWidth = timelineWidth * zoom
   const canvasScale = useCanvasScale(app)
   const resolutionInput = useMultiTrackResolutionInput(node)
+  const resolutionRef = useRef(resolutionInput)
+  resolutionRef.current = resolutionInput
   // React's wheel listener can be passive; cancel native scrolling before moving the timeline.
   // useLayoutEffect attaches the non-passive listener before paint so the very first wheel
   // gesture on the timeline is intercepted rather than falling through to native scroll.
@@ -1278,10 +1280,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
     const registry = globalThis as unknown as {
       __easyMediaOpenWorkspace?: () => void
-      __easyMediaTimelineSummary?: () => { audio: string[]; video: string[] }
+      __easyMediaTimelineSummary?: () => { ratio: string; audio: string[]; video: string[] }
     }
     registry.__easyMediaOpenWorkspace = openWorkspace
     registry.__easyMediaTimelineSummary = () => ({
+      ratio: String(resolutionRef.current?.aspect_ratio || ''),
       audio: data.tracks
         .filter((track) => track.type === 'audio')
         .flatMap((track) => track.segments.map((segment) => String(((segment.content as unknown as { file_name?: string; user_prompt?: string })?.file_name || (segment.content as unknown as { user_prompt?: string })?.user_prompt || '').split('\n')[0].slice(0, 40))))

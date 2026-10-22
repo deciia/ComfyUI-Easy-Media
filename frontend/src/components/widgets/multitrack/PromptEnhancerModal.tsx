@@ -1129,7 +1129,10 @@ export function PromptEnhancerModal({
               projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
               tab={workspaceTab}
               frameRate={workspaceFrameRate}
-              ratio={'16:9'}
+              ratio={(() => {
+                const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
+                try { return summary?.().ratio || '16:9' } catch { return '16:9' }
+              })()}
               segments={workspaceSegments.map((segment, index) => {
                 const content = segment.content as unknown as { user_prompt?: string; images?: Array<{ file_name?: string; name?: string }> }
                 const promptText = String(content?.user_prompt ?? '')
