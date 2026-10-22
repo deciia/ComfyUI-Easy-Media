@@ -417,8 +417,8 @@ export function AssetsTab({
         )}
       </div>
 
-      {/* 列2：详情 */}
-      <div className="flex w-[340px] shrink-0 flex-col gap-2 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
+      {/* 列2：详情（弹性：宽度 = 总宽 − 左列 − 共享资源列） */}
+      <div className="flex min-w-[240px] flex-1 flex-col gap-2 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
         <div className="text-[11px] text-muted-foreground">详情</div>
         {detail}
       </div>
