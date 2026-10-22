@@ -273,8 +273,7 @@ export function PlanPreview({
                             duration_seconds: Math.min(15, Math.max(0.5, Number(editDraft.duration) || 4)),
                             summary: editDraft.summary,
                             director_note: editDraft.directorNote,
-        settings: { contextMode: editDraft.contextMode, refImageSize: editDraft.refImageSize, taskType: editDraft.taskType },
-      } as unknown as typeof seg)
+                            settings: { contextMode: editDraft.contextMode, refImageSize: editDraft.refImageSize, taskType: editDraft.taskType },
                           }
                         : seg
                     )))
