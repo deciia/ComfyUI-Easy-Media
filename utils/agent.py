@@ -187,6 +187,8 @@ async def run_agent(
                 "ratio": params.get("ratio"),
                 "style": params.get("style"),
                 "frame_rate": (context or {}).get("frame_rate") or 24,
+                # 长文案分镜实测需要 4–10 分钟，给足上限（generate_plan 夹取 ≤600）
+                "timeout_seconds": 600,
             }
             if action == "revise_storyboard":
                 payload["previous_plan"] = (context or {}).get("plan")
@@ -195,7 +197,7 @@ async def run_agent(
             else:
                 if not payload["brief"]:
                     raise AgentError("缺少故事想法")
-            yield _sse({"type": "step", "label": "调用规划模型（分镜脚本，约 1–3 分钟）"})
+            yield _sse({"type": "step", "label": "调用规划模型（长文案约 3–10 分钟，可点停止）"})
             plan = await generate_plan(payload, config)
             yield _sse({"type": "step", "label": "解析并校验分镜 JSON"})
             yield _sse({"type": "plan", "plan": plan})
