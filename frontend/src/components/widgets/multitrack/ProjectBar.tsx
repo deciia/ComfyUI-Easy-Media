@@ -79,7 +79,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const switchProjectRef = useRef<(name: string) => Promise<void>>(async () => {})
   switchProjectRef.current = handleSelect
   const projectListRef = useRef<string[]>([])
-  projectListRef.current = projects.map((item) => item.project_name)
+  projectListRef.current = projects.filter((item) => item.has_timeline).map((item) => item.project_name)
   const nameRef = useRef('')
   nameRef.current = currentName
   useEffect(() => {
