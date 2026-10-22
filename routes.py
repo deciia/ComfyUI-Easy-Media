@@ -1178,6 +1178,8 @@ async def handle_resources_input(request: web.Request) -> web.Response:
         if root not in ("input", "output", "temp"):
             root = "input"
         mode = str(request.query.get("mode") or "flat").lower()
+        if mode in ("folders", "browse", "dir"):
+            mode = "browse"
         sub_dir = str(request.query.get("dir") or "").strip().strip("/\\")
         kind = str(request.query.get("kind") or "all").lower()
         query = str(request.query.get("query") or "").strip().lower()
