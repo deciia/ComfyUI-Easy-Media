@@ -111,7 +111,7 @@ export function PlanPreview({
   const [confirmApply, setConfirmApply] = useState(false)
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const [editDraft, setEditDraft] = useState<{ name: string; beat: string; duration: string; summary: string; directorNote: string }>({ name: '', beat: '', duration: '', summary: '', directorNote: '' })
+  const [editDraft, setEditDraft] = useState<{ name: string; beat: string; duration: string; summary: string; directorNote: string; contextMode: string; refImageSize: string; taskType: string }>({ name: '', beat: '', duration: '', summary: '', directorNote: '', contextMode: 'shot', refImageSize: '', taskType: '' })
 
   const startEdit = (index: number, segment: { name?: string; beat?: string; duration_seconds?: number; summary?: string; director_note?: string }) => {
     setEditingIndex(index)
@@ -121,6 +121,9 @@ export function PlanPreview({
       duration: String(segment.duration_seconds ?? 4),
       summary: String(segment.summary ?? ''),
       directorNote: String(segment.director_note ?? ''),
+      contextMode: String((segment as unknown as { settings?: { contextMode?: string } }).settings?.contextMode ?? 'shot'),
+      refImageSize: String((segment as unknown as { settings?: { refImageSize?: string } }).settings?.refImageSize ?? ''),
+      taskType: String((segment as unknown as { settings?: { taskType?: string } }).settings?.taskType ?? ''),
     })
   }
   return (
@@ -236,6 +239,29 @@ export function PlanPreview({
                 </div>
                 <textarea style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }} value={editDraft.summary} placeholder="本段概要" onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })} />
                 <textarea style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }} value={editDraft.directorNote} placeholder="导演说明（可选）" onChange={(e) => setEditDraft({ ...editDraft, directorNote: e.target.value })} />
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                    <label className="flex items-center gap-1">衔接
+                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.contextMode} onChange={(event) => setEditDraft({ ...editDraft, contextMode: event.target.value })}>
+                        <option value="shot">shot（独立镜头）</option>
+                        <option value="context">context（带上一段上下文）</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1">参考图
+                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.refImageSize} onChange={(event) => setEditDraft({ ...editDraft, refImageSize: event.target.value })}>
+                        <option value="">跟随脚本</option>
+                        <option value="match">match</option>
+                        <option value="max">max</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1">任务
+                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.taskType} onChange={(event) => setEditDraft({ ...editDraft, taskType: event.target.value })}>
+                        <option value="">跟随脚本</option>
+                        <option value="R2V">R2V</option>
+                        <option value="T2V">T2V</option>
+                        <option value="I2V">I2V</option>
+                      </select>
+                    </label>
+                  </div>
                 <div className="flex gap-2">
                   <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => {
                     onMutateSegments?.((segs) => segs.map((seg, i) => (
@@ -247,6 +273,8 @@ export function PlanPreview({
                             duration_seconds: Math.min(15, Math.max(0.5, Number(editDraft.duration) || 4)),
                             summary: editDraft.summary,
                             director_note: editDraft.directorNote,
+        settings: { contextMode: editDraft.contextMode, refImageSize: editDraft.refImageSize, taskType: editDraft.taskType },
+      } as unknown as typeof seg)
                           }
                         : seg
                     )))
