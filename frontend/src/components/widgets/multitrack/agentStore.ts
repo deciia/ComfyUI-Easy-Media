@@ -12,6 +12,7 @@ export interface AgentMessage {
   role: 'user' | 'assistant' | 'system'
   text: string
   thinking?: string
+  gen?: string
   steps?: AgentStep[]
   status?: 'running' | 'done' | 'failed'
   elapsedMs?: number
