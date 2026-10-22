@@ -364,10 +364,25 @@ export function PromptEnhancerModal({
   const t = useT()
   const [brief, setBrief] = useState(initialBrief)
   const [draftPrompt, setDraftPrompt] = useState('')
-  const [finalDraft, setFinalDraft] = useState('')
+  const [finalA, setFinalA] = useState('')
+  const [finalB, setFinalB] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
   const [abTab, setAbTab] = useState<'a' | 'b'>('a')
   const activePrompt = abTab === 'a' ? brief : draftPrompt
+  const finalDraft = abTab === 'a' ? finalA : finalB
+  const setFinalDraft = (value: string) => (abTab === 'a' ? setFinalA(value) : setFinalB(value))
+  const finalStoreKey = `easy-media-final-${abTab}:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(finalStoreKey)
+      if (raw !== null) (abTab === 'a' ? setFinalA(raw) : setFinalB(raw))
+    } catch { /* ignore */ }
+    // 仅在段或变体切换时加载
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalStoreKey])
+  useEffect(() => {
+    try { window.localStorage.setItem(finalStoreKey, finalDraft) } catch { /* ignore */ }
+  }, [finalDraft, finalStoreKey])
   const draftStoreKey = `easy-media-brief-b:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
   useEffect(() => {
     try {
@@ -1648,7 +1663,7 @@ export function PromptEnhancerModal({
                     referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
                     onChangePrompt={(next) => setFinalDraft(next)}
                   />
-                  <span className="text-[11px] text-neutral-400">最终提示词（会保存到任务轨）</span>
+                  <span className="text-[11px] text-neutral-400">最终提示词 {abTab === 'a' ? 'A' : 'B'}（会保存到任务轨对应 A/B 用户提示词）</span>
                   <div className="min-h-[160px] shrink-0 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
                     <PromptContentEditor
                       value={finalDraft || finalPrompt}
