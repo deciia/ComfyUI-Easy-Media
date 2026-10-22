@@ -82,6 +82,7 @@ export function PlanPreview({
   plan,
   onBack,
   onSaveDraft,
+  onOpenEnhance,
   saved,
   onApply,
   editable = false,
@@ -92,8 +93,9 @@ export function PlanPreview({
   importedNote,
 }: {
   plan: StoryboardPlan
-  onBack: () => void
+  onBack?: () => void
   onSaveDraft: () => void
+  onOpenEnhance?: () => void
   saved: boolean
   onApply?: () => boolean
   /** 手动编辑：传入后段支持增删改/排序 */
@@ -128,15 +130,16 @@ export function PlanPreview({
         </span>
         {plan.genre ? <span className="rounded border px-1 text-[10px]" style={{ borderColor: BORDER }}>{plan.genre}</span> : null}
         <span className="ml-auto" />
-        <Button size="sm" variant="secondary" onClick={onBack}>返回编辑</Button>
-        {onImportSubjects ? (
-          <Button size="sm" variant="secondary" onClick={onImportSubjects}>导入主体到「主体与资源」</Button>
+        {onImportSubjects || onImportResources ? (
+          <Button size="sm" variant="secondary" onClick={() => { onImportSubjects?.(); onImportResources?.() }}>
+            同步到主体与资源
+          </Button>
         ) : null}
-        {onImportResources ? (
-          <Button size="sm" variant="secondary" onClick={onImportResources}>导入资源需求到「主体与资源」</Button>
+        {onOpenEnhance ? (
+          <Button size="sm" variant="secondary" onClick={onOpenEnhance}>→ 提示词增强</Button>
         ) : null}
         <Button size="sm" variant="secondary" onClick={onSaveDraft} disabled={saved}>
-          {saved ? '已保存为草稿' : '保存为草稿'}
+          {saved ? '已保存' : '保存草稿'}
         </Button>
         {onApply ? (
         <Button

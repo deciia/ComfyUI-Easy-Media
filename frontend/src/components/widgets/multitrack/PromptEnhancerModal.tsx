@@ -1254,6 +1254,7 @@ export function PromptEnhancerModal({
                 setPlannedResources(next)
               }}
               onOpenAssets={() => setWorkspaceTab('assets')}
+              onOpenEnhance={() => setWorkspaceTab('enhance')}
               onApplyPlan={(items) => {
                 const registry = globalThis as unknown as {
                   __easyMediaApplyStoryboard?: (value: typeof items) => boolean

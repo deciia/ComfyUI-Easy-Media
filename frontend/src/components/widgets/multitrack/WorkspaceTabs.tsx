@@ -33,6 +33,7 @@ export interface StoryboardTabProps {
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
   onOpenAssets?: () => void
+  onOpenEnhance?: () => void
   planning?: boolean
   projectKey?: string
   onPlan?: any
@@ -91,6 +92,7 @@ export function StoryboardTab({
   onImportPlanSubjects,
   onImportPlanResources,
   onOpenAssets,
+  onOpenEnhance,
 }: StoryboardTabProps) {
   const projectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
@@ -139,6 +141,7 @@ export function StoryboardTab({
           setImportedNote(`保存失败：${String(saveError)}`)
         }
       }}
+      onOpenEnhance={onOpenEnhance}
       onImportSubjects={onImportPlanSubjects ? () => {
         onImportPlanSubjects(value)
         setImportedNote('已把主体导入「主体与资源」页')
@@ -296,7 +299,7 @@ export function StoryboardTab({
             style={{ border: `1px dashed ${BORDER}` }}
             onClick={() => setPlanFocus(null)}
           >
-            查看整版预览
+            整版预览
           </button>
         </>
       ) : null}
