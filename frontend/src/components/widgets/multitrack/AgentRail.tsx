@@ -29,7 +29,7 @@ const fieldStyle: React.CSSProperties = {
 const TAB_HINTS: Record<string, string> = {
   storyboard: '可以让我生成分镜、改分镜（拆段/合并/改台词/调节奏），或把分镜应用到任务轨。',
   subjects: '可以让我从分镜推导主体、补描述与保留项、检查跨段一致性。',
-  assets: '可以让我按分镜列资源需求、匹配 input 素材、发起生成并挂到片段。',
+  assets: '可以让我按分镜列资源需求、匹配 input/output 素材、补缺件；绑定到分镜段在「提示词增强」里做。',
   enhance: '可以让我把某一段分镜写成模型提示词。',
 }
 

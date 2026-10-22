@@ -32,6 +32,7 @@ export interface StoryboardTabProps {
   onApplyPlan?: (items: Array<{ name: string; durationFrames: number; brief: string; prompt?: string }>) => boolean
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
+  onOpenAssets?: () => void
   planning?: boolean
   projectKey?: string
   onPlan?: any
@@ -89,6 +90,7 @@ export function StoryboardTab({
   error = '',
   onImportPlanSubjects,
   onImportPlanResources,
+  onOpenAssets,
 }: StoryboardTabProps) {
   const projectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
@@ -139,11 +141,11 @@ export function StoryboardTab({
       }}
       onImportSubjects={onImportPlanSubjects ? () => {
         onImportPlanSubjects(value)
-        setImportedNote('已导入主体到「主体定义」页')
+        setImportedNote('已把主体导入「主体与资源」页')
       } : undefined}
       onImportResources={onImportPlanResources ? () => {
         onImportPlanResources(value)
-        setImportedNote('已把资源需求导入「资源与生成」页')
+        setImportedNote('已把资源需求导入「主体与资源」页（缺件需补素材）')
       } : undefined}
       editable
       onMutateSegments={(fn) => mutatePlanSegments(projectKey, frameRate, fn)}
@@ -206,16 +208,48 @@ export function StoryboardTab({
           ))}
         </div>
       ) : null}
-      {(planSegment.resources ?? []).length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1 text-[10px]">
-          <span className="text-muted-foreground">资源：</span>
-          {(planSegment.resources as Array<{ kind?: string; name: string }>).map((resource, index) => (
-            <span key={`${resource.kind}-${resource.name}-${index}`} className="rounded-full px-1.5" style={{ border: `1px solid ${BORDER}` }}>
-              {resource.kind}:{resource.name}
+      {(planSegment.resources ?? []).length > 0 ? (() => {
+        const pool = readWorkspace(projectKey).resources ?? []
+        const statusOf = (name: string) => {
+          const hit = pool.find((item) => item.type !== 'Subject' && item.name === name)
+          if (!hit) return 'absent'
+          return hit.status === 'ready' ? 'ready' : 'need'
+        }
+        const entries = planSegment.resources as Array<{ kind?: string; name: string }>
+        const readyCount = entries.filter((item) => statusOf(item.name) === 'ready').length
+        const missingCount = entries.filter((item) => statusOf(item.name) !== 'ready').length
+        return (
+          <div className="flex flex-wrap items-center gap-1 text-[10px]">
+            <span className="text-muted-foreground">
+              资源（池中 ✓{readyCount} · 缺 {missingCount}）：
             </span>
-          ))}
-        </div>
-      ) : null}
+            {entries.map((resource, index) => {
+              const status = statusOf(resource.name)
+              const color = status === 'ready' ? PRIMARY : status === 'need' ? '#fbbf24' : undefined
+              return (
+                <span
+                  key={`${resource.kind}-${resource.name}-${index}`}
+                  className="rounded-full px-1.5"
+                  style={{ border: `1px solid ${color ?? BORDER}`, color }}
+                  title={status === 'ready' ? '已在资源池且已绑定素材' : status === 'need' ? '在资源池但缺素材' : '还没加入资源池'}
+                >
+                  {status === 'ready' ? '✓' : status === 'need' ? '缺' : '·'}{resource.kind}:{resource.name}
+                </span>
+              )
+            })}
+            {onOpenAssets ? (
+              <button
+                type="button"
+                className="ml-1 rounded px-1.5 py-0.5"
+                style={{ border: `1px solid ${BORDER}` }}
+                onClick={onOpenAssets}
+              >
+                去「主体与资源」补件
+              </button>
+            ) : null}
+          </div>
+        )
+      })() : null}
     </div>
   ) : null
 
@@ -354,7 +388,7 @@ export function StoryboardTab({
           <div className="flex max-w-[460px] flex-col items-center gap-3 text-[12px] leading-relaxed text-muted-foreground">
             <div className="text-center">
               可以在右侧让助手生成分镜，也可以直接手动新建：
-              <br />分镜会保存为项目草稿，之后导入主体/资源需求，最后用标题栏保存按钮落到任务轨。
+              <br />分镜会保存为项目草稿；导入主体/资源需求到「主体与资源」补齐素材后，再用标题栏保存按钮落到任务轨。
             </div>
             <Button size="sm" variant="secondary" onClick={() => createEmptyPlan(projectKey, frameRate)}>
               ✚ 手动新建分镜

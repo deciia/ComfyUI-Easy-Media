@@ -130,10 +130,10 @@ export function PlanPreview({
         <span className="ml-auto" />
         <Button size="sm" variant="secondary" onClick={onBack}>返回编辑</Button>
         {onImportSubjects ? (
-          <Button size="sm" variant="secondary" onClick={onImportSubjects}>导入主体到 ②</Button>
+          <Button size="sm" variant="secondary" onClick={onImportSubjects}>导入主体到「主体与资源」</Button>
         ) : null}
         {onImportResources ? (
-          <Button size="sm" variant="secondary" onClick={onImportResources}>导入资源需求到 ③</Button>
+          <Button size="sm" variant="secondary" onClick={onImportResources}>导入资源需求到「主体与资源」</Button>
         ) : null}
         <Button size="sm" variant="secondary" onClick={onSaveDraft} disabled={saved}>
           {saved ? '已保存为草稿' : '保存为草稿'}
