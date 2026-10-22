@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
-import { ResourcesTab, SubjectsTab, type WorkspaceSubject } from './WorkspacePanels'
+import { type WorkspaceSubject } from './WorkspacePanels'
+import { AssetsTab } from './AssetsTab'
 import { AgentRail } from './AgentRail'
 import {
   addResourceFromShared,
@@ -1047,8 +1048,7 @@ export function PromptEnhancerModal({
         <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
           {([
             ['storyboard', '分镜编排'],
-            ['subjects', '主体'],
-            ['assets', '项目资源'],
+                        ['assets', '主体与资源'],
             ['enhance', '提示词增强'],
           ] as Array<[WorkspaceTab, string]>).map(([key, label]) => (
             <button
@@ -1237,10 +1237,10 @@ export function PromptEnhancerModal({
                 }
               }}
             />
-            ) : workspaceTab === 'subjects' ? (
-              <SubjectsTab subjects={workspaceSubjects} onChange={setWorkspaceSubjects} resources={resources} />
             ) : (
-              <ResourcesTab
+              <AssetsTab
+                subjects={workspaceSubjects}
+                onSubjectsChange={(next) => setWorkspaceSubjects(next)}
                 resources={resources}
                 onAddFromShared={onAddSharedResource}
                 onPatch={onPatchProjectResource}
