@@ -60,6 +60,7 @@ export interface ProjectResource {
   source: 'shared' | 'generated' | 'manual'
   sharedPath?: string
   subfolder?: string
+  sharedRoot?: 'input' | 'output' | 'temp'
   generator?: { workflow?: string; brief?: string; seed?: number }
   createdAt: number
   updatedAt: number
@@ -280,7 +281,7 @@ export function removeResource(key: string, id: string) {
 /** 从共享资源新建一条项目资源（图片/音频/视频） */
 export function addResourceFromShared(
   key: string,
-  item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video' },
+  item: { name: string; subfolder?: string; kind: 'image' | 'audio' | 'video'; root?: 'input' | 'output' | 'temp' },
   patch: Partial<ProjectResource> = {},
 ): ProjectResource {
   const type = kindToType(item.kind)
@@ -294,6 +295,7 @@ export function addResourceFromShared(
     retention: patch.retention ?? [],
     status: 'ready',
     source: 'shared',
+    sharedRoot: item.root ?? 'input',
     sharedPath: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
     subfolder: item.subfolder,
     imageFile: type === 'Picture' ? item.name : undefined,

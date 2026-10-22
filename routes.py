@@ -1162,14 +1162,23 @@ def _classify_input_file(suffix: str) -> str | None:
 
 @PromptServer.instance.routes.get("/easy-media/resources/input")
 async def handle_resources_input(request: web.Request) -> web.Response:
-    """列出 ComfyUI/input 下的共享资源（只读，按需分页）。
+    """列出 ComfyUI 共享资源（input/output/temp，只读）。
 
-    查询参数：kind（all/image/audio/video）、query（文件名过滤）、limit/offset。
-    不预先计算 sha256；被引用时再按需计算。
+    查询参数：
+      root   = input | output | temp（白名单，默认 input）
+      dir    = 子目录（相对 root，浏览模式用）
+      mode   = flat（递归全部文件，默认）| browse（只看当前目录，返回 folders）
+      kind   = all | image | audio | video
+      query / sort / limit / offset
     """
     try:
         from urllib.parse import quote
 
+        root = str(request.query.get("root") or "input").lower()
+        if root not in ("input", "output", "temp"):
+            root = "input"
+        mode = str(request.query.get("mode") or "flat").lower()
+        sub_dir = str(request.query.get("dir") or "").strip().strip("/\\")
         kind = str(request.query.get("kind") or "all").lower()
         query = str(request.query.get("query") or "").strip().lower()
         sort = str(request.query.get("sort") or "name").lower()
@@ -1182,58 +1191,125 @@ async def handle_resources_input(request: web.Request) -> web.Response:
         except (TypeError, ValueError):
             offset = 0
 
-        base = Path(folder_paths.get_input_directory())
+        if root == "input":
+            base = Path(folder_paths.get_input_directory())
+        elif root == "output":
+            base = Path(folder_paths.get_output_directory())
+        else:
+            base = Path(folder_paths.get_temp_directory())
+        base = base.resolve()
+
+        current = (base / sub_dir).resolve() if sub_dir else base
+        if not str(current).startswith(str(base)) or not current.is_dir():
+            current = base
+            sub_dir = ""
+
+        def _url(name: str, subfolder: str) -> str:
+            url = f"/view?filename={quote(name)}&type={root}"
+            if subfolder:
+                url += f"&subfolder={quote(subfolder)}"
+            return url
+
+        def _rel_subfolder(path: Path) -> str:
+            relative = path.relative_to(base)
+            return "" if len(relative.parts) == 1 else "/".join(relative.parts[:-1])
+
         items: list[dict] = []
-        matched = 0
+        folders: list[dict] = []
+
+        if mode == "browse":
+            for child in sorted(current.iterdir(), key=lambda entry: entry.name.lower()):
+                if child.is_dir():
+                    folders.append({
+                        "name": child.name,
+                        "path": (f"{sub_dir}/{child.name}" if sub_dir else child.name),
+                    })
+            files: list[tuple[float, str, Path]] = []
+            for child in current.iterdir():
+                if not child.is_file():
+                    continue
+                file_kind = _classify_input_file(child.suffix)
+                if file_kind is None:
+                    continue
+                if kind != "all" and file_kind != kind:
+                    continue
+                if query and query not in child.name.lower():
+                    continue
+                files.append((child.stat().st_mtime, child.name.lower(), child))
+            if sort in ("time", "time_desc", "latest"):
+                files.sort(key=lambda entry: entry[0], reverse=True)
+            else:
+                files.sort(key=lambda entry: entry[1])
+            for mtime, _key, child in files[offset:offset + limit]:
+                items.append({
+                    "name": child.name,
+                    "subfolder": _rel_subfolder(child),
+                    "kind": _classify_input_file(child.suffix) or "image",
+                    "size": child.stat().st_size,
+                    "mtime": int(mtime),
+                    "url": _url(child.name, _rel_subfolder(child)),
+                    "root": root,
+                })
+            return web.json_response({
+                "ok": True,
+                "items": items,
+                "folders": folders,
+                "root": root,
+                "dir": sub_dir,
+                "mode": mode,
+                "total": len(items),
+                "offset": offset,
+                "limit": limit,
+            })
+
         collected: list[tuple[float, str, Path, Path]] = []
-        if base.is_dir():
-            for path in sorted(base.rglob("*")):
+        if current.is_dir():
+            for path in sorted(current.rglob("*")):
                 if not path.is_file():
                     continue
                 relative = path.relative_to(base)
-                if len(relative.parts) > 4:
+                if len(relative.parts) > 5:
                     continue
                 file_kind = _classify_input_file(path.suffix)
                 if file_kind is None:
                     continue
                 if kind != "all" and file_kind != kind:
                     continue
-                name = path.name
-                if query and query not in name.lower():
+                if query and query not in path.name.lower():
                     continue
-                stat = path.stat()
-                collected.append((stat.st_mtime, name.lower(), path, relative))
-                matched += 1
+                collected.append((path.stat().st_mtime, path.name.lower(), path, relative))
 
         if sort in ("time", "time_desc", "latest"):
             collected.sort(key=lambda entry: entry[0], reverse=True)
         else:
             collected.sort(key=lambda entry: entry[1])
 
-        for mtime, _name_key, path, relative in collected[offset : offset + limit]:
-            name = path.name
+        for mtime, _name_key, path, relative in collected[offset:offset + limit]:
             subfolder = "" if len(relative.parts) == 1 else "/".join(relative.parts[:-1])
-            url = f"/view?filename={quote(name)}&type=input"
-            if subfolder:
-                url += f"&subfolder={quote(subfolder)}"
             items.append({
-                "name": name,
+                "name": path.name,
                 "subfolder": subfolder,
                 "kind": _classify_input_file(path.suffix) or "image",
                 "size": path.stat().st_size,
                 "mtime": int(mtime),
-                "url": url,
+                "url": _url(path.name, subfolder),
+                "root": root,
             })
         return web.json_response({
             "ok": True,
             "items": items,
-            "total": matched,
+            "folders": [],
+            "root": root,
+            "dir": sub_dir,
+            "mode": mode,
+            "total": len(collected),
             "offset": offset,
             "limit": limit,
         })
     except Exception as error:
         traceback.print_exc()
         return web.json_response(
-            {"ok": False, "error": f"Failed to scan input dir: {error}"}, status=500
+            {"ok": False, "error": f"Failed to scan shared resources: {error}"}, status=500
         )
+
 
