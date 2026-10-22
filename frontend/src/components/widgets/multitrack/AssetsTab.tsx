@@ -47,6 +47,7 @@ export function AssetsTab({
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null)
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
+  const [childHint, setChildHint] = useState('')
   const descRef = useRef<HTMLTextAreaElement | null>(null)
 
   // 共享资源浏览器
@@ -174,7 +175,25 @@ export function AssetsTab({
   }
 
   const detail = subject ? (
-    <div className="flex flex-col gap-2">
+    <div
+      className="flex flex-col gap-2"
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('text/easymedia-shared-resource')) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        // 兜底：拖到详情任意处也添加引用（按共享资源自身类型落到对应行）
+        const shared = parseShared(event)
+        if (!shared) return
+        event.preventDefault()
+        event.stopPropagation()
+        const created = onAddFromShared?.(shared)
+        const createdId = (created as ProjectResource | undefined)?.id
+        if (createdId) {
+          bindChild(subject.id, createdId)
+          setChildHint(`已添加引用：${shared.name}`)
+        }
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <input
           style={{ ...fieldStyle, width: 180, fontWeight: 600 }}
@@ -198,10 +217,12 @@ export function AssetsTab({
           删除主体
         </Button>
       </div>
+
+      {/* 1. 描述（支持 @ 引用） */}
       <div className="flex flex-col gap-1">
         <textarea
           ref={descRef}
-          style={{ ...fieldStyle, minHeight: 96, resize: 'vertical', lineHeight: 1.6 }}
+          style={{ ...fieldStyle, minHeight: 88, resize: 'vertical', lineHeight: 1.6 }}
           placeholder="外观、身份、性格、与其它主体的关系…（输入 @ 可引用已定义的主体/资源）"
           value={subject.description}
           onChange={(event) => {
@@ -273,85 +294,109 @@ export function AssetsTab({
           </div>
         ) : null}
       </div>
-      <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-muted-foreground">保留项（逗号分隔）</span>
-        <input
-          style={fieldStyle}
-          value={subject.retention.join('，')}
-          onChange={(event) => patchSubject(subject.id, {
-            retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
-          })}
-        />
-      </label>
-      <div className="flex flex-col gap-2">
-        <span className="text-[11px] text-muted-foreground">引用资源（可把左侧资源卡或右侧共享资源拖到对应类型行）</span>
+
+      {/* 2. 引用资源（三行类型带） */}
+      <div className="flex flex-col gap-2 rounded p-2" style={{ border: `1px solid ${BORDER}` }}>
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-muted-foreground">引用资源</span>
+          <span className="text-[10px] text-muted-foreground">从右侧共享资源拖到对应类型行（或本区域任意处）</span>
+          {childHint ? <span className="ml-auto text-[10px]" style={{ color: PRIMARY }}>{childHint}</span> : null}
+        </div>
         {(['Picture', 'Audio', 'Video'] as const).map((type) => {
           const children = (subject.childResourceIds ?? [])
             .map((id) => resources.find((item) => item.id === id))
             .filter((item): item is ProjectResource => Boolean(item) && item!.type === type)
           const label = { Picture: '图片', Audio: '音频', Video: '视频' }[type]
+          const active = dropTarget === `child-${type}`
           return (
             <div
               key={type}
               className="flex flex-col gap-1 rounded p-1.5"
-              style={{ border: `1px dashed ${dropTarget === `child-${type}` ? PRIMARY : BORDER}` }}
+              style={{ border: `1px dashed ${active ? PRIMARY : BORDER}`, background: active ? `${PRIMARY} / 0.08` : 'transparent' }}
               onDragOver={(event) => {
                 event.preventDefault()
+                event.stopPropagation()
                 setDropTarget(`child-${type}`)
               }}
               onDragLeave={() => setDropTarget(null)}
               onDrop={(event) => {
-                setDropTarget(null)
                 event.preventDefault()
+                event.stopPropagation()
+                setDropTarget(null)
                 const shared = parseShared(event)
                 if (shared) {
                   const created = onAddFromShared?.(shared)
                   const createdId = (created as ProjectResource | undefined)?.id
-                  if (createdId) bindChild(subject.id, createdId)
+                  if (createdId) {
+                    bindChild(subject.id, createdId)
+                    setChildHint(created?.type === type ? `已添加${label}：${shared.name}` : `已添加资源（类型：${created?.type ?? shared.kind}）`)
+                  }
                   return
                 }
                 const id = event.dataTransfer.getData('text/easymedia-resource-id')
                 const target = id ? resources.find((item) => item.id === id) : undefined
-                if (target && target.type === type) bindChild(subject.id, id)
+                if (!target) return
+                if (target.type !== type) {
+                  setChildHint(`类型不匹配：${target.type} 不能放进「${label}」`)
+                  return
+                }
+                bindChild(subject.id, id)
+                setChildHint(`已引用：${target.name}`)
               }}
             >
-              <button
-                type="button"
-                className="flex items-center gap-2 text-left text-[11px]"
-                onClick={() => setChildTab(type)}
-              >
-                <span className="rounded px-1.5 py-0.5" style={{ border: `1px solid ${childTab === type ? PRIMARY : BORDER}`, color: childTab === type ? PRIMARY : undefined }}>
+              <div className="flex items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  className="rounded px-1.5 py-0.5"
+                  style={{ border: `1px solid ${childTab === type ? PRIMARY : BORDER}`, color: childTab === type ? PRIMARY : undefined }}
+                  onClick={() => setChildTab(type)}
+                >
                   {label} {children.length}
-                </span>
+                </button>
                 <span className="text-[10px] text-muted-foreground">拖到此行添加{label}</span>
-              </button>
-              <div className="flex flex-wrap items-center gap-1">
+              </div>
+              <div className="flex flex-wrap items-start gap-2">
                 {children.map((child) => {
-                  const active = selectedChildId === child.id
+                  const isActive = selectedChildId === child.id
+                  const viewUrl = child.sharedPath
+                    ? `/view?filename=${encodeURIComponent(child.imageFile ?? child.name)}&type=${child.sharedRoot ?? 'input'}${child.subfolder ? `&subfolder=${encodeURIComponent(child.subfolder)}` : ''}`
+                    : ''
                   return (
-                    <span key={child.id} className="flex flex-col items-center gap-0.5">
+                    <div key={child.id} className="relative">
                       <button
                         type="button"
-                        title={`${child.name}（点击查看/编辑保留项）`}
-                        className="flex h-12 w-12 items-center justify-center overflow-hidden rounded"
-                        style={{ border: `1px solid ${active ? PRIMARY : BORDER}`, background: FIELD_BG }}
+                        title={`${child.name}（点击编辑保留项/引用关系）`}
+                        className="flex h-16 w-16 items-center justify-center overflow-hidden rounded"
+                        style={{ border: `1px solid ${isActive ? PRIMARY : BORDER}`, background: FIELD_BG }}
                         onClick={() => {
                           setChildTab(type)
                           setSelectedChildId(child.id)
                         }}
                       >
-                        {type === 'Picture' && child.sharedPath ? (
-                          <img
-                            src={`/view?filename=${encodeURIComponent(child.imageFile ?? child.name)}&type=${child.sharedRoot ?? 'input'}${child.subfolder ? `&subfolder=${encodeURIComponent(child.subfolder)}` : ''}`}
-                            alt={child.name}
-                            className="h-full w-full object-cover"
-                          />
+                        {type === 'Picture' && viewUrl ? (
+                          <img src={viewUrl} alt={child.name} className="h-full w-full object-cover" loading="lazy" />
                         ) : (
-                          <span className="text-[10px]">{type === 'Audio' ? '♪' : type === 'Video' ? '▶' : '🖼'}</span>
+                          <span className="text-lg">{type === 'Audio' ? '♪' : type === 'Video' ? '▶' : '🖼'}</span>
                         )}
                       </button>
-                      <span className="w-12 truncate text-center text-[9px] text-muted-foreground">{child.name}</span>
-                    </span>
+                      <button
+                        type="button"
+                        title="解除引用"
+                        className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px]"
+                        style={{ background: '#7f1d1d', color: '#fff', border: '1px solid #ef4444' }}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          patchSubject(subject.id, {
+                            childResourceIds: (subject.childResourceIds ?? []).filter((id) => id !== child.id),
+                          })
+                          if (selectedChildId === child.id) setSelectedChildId(null)
+                          setChildHint(`已解除引用：${child.name}`)
+                        }}
+                      >
+                        ×
+                      </button>
+                      <div className="w-16 truncate text-center text-[9px] text-muted-foreground">{child.name}</div>
+                    </div>
                   )
                 })}
                 <BindingPicker
@@ -369,7 +414,7 @@ export function AssetsTab({
             .map((id) => resources.find((item) => item.id === id))
             .find((item): item is ProjectResource => Boolean(item) && item!.id === selectedChildId)
           if (!activeChild) {
-            return <span className="text-[10px] text-muted-foreground">点上方缩略图可编辑该资源的定义/保留项。</span>
+            return <span className="text-[10px] text-muted-foreground">点上方缩略图可编辑该资源的保留项与引用关系。</span>
           }
           return (
             <div className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}`, background: FIELD_BG }}>
@@ -379,14 +424,17 @@ export function AssetsTab({
                   type="button"
                   className="rounded px-1 text-[10px] text-muted-foreground"
                   style={{ border: `1px solid ${BORDER}` }}
-                  onClick={() => patchSubject(subject.id, { childResourceIds: (subject.childResourceIds ?? []).filter((id) => id !== activeChild.id) })}
+                  onClick={() => {
+                    patchSubject(subject.id, { childResourceIds: (subject.childResourceIds ?? []).filter((id) => id !== activeChild.id) })
+                    setSelectedChildId(null)
+                  }}
                 >
                   解除引用
                 </button>
               </div>
               <input
                 style={{ ...fieldStyle, padding: '2px 4px' }}
-                placeholder="保留项（该资源在这段视频里要保持什么，逗号分隔）"
+                placeholder="保留项：该资源在本片里要保持什么（逗号分隔）"
                 value={(activeChild.retention ?? []).join('，')}
                 onChange={(event) => onPatch?.(activeChild.id, {
                   retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
@@ -405,6 +453,18 @@ export function AssetsTab({
           )
         })()}
       </div>
+
+      {/* 3. 主体保留项（放在引用资源下面） */}
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] text-muted-foreground">主体保留项（逗号分隔：身份/服装/涂装/场地…）</span>
+        <input
+          style={fieldStyle}
+          value={subject.retention.join('，')}
+          onChange={(event) => patchSubject(subject.id, {
+            retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+          })}
+        />
+      </label>
     </div>
   ) : resource ? (
     <div className="flex flex-col gap-2">
