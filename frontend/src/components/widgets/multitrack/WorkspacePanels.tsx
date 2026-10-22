@@ -170,11 +170,13 @@ export function ResourcesTab({
   segments = [],
   onAttach,
   plannedResources = [],
+  onAddPlanned,
 }: {
   projectResources: Array<{ kind: string; name: string; scope?: string }>
   segments?: Array<{ id: string; label: string }>
   onAttach?: (segmentId: string, items: WorkspaceResourceItem[]) => boolean
   plannedResources?: Array<{ kind: string; name: string; purpose?: string }>
+  onAddPlanned?: (item: { kind: string; name: string; purpose?: string }) => void
 }) {
   const [kind, setKind] = useState<'all' | 'image' | 'audio' | 'video'>('all')
   const [query, setQuery] = useState('')
@@ -185,6 +187,9 @@ export function ResourcesTab({
   const [targetSegmentId, setTargetSegmentId] = useState<string>(segments[0]?.id ?? '')
   const [sort, setSort] = useState<'name' | 'time'>('name')
   const [thumbSize, setThumbSize] = useState(64)
+  const [manualKind, setManualKind] = useState<'image' | 'audio' | 'video'>('image')
+  const [manualName, setManualName] = useState('')
+  const [manualPurpose, setManualPurpose] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -339,6 +344,30 @@ export function ResourcesTab({
             )
           })}
         </div>
+        {onAddPlanned ? (
+          <div className="flex flex-wrap items-center gap-2 text-[10px]">
+            <span className="text-muted-foreground">手动加需求</span>
+            <select style={{ ...fieldStyle, width: 76, padding: '2px 4px' }} value={manualKind} onChange={(event) => setManualKind(event.target.value as 'image' | 'audio' | 'video')}>
+              <option value="image">图片</option>
+              <option value="audio">音频</option>
+              <option value="video">视频</option>
+            </select>
+            <input style={{ ...fieldStyle, width: 150, padding: '2px 4px' }} placeholder="资源名称" value={manualName} onChange={(event) => setManualName(event.target.value)} />
+            <input style={{ ...fieldStyle, width: 150, padding: '2px 4px' }} placeholder="用途（可选）" value={manualPurpose} onChange={(event) => setManualPurpose(event.target.value)} />
+            <Button
+              size="sm"
+              className="h-6 px-2 text-[10px]"
+              disabled={!manualName.trim()}
+              onClick={() => {
+                onAddPlanned({ kind: manualKind, name: manualName.trim(), purpose: manualPurpose.trim() || undefined })
+                setManualName('')
+                setManualPurpose('')
+              }}
+            >
+              ＋ 添加
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           <select
             style={{ ...fieldStyle, width: 160 }}

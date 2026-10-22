@@ -1089,6 +1089,7 @@ export function PromptEnhancerModal({
 <ResourcesTab
               projectResources={projectResources}
               plannedResources={plannedResources}
+              onAddPlanned={(item) => setPlannedResources((current) => [...current, item])}
               segments={workspaceSegments.map((segment, index) => ({ id: segment.id, label: `镜头 ${index + 1}` }))}
               onAttach={(segmentId, items) => {
                 if (!onAttachImages) return false

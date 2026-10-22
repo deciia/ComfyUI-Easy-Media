@@ -67,6 +67,15 @@ export function formatPlanSegmentBrief(segment: PlanSegment): string {
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
+const fieldStyle: React.CSSProperties = {
+  background: FIELD_BG,
+  border: `1px solid ${BORDER}`,
+  borderRadius: 6,
+  color: '#e5e5e5',
+  padding: '4px 8px',
+  fontSize: 12,
+  outline: 'none',
+}
 
 /** 导演级分镜规划结果的预览面板。 */
 export function PlanPreview({
@@ -75,6 +84,8 @@ export function PlanPreview({
   onSaveDraft,
   saved,
   onApply,
+  editable = false,
+  onMutateSegments,
   appliedNote,
   onImportSubjects,
   onImportResources,
@@ -85,6 +96,9 @@ export function PlanPreview({
   onSaveDraft: () => void
   saved: boolean
   onApply?: () => boolean
+  /** 手动编辑：传入后段支持增删改/排序 */
+  editable?: boolean
+  onMutateSegments?: (fn: (segments: any[]) => any[]) => void
   appliedNote?: string
   onImportSubjects?: () => void
   onImportResources?: () => void
@@ -149,8 +163,14 @@ export function PlanPreview({
       ) : null}
 
       <div className="flex flex-col gap-2">
-        {plan.segments.map((segment) => (
-          <div key={`${segment.index}-${segment.name}`} className="flex flex-col gap-1.5 rounded-md p-2" style={{ border: `1px solid ${BORDER}` }}>
+        {editable && onMutateSegments ? (
+          <Button size="sm" variant="secondary" className="h-6 self-start px-2 text-[11px]"
+            onClick={() => onMutateSegments((segs) => [...segs, { index: segs.length + 1, name: `镜头 ${segs.length + 1}`, beat: '', duration_seconds: 4, duration_frames: 0, summary: '', shots: [], subjects: [], resources: [] }])}>
+            ＋ 手动添加一段
+          </Button>
+        ) : null}
+        {plan.segments.map((segment, segmentIndex) => (
+          <div key={segmentIndex} className="flex flex-col gap-1.5 rounded-md p-2" style={{ border: `1px solid ${BORDER}` }}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[12px] font-medium">{segment.index}. {segment.name}</span>
               {segment.beat ? <span className="rounded-full px-1.5 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>{segment.beat}</span> : null}
@@ -158,6 +178,43 @@ export function PlanPreview({
                 {segment.duration_seconds}s · {segment.duration_frames}f · {segment.shots.length} 镜
               </span>
             </div>
+            {editable && onMutateSegments ? (
+              <div className="flex items-center gap-1 text-[10px]">
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={() => startEdit(segmentIndex, segment)}>✎ 编辑</button>
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} disabled={segmentIndex === 0} onClick={() => onMutateSegments((segs) => { const next = [...segs]; [next[segmentIndex - 1], next[segmentIndex]] = [next[segmentIndex], next[segmentIndex - 1]]; return next })}>↑</button>
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} disabled={segmentIndex === plan.segments.length - 1} onClick={() => onMutateSegments((segs) => { const next = [...segs]; [next[segmentIndex + 1], next[segmentIndex]] = [next[segmentIndex], next[segmentIndex + 1]]; return next })}>↓</button>
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={() => onMutateSegments((segs) => segs.filter((_, i) => i !== segmentIndex))}>✕ 删除</button>
+              </div>
+            ) : null}
+            {editingIndex === segmentIndex ? (
+              <div className="flex flex-col gap-1.5 rounded p-2" style={{ background: FIELD_BG, border: `1px dashed ${BORDER}` }}>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  <input style={{ ...fieldStyle, width: 140 }} value={editDraft.name} placeholder="镜头名" onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+                  <input style={{ ...fieldStyle, width: 90 }} value={editDraft.beat} placeholder="beat（钩子/铺垫…）" onChange={(e) => setEditDraft({ ...editDraft, beat: e.target.value })} />
+                  <input style={{ ...fieldStyle, width: 64 }} value={editDraft.duration} placeholder="秒" onChange={(e) => setEditDraft({ ...editDraft, duration: e.target.value })} />
+                </div>
+                <textarea style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }} value={editDraft.summary} placeholder="本段概要" onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })} />
+                <textarea style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }} value={editDraft.directorNote} placeholder="导演说明（可选）" onChange={(e) => setEditDraft({ ...editDraft, directorNote: e.target.value })} />
+                <div className="flex gap-2">
+                  <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => {
+                    onMutateSegments?.((segs) => segs.map((seg, i) => (
+                      i === segmentIndex
+                        ? {
+                            ...seg,
+                            name: editDraft.name.trim() || seg.name,
+                            beat: editDraft.beat.trim(),
+                            duration_seconds: Math.min(15, Math.max(0.5, Number(editDraft.duration) || 4)),
+                            summary: editDraft.summary,
+                            director_note: editDraft.directorNote,
+                          }
+                        : seg
+                    )))
+                    setEditingIndex(null)
+                  }}>保存</Button>
+                  <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => setEditingIndex(null)}>取消</Button>
+                </div>
+              </div>
+            ) : null}
             {segment.summary ? <div className="text-[11px] leading-relaxed">{segment.summary}</div> : null}
             {segment.director_note ? (
               <div className="text-[10px] leading-relaxed text-muted-foreground">导演说明：{segment.director_note}</div>
@@ -215,3 +272,17 @@ export function PlanPreview({
     </div>
   )
 }
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState<{ name: string; beat: string; duration: string; summary: string; directorNote: string }>({ name: '', beat: '', duration: '', summary: '', directorNote: '' })
+
+  const startEdit = (index: number, segment: { name?: string; beat?: string; duration_seconds?: number; summary?: string; director_note?: string }) => {
+    setEditingIndex(index)
+    setEditDraft({
+      name: String(segment.name ?? ''),
+      beat: String(segment.beat ?? ''),
+      duration: String(segment.duration_seconds ?? 4),
+      summary: String(segment.summary ?? ''),
+      directorNote: String(segment.director_note ?? ''),
+    })
+  }
+

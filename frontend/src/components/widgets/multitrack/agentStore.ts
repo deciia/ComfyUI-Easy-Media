@@ -73,3 +73,57 @@ export function patchWorkspaceMessages(key: string, fn: (current: AgentMessage[]
   const current = readWorkspace(key).messages ?? []
   writeWorkspace(key, { messages: fn(current) })
 }
+
+
+export type PlanSegment = StoryboardPlanLike['segments'][number]
+
+function recomputePlan(plan: StoryboardPlanLike, segments: PlanSegment[], fps: number): StoryboardPlanLike {
+  let frames = 0
+  let seconds = 0
+  segments.forEach((segment, index) => {
+    segment.index = index + 1
+    const duration = Number(segment.duration_seconds) || 0
+    segment.duration_frames = Math.round(duration * fps)
+    frames += segment.duration_frames
+    seconds += duration
+  })
+  return { ...plan, segments, total_seconds: Number(seconds.toFixed(2)), total_frames: frames }
+}
+
+/** 对分镜段列表做变更（增删改/排序），自动重算序号、帧数与总时长。 */
+export function mutatePlanSegments(
+  key: string,
+  fps: number,
+  fn: (segments: PlanSegment[]) => PlanSegment[],
+) {
+  const plan = readWorkspace(key).plan
+  if (!plan) return
+  try {
+    const next = fn(plan.segments.map((segment) => ({ ...segment })))
+    writeWorkspace(key, { plan: recomputePlan(plan, next, fps) })
+  } catch (error) {
+    console.warn('[EasyMedia] mutate plan failed', error)
+  }
+}
+
+/** 手动新建一个空分镜（单段占位，可继续增删改）。 */
+export function createEmptyPlan(key: string, fps: number) {
+  const segment: PlanSegment = {
+    index: 1,
+    name: '未命名镜头',
+    beat: '',
+    duration_seconds: 4,
+    duration_frames: Math.round(4 * fps),
+    summary: '',
+    shots: [],
+    subjects: [],
+    resources: [],
+  }
+  writeWorkspace(key, {
+    plan: recomputePlan(
+      { title: '未命名分镜', logline: '', tone: '', rhythm: '', total_seconds: 4, total_frames: Math.round(4 * fps), segments: [segment] },
+      [segment],
+      fps,
+    ),
+  })
+}

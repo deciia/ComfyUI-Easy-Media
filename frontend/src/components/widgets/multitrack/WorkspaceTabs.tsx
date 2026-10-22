@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
-import { readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
+import { createEmptyPlan, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
@@ -135,6 +135,8 @@ export function StoryboardTab({
         setImportedNote('已把资源需求导入「资源与生成」页')
       } : undefined}
       onApply={undefined}
+      editable
+      onMutateSegments={(fn) => mutatePlanSegments(projectKey, frameRate, fn)}
 
     />
   )
@@ -157,10 +159,14 @@ export function StoryboardTab({
           <div className="flex min-h-0 flex-1 flex-col">{preview(plan)}</div>
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-center">
-            <div className="max-w-[420px] text-[12px] leading-relaxed text-muted-foreground">
-              在右侧对助手说出想法即可生成分镜脚本；它会保存为项目草稿。
-              <br />在右侧告诉助手你的想法（例如「写一个天空鲸落掉深海回家的故事」），
-              之后可导入主体、资源需求，最后用标题栏的保存按钮落到任务轨。
+            <div className="flex max-w-[460px] flex-col items-center gap-3 text-[12px] leading-relaxed text-muted-foreground">
+              <div className="text-center">
+                可以在右侧让助手生成分镜，也可以直接手动新建：
+                <br />分镜会保存为项目草稿，之后导入主体/资源需求，最后用标题栏保存按钮落到任务轨。
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => createEmptyPlan(projectKey, frameRate)}>
+                ✚ 手动新建分镜
+              </Button>
             </div>
           </div>
         )}
