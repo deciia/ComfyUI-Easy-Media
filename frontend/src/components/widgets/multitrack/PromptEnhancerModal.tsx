@@ -366,6 +366,7 @@ export function PromptEnhancerModal({
   const [draftPrompt, setDraftPrompt] = useState('')
   const [finalDraft, setFinalDraft] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
+  const [abTab, setAbTab] = useState<'a' | 'b'>('a')
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
@@ -1321,7 +1322,7 @@ export function PromptEnhancerModal({
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr)', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1.15fr) minmax(0, 1fr)', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 {PRESET_GROUPS.map((group) => (
@@ -1480,6 +1481,25 @@ export function PromptEnhancerModal({
                     </div>
                   ) : null}
                 </div>
+                <div className="flex items-center gap-1">
+                  {([['a', 'A · 片段提示词'], ['b', 'B · 我的尝试']] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="rounded px-2 py-0.5 text-[11px]"
+                      style={{
+                        border: '1px solid ' + (abTab === key ? 'hsl(var(--primary, 199 89% 48%))' : 'hsl(var(--border, 240 6% 25%))'),
+                        color: abTab === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+                      }}
+                      onClick={() => setAbTab(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[10px] text-neutral-500">
+                    {abTab === 'a' ? '来自分镜，可粗' : '自由填写，作 AI 参考'}
+                  </span>
+                </div>
                 <PromptQualityBar
                 prompt={brief}
                 resources={resources}
@@ -1492,10 +1512,10 @@ export function PromptEnhancerModal({
                   style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}
                 >
                   <PromptContentEditor
-                    value={brief}
-                    onChange={(next) => setBrief(next)}
+                    value={abTab === 'a' ? brief : draftPrompt}
+                    onChange={(next) => (abTab === 'a' ? setBrief(next) : setDraftPrompt(next))}
                     ariaLabel={t('multitrack.enhancerBrief')}
-                    placeholder={t('multitrack.enhancerBriefPlaceholder')}
+                    placeholder={abTab === 'a' ? t('multitrack.enhancerBriefPlaceholder') : '自己试着写一版最终效果（作为 AI 参考，不直接送模型）'}
                     resources={editorResources}
                     mentionsEnabled
                     highlightPromptSemantics
@@ -1573,27 +1593,6 @@ export function PromptEnhancerModal({
                       </span>
                     ))
                   )}
-                </div>
-              </div>
-
-              {/* B 栏：用户自由填写（可选） */}
-              <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
-                <div className="flex items-center gap-2">
-                  <span className={labelClass}>B · 我的尝试（可留空）</span>
-                  <span className="text-[10px] text-neutral-500">{draftPrompt.length} 字</span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
-                  <PromptContentEditor
-                    value={draftPrompt}
-                    onChange={(next) => setDraftPrompt(next)}
-                    ariaLabel="我的尝试"
-                    placeholder="可以在这里自己试着写一版最终效果（会被 AI 作为参考，不直接送模型）"
-                    resources={editorResources}
-                    mentionsEnabled
-                    highlightPromptSemantics
-                    className="h-full border-none bg-transparent"
-                    testId="enhancer-draft-editor"
-                  />
                 </div>
               </div>
 
