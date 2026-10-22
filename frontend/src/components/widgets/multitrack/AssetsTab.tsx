@@ -432,12 +432,12 @@ export function AssetsTab({
                   解除引用
                 </button>
               </div>
-              <input
-                style={{ ...fieldStyle, padding: '2px 4px' }}
-                placeholder="保留项：该资源在本片里要保持什么（逗号分隔）"
-                value={(activeChild.retention ?? []).join('，')}
+              <textarea
+                style={{ ...fieldStyle, padding: '4px 6px', minHeight: 60, resize: 'vertical', lineHeight: 1.5 }}
+                placeholder="保留项说明（可多行）：该资源在本片里要保持什么"
+                value={(activeChild.retention ?? []).join('\n')}
                 onChange={(event) => onPatch?.(activeChild.id, {
-                  retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+                  retention: event.target.value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean),
                 })}
               />
               <select
@@ -456,12 +456,13 @@ export function AssetsTab({
 
       {/* 3. 主体保留项（放在引用资源下面） */}
       <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-muted-foreground">主体保留项（逗号分隔：身份/服装/涂装/场地…）</span>
-        <input
-          style={fieldStyle}
-          value={subject.retention.join('，')}
+        <span className="text-[11px] text-muted-foreground">主体保留项（可多行：身份/服装/涂装/场地…）</span>
+        <textarea
+          style={{ ...fieldStyle, padding: '4px 6px', minHeight: 64, resize: 'vertical', lineHeight: 1.5 }}
+          placeholder="每行一条，例如：身份不变\n服装不变\n车辆涂装不变"
+          value={subject.retention.join('\n')}
           onChange={(event) => patchSubject(subject.id, {
-            retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+            retention: event.target.value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean),
           })}
         />
       </label>
@@ -502,11 +503,12 @@ export function AssetsTab({
       />
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-muted-foreground">保留项（逗号分隔）</span>
-        <input
-          style={fieldStyle}
-          value={(resource.retention ?? []).join('，')}
+        <textarea
+          style={{ ...fieldStyle, padding: '4px 6px', minHeight: 60, resize: 'vertical', lineHeight: 1.5 }}
+          placeholder="每行一条保留项"
+          value={(resource.retention ?? []).join('\n')}
           onChange={(event) => onPatch?.(resource.id, {
-            retention: event.target.value.split(/[，,]/).map((item) => item.trim()).filter(Boolean),
+            retention: event.target.value.split(/[\n，,]/).map((item) => item.trim()).filter(Boolean),
           })}
         />
       </label>
