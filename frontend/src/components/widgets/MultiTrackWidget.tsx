@@ -154,6 +154,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
   const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false)
+  const workspaceInstanceId = useRef(`ws-${Math.random().toString(36).slice(2, 8)}`).current
+  const openWorkspaceRef = useRef<() => void>(() => {})
 
   // 提示词增强器切换任务片段：把切换函数登记到全局，弹窗直接调用（事件作为兜底）
   useEffect(() => {
@@ -1266,18 +1268,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   // 项目栏「工作台」按钮：选中第一个任务片段并通知编辑器打开弹窗
   useEffect(() => {
     const openWorkspace = () => {
+      // 声明弹窗归属本节点实例：避免多节点同时各开一层
+      ;(globalThis as unknown as { __easyMediaWorkspaceModalOwner?: string }).__easyMediaWorkspaceModalOwner = workspaceInstanceId
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const firstSegment = taskTrack?.segments?.[0]
-      if (!firstSegment) {
-        setWorkspaceModalOpen(true)
-        return
-      }
-      handleSelectSegment(firstSegment.id, 'replace')
-      // 编辑器可能尚未因选中而挂载：写标记让它在挂载后自行打开，同时广播给已挂载实例
-      ;(globalThis as unknown as { __easyMediaPendingWorkspaceOpen?: boolean })
-        .__easyMediaPendingWorkspaceOpen = true
-      window.dispatchEvent(new CustomEvent('easy-media.workspace.open'))
+      if (firstSegment) handleSelectSegment(firstSegment.id, 'replace')
+      setWorkspaceModalOpen(true)
     }
+    openWorkspaceRef.current = openWorkspace
     const registry = globalThis as unknown as {
       __easyMediaOpenWorkspace?: () => void
       __easyMediaTimelineSummary?: () => { ratio: string; audio: string[]; video: string[] }
@@ -1302,7 +1300,10 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   // 片段 ✦ 或项目栏图标：统一打开节点层工作台（弹窗不随片段卸载）
   useEffect(() => {
     function open() {
-      setWorkspaceModalOpen(true)
+      // 只让当前注册表持有者响应，避免多个节点实例各开一层弹窗
+      const registry = globalThis as unknown as { __easyMediaOpenWorkspace?: () => void }
+      if (registry.__easyMediaOpenWorkspace !== openWorkspaceRef.current) return
+      openWorkspaceRef.current()
     }
     window.addEventListener('easy-media.workspace.open', open)
     return () => window.removeEventListener('easy-media.workspace.open', open)
@@ -1710,12 +1711,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onApply={applyProjectTimeline}
           />
 
-      {workspaceModalOpen ? (
+      {workspaceModalOpen && (globalThis as unknown as { __easyMediaWorkspaceModalOwner?: string }).__easyMediaWorkspaceModalOwner === workspaceInstanceId ? (
         <PromptEnhancerModal
           initialBrief=""
           initialResult=""
           onApply={() => {}}
-          onClose={() => setWorkspaceModalOpen(false)}
+          onClose={() => {
+            setWorkspaceModalOpen(false)
+            const registry = globalThis as unknown as { __easyMediaWorkspaceModalOwner?: string }
+            if (registry.__easyMediaWorkspaceModalOwner === workspaceInstanceId) registry.__easyMediaWorkspaceModalOwner = undefined
+          }}
           workspaceSegments={data.tracks.find((track) => track.type === 'task')?.segments ?? []}
           workspaceFrameRate={data.frame_rate}
           segmentId={selectedSegmentId ?? undefined}
