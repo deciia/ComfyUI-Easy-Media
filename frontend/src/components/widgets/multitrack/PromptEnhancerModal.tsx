@@ -363,6 +363,9 @@ export function PromptEnhancerModal({
 }: PromptEnhancerModalProps) {
   const t = useT()
   const [brief, setBrief] = useState(initialBrief)
+  const [draftPrompt, setDraftPrompt] = useState('')
+  const [finalDraft, setFinalDraft] = useState('')
+  const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
@@ -1318,7 +1321,7 @@ export function PromptEnhancerModal({
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '290px minmax(0, 1.4fr) minmax(0, 1fr)', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr)', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 {PRESET_GROUPS.map((group) => (
@@ -1573,16 +1576,81 @@ export function PromptEnhancerModal({
                 </div>
               </div>
 
+              {/* B 栏：用户自由填写（可选） */}
+              <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
+                <div className="flex items-center gap-2">
+                  <span className={labelClass}>B · 我的尝试（可留空）</span>
+                  <span className="text-[10px] text-neutral-500">{draftPrompt.length} 字</span>
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                  <PromptContentEditor
+                    value={draftPrompt}
+                    onChange={(next) => setDraftPrompt(next)}
+                    ariaLabel="我的尝试"
+                    placeholder="可以在这里自己试着写一版最终效果（会被 AI 作为参考，不直接送模型）"
+                    resources={editorResources}
+                    mentionsEnabled
+                    highlightPromptSemantics
+                    className="h-full border-none bg-transparent"
+                    testId="enhancer-draft-editor"
+                  />
+                </div>
+              </div>
+
               {/* 右栏：结果（可编辑，按段拆分） */}
               <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2">
                 <div className="flex items-center justify-between">
-                  <span className={labelClass}>{t('multitrack.enhancerPreview')}</span>
                   <div className="flex gap-1">
+                    {([['preview', '预览'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className="rounded px-2 py-0.5 text-[11px]"
+                        style={{
+                          border: `1px solid ${resultTab === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
+                          color: resultTab === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+                        }}
+                        onClick={() => setResultTab(key)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="secondary"
+                      className="h-6 px-2 text-[11px]"
+                      title="把 A 栏的片段提示词直接作为最终提示词"
+                      disabled={!brief.trim()}
+                      onClick={() => setFinalDraft(brief)}
+                    >
+                      从片段提示词导入
+                    </Button>
                     <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !brief.trim()} onClick={() => void handleGenerate('English')}>生成英文</Button>
                     <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !brief.trim()} onClick={() => void handleGenerate('中文')}>生成中文</Button>
                   </div>
                 </div>
-                <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+                <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
+                  <PromptQualityBar
+                    prompt={finalDraft || finalPrompt}
+                    resources={resources}
+                    referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
+                    onChangePrompt={(next) => setFinalDraft(next)}
+                  />
+                  <span className="text-[11px] text-neutral-400">最终提示词（会保存到任务轨）</span>
+                  <div className="min-h-[160px] shrink-0 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                    <PromptContentEditor
+                      value={finalDraft || finalPrompt}
+                      onChange={(next) => setFinalDraft(next)}
+                      ariaLabel="最终提示词"
+                      placeholder="AI 生成结果会出现在这里，也可手改；写入任务轨的就是这段文本"
+                      resources={editorResources}
+                      mentionsEnabled
+                      highlightPromptSemantics
+                      className="h-full min-h-[160px] border-none bg-transparent"
+                      testId="enhancer-final-editor"
+                    />
+                  </div>
                   {sections.length > 0 ? (
                     sections.map((section, index) => (
                       <div key={section.title} className="flex flex-col gap-0.5">
@@ -1617,6 +1685,24 @@ export function PromptEnhancerModal({
                       onChange={(event) => setResult(event.target.value)}
                     />
                   )}
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
+                  <AgentRail
+                    projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
+                    tab="enhance"
+                    segments={segments.map((item, index) => ({ index, name: item.label, durationSeconds: 0, hasPrompt: Boolean((item as unknown as { prompt?: string }).prompt) }))}
+                    subjects={workspaceSubjects.map((subject) => ({ name: subject.name, desc: String(subject.description ?? '').slice(0, 80) }))}
+                    resources={resources.map((item) => ({ name: item.name }))}
+                    frameRate={workspaceFrameRate}
+                    ratio={(() => {
+                      try {
+                        const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
+                        return summary?.().ratio || '16:9'
+                      } catch {
+                        return '16:9'
+                      }
+                    })()}
+                  />
                 </div>
                 {error ? (
                   <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', background: 'rgba(146,64,14,0.18)', color: '#fbbf24' }}>{error}</div>
@@ -1665,9 +1751,9 @@ export function PromptEnhancerModal({
               <Button
                 className="shrink-0"
                 onClick={() => {
-                  if (finalPrompt) onApply(finalPrompt, brief, globalDraft)
+                  if (finalDraft || finalPrompt) onApply(finalDraft || finalPrompt, brief, globalDraft)
                 }}
-                disabled={!finalPrompt || failures.length > 0}
+                disabled={!(finalDraft || finalPrompt) || failures.length > 0}
               >
                 {t('multitrack.enhancerApply')}
               </Button>
