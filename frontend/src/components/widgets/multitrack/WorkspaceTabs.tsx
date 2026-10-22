@@ -356,7 +356,33 @@ export function StoryboardTab({
   // 中栏
   const middle = (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto p-2">
-      {planFocus != null && planDetail ? (
+      {planSegment && timelineSelected ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md p-2" style={{ flex: '1 1 52%', border: `1px solid ${BORDER}`, background: FIELD_BG }}>
+            <div className="text-[10px] text-muted-foreground">脚本段（可编辑）</div>
+            {planDetail}
+          </div>
+          <div className="flex min-h-0 flex-col gap-1 overflow-auto rounded-md p-2" style={{ flex: '1 1 44%', border: `1px solid ${BORDER}`, background: FIELD_BG }}>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-muted-foreground">任务轨片段（已落地）</span>
+              <span>镜头 {timelineSelected.index} · {timelineSelected.label}</span>
+              <span className="text-muted-foreground">
+                {timelineSelected.startFrame}–{timelineSelected.endFrame} 帧（{timelineSelected.seconds.toFixed(2)}s）
+              </span>
+            </div>
+            <div
+              className="whitespace-pre-wrap text-[11px] leading-relaxed"
+              style={{ opacity: timelineSelected.prompt ? 1 : 0.6 }}
+            >
+              {timelineSelected.prompt || '（该片段还没有提示词）'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              图片 {(((timelineSelected as unknown as { content?: { images?: unknown[] } }).content?.images ?? []) as unknown[]).length}
+              {' · '}任务类型 {((timelineSelected as unknown as { content?: { task_mode?: string } }).content?.task_mode) || '—'}
+            </div>
+          </div>
+        </div>
+      ) : planFocus != null && planDetail ? (
         planDetail
       ) : plan ? (
         preview(plan)
