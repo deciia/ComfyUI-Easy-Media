@@ -152,7 +152,7 @@ export function PlanPreview({
             <div className="flex flex-wrap items-center gap-2">
               {field('ratio', '比例', [['9:16', '9:16'], ['16:9', '16:9'], ['1:1', '1:1'], ['4:3', '4:3']])}
               {field('refImageSize', '参考图', [['match', 'match'], ['max', 'max']])}
-              {field('taskType', '任务', [['ref', 'ref 参考生视频'], ['default', 'default 自动'], ['edit', 'edit 编辑'], ['l2v', 'l2v 首尾帧'], ['passthrough', 'passthrough 直通']])}
+              {field('taskType', '任务', [['r2v', 'R2V'], ['fmlf2v', 'FMLF2V'], ['vi2v', 'VI2V'], ['l2v', 'L2V'], ['passthrough', 'Pass']])}
             </div>
           )
         })() : null}
@@ -257,11 +257,11 @@ export function PlanPreview({
                     <label className="flex items-center gap-1">任务
                       <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.taskType} onChange={(event) => setEditDraft({ ...editDraft, taskType: event.target.value })}>
                         <option value="">跟随脚本</option>
-                        <option value="default">default 自动</option>
-                        <option value="ref">ref 参考生视频</option>
-                        <option value="edit">edit 编辑</option>
-                        <option value="l2v">l2v 首尾帧</option>
-                        <option value="passthrough">passthrough 直通</option>
+                        <option value="r2v">R2V</option>
+                        <option value="fmlf2v">FMLF2V</option>
+                        <option value="vi2v">VI2V</option>
+                        <option value="l2v">L2V</option>
+                        <option value="passthrough">Pass</option>
                       </select>
                     </label>
                   </div>
