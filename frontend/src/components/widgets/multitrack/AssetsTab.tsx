@@ -47,6 +47,13 @@ export function AssetsTab({
   const [resType, setResType] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
   const [leftTab, setLeftTab] = useState<'subject' | 'resource'>('subject')
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+
+  // 进入本页时默认选中「主体」页签的第一个主体，避免详情区空着
+  useEffect(() => {
+    if (selection) return
+    if (subjects.length > 0) setSelection({ kind: 'subject', id: subjects[0].id })
+  }, [selection, subjects])
+
   const [childTab, setChildTab] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null)
   const [mentionOpen, setMentionOpen] = useState(false)
