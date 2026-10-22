@@ -7,6 +7,7 @@ import { PromptContentEditor, type PromptReferenceResource } from './PromptConte
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { type WorkspaceSubject } from './WorkspacePanels'
 import { AssetsTab } from './AssetsTab'
+import { PromptQualityBar } from './PromptQualityBar'
 import { AgentRail } from './AgentRail'
 import {
   addResourceFromShared,
@@ -1476,7 +1477,13 @@ export function PromptEnhancerModal({
                     </div>
                   ) : null}
                 </div>
-                <div className="text-[11px] text-neutral-500">点上方标签可引用主体/资源</div>
+                <PromptQualityBar
+                prompt={brief}
+                resources={resources}
+                referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
+                onChangePrompt={(next) => setBrief(next)}
+              />
+              <div className="text-[11px] text-neutral-500">点上方标签可引用主体/资源</div>
                 <div
                   className="min-h-0 flex-1 overflow-hidden rounded-md"
                   style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}
