@@ -60,6 +60,27 @@ export function AgentRail({
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
+  const [inputHeight, setInputHeight] = useState(72)
+  const [expanded, setExpanded] = useState(false)
+  const prevHeightRef = useRef(72)
+  const inputAreaRef = useRef<HTMLDivElement | null>(null)
+  const heightDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
+  useEffect(() => {
+    function onMove(event: MouseEvent) {
+      const drag = heightDragRef.current
+      if (!drag) return
+      setInputHeight(Math.max(64, Math.min(640, drag.startHeight + (drag.startY - event.clientY))))
+    }
+    function onUp() {
+      heightDragRef.current = null
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
   const [model, setModel] = useState('')
   const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
@@ -412,18 +433,78 @@ export function AgentRail({
         )}
       </div>
 
-      <textarea
-        style={{ ...fieldStyle, minHeight: 64, resize: 'vertical' }}
-        placeholder={plan ? '继续提要求，例如：第 2 段拆两段 / 应用' : '例：写一个天空鲸落掉深海回家的故事。'}
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            void send()
-          }
-        }}
-      />
+      <div
+        ref={inputAreaRef}
+        style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}
+      >
+        <div
+          title="上下拖动调整输入框高度"
+          style={{ height: 6, cursor: 'ns-resize', borderRadius: 3, background: 'hsl(var(--border, 240 6% 25%))', opacity: 0.6 }}
+          onMouseDown={(event) => {
+            heightDragRef.current = { startY: event.clientY, startHeight: inputHeight }
+          }}
+        />
+        <textarea
+          style={{
+            ...fieldStyle,
+            minHeight: 64,
+            height: expanded ? Math.max(360, inputHeight) : inputHeight,
+            maxHeight: 640,
+            resize: 'none',
+            overflowY: 'auto',
+            lineHeight: 1.55,
+          }}
+          placeholder={plan ? '继续提要求，例如：第 2 段拆两段 / 应用' : '例：写一个天空鲸落掉深海回家的故事。'}
+          value={input}
+          onChange={(event) => {
+            setInput(event.target.value)
+            const el = event.currentTarget
+            if (!expanded) {
+              el.style.height = 'auto'
+              setInputHeight(Math.max(64, Math.min(240, el.scrollHeight)))
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              void send()
+            }
+          }}
+        />
+        <button
+          type="button"
+          title={expanded ? '还原高度' : '放大输入框'}
+          style={{
+            position: 'absolute',
+            right: 6,
+            bottom: 6,
+            zIndex: 2,
+            width: 20,
+            height: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 4,
+            border: '1px solid hsl(var(--border, 240 6% 25%))',
+            background: 'hsl(var(--background, 240 10% 8%))',
+            color: 'hsl(var(--muted-foreground, 240 5% 65%))',
+            fontSize: 11,
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            if (!expanded) {
+              prevHeightRef.current = inputHeight
+              setInputHeight(480)
+              setExpanded(true)
+            } else {
+              setInputHeight(prevHeightRef.current || 72)
+              setExpanded(false)
+            }
+          }}
+        >
+          {expanded ? '⤡' : '⤢'}
+        </button>
+      </div>
       <div className="flex items-center gap-2">
         <Button
           size="sm"
