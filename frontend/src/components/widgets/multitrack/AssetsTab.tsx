@@ -41,6 +41,7 @@ export function AssetsTab({
 }: AssetsTabProps) {
   const [selection, setSelection] = useState<Selection>(null)
   const [resType, setResType] = useState<'Picture' | 'Audio' | 'Video'>('Picture')
+  const [leftTab, setLeftTab] = useState<'subject' | 'resource'>('subject')
   const [dropTarget, setDropTarget] = useState<string | null>(null)
 
   // 共享资源浏览器
@@ -53,8 +54,8 @@ export function AssetsTab({
   const [thumbSize, setThumbSize] = useState(72)
   const [browserWidth, setBrowserWidth] = useState(() => {
     try {
-      const raw = window.localStorage.getItem('easy-media-assets-browser-width')
-      return raw ? Math.max(320, Math.min(900, Number(raw) || 560)) : 560
+      const raw = window.localStorage.getItem('easy-media-assets-browser-width-v2')
+      return raw ? Math.max(280, Math.min(900, Number(raw) || 460)) : 460
     } catch {
       return 560
     }
@@ -62,7 +63,7 @@ export function AssetsTab({
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   useEffect(() => {
     try {
-      window.localStorage.setItem('easy-media-assets-browser-width', String(browserWidth))
+      window.localStorage.setItem('easy-media-assets-browser-width-v2', String(browserWidth))
     } catch {
       /* ignore */
     }
@@ -71,7 +72,7 @@ export function AssetsTab({
     function onMove(event: MouseEvent) {
       const drag = dragRef.current
       if (!drag) return
-      setBrowserWidth(Math.max(320, Math.min(900, drag.startWidth + (drag.startX - event.clientX))))
+      setBrowserWidth(Math.max(280, Math.min(900, drag.startWidth + (drag.startX - event.clientX))))
     }
     function onUp() {
       dragRef.current = null
@@ -297,92 +298,123 @@ export function AssetsTab({
 
   return (
     <div className="flex min-h-0 flex-1">
-      {/* 列1：主体 + 资源 */}
-      <div className="flex w-[250px] shrink-0 flex-col gap-1 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
-        <div className="flex items-center justify-between px-1 pb-1 text-[11px] text-muted-foreground">
-          <span>主体（{subjects.length}）</span>
-          <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={addSubject}>＋ 新增</button>
-        </div>
-        {subjects.map((item) => {
-          const active = selection?.kind === 'subject' && selection.id === item.id
-          return (
-            <button
-              key={item.id}
-              type="button"
-              draggable={false}
-              onClick={() => setSelection({ kind: 'subject', id: item.id })}
-              className="flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left"
-              style={{ background: active ? `${PRIMARY} / 0.16` : FIELD_BG, border: `1px solid ${active ? PRIMARY : BORDER}` }}
-            >
-              <span className="truncate text-[12px] font-medium">{item.name}</span>
-              <span className="text-[10px] text-muted-foreground">{item.type} · 引用 {(item.childResourceIds ?? []).length}</span>
-            </button>
-          )
-        })}
-
-        <div className="mt-1 flex items-center gap-1 px-1 text-[11px] text-muted-foreground">
-          <span>资源（{mediaResources.length}）</span>
-          <span className="ml-auto" />
-          {onCreateEmpty ? (
-            <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={onCreateEmpty}>＋ 新建</button>
-          ) : null}
-        </div>
-        <div className="flex gap-1 px-1">
-          {(['Picture', 'Audio', 'Video'] as const).map((key) => (
+      {/* 列1：主体 / 资源（两态切换） */}
+      <div className="flex w-[250px] shrink-0 flex-col gap-1 overflow-hidden p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
+        <div className="flex gap-1">
+          {([
+            ['subject', `主体 ${subjects.length}`],
+            ['resource', `资源 ${mediaResources.length}`],
+          ] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
-              className="rounded px-1.5 py-0.5 text-[10px]"
+              className="flex-1 rounded px-1 py-0.5 text-[11px]"
               style={{
-                border: `1px solid ${resType === key ? PRIMARY : BORDER}`,
-                color: resType === key ? PRIMARY : undefined,
+                border: `1px solid ${leftTab === key ? PRIMARY : BORDER}`,
+                color: leftTab === key ? PRIMARY : undefined,
+                background: leftTab === key ? `${PRIMARY} / 0.12` : 'transparent',
               }}
-              onClick={() => setResType(key)}
+              onClick={() => setLeftTab(key)}
             >
-              {{ Picture: '图片', Audio: '音频', Video: '视频' }[key]} {byType[key].length}
+              {label}
             </button>
           ))}
         </div>
-        <div
-          className="flex min-h-[80px] flex-col gap-1 rounded p-1"
-          style={{ border: `1px dashed ${dropTarget === 'pool' ? PRIMARY : 'transparent'}` }}
-          {...dropProps((event) => {
-            const shared = parseShared(event)
-            if (shared) onAddFromShared?.(shared)
-          }, true)}
-        >
-          {byType[resType].length === 0 ? (
-            <div className="px-1 text-[10px] leading-relaxed text-muted-foreground">还没有{ { Picture: '图片', Audio: '音频', Video: '视频' }[resType] }资源：从右侧点击/拖入，或点「＋ 新建」。</div>
-          ) : byType[resType].map((item) => {
-            const active = selection?.kind === 'resource' && selection.id === item.id
-            return (
-              <button
-                key={item.id}
-                type="button"
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.setData('text/easymedia-resource-id', item.id)
-                  event.dataTransfer.effectAllowed = 'copy'
-                }}
-                onClick={() => setSelection({ kind: 'resource', id: item.id })}
-                className="flex items-center gap-1 rounded px-1.5 py-1 text-left"
-                style={{ background: active ? `${PRIMARY} / 0.16` : FIELD_BG, border: `1px solid ${active ? PRIMARY : BORDER}` }}
-              >
-                <span
-                  className="shrink-0 rounded px-1 text-[9px]"
+
+        {leftTab === 'subject' ? (
+          <>
+            <div className="flex items-center justify-between px-1 text-[10px] text-muted-foreground">
+              <span>人物 / 场景 / 物体 / 风格</span>
+              <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={addSubject}>＋ 新增</button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+              {subjects.length === 0 ? (
+                <div className="px-1 text-[10px] text-muted-foreground">还没有主体：点「＋ 新增」，或从分镜预览导入。</div>
+              ) : subjects.map((item) => {
+                const active = selection?.kind === 'subject' && selection.id === item.id
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSelection({ kind: 'subject', id: item.id })}
+                    className="flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left"
+                    style={{ background: active ? `${PRIMARY} / 0.16` : FIELD_BG, border: `1px solid ${active ? PRIMARY : BORDER}` }}
+                  >
+                    <span className="truncate text-[12px] font-medium">{item.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{item.type} · 引用 {(item.childResourceIds ?? []).length}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between px-1 text-[10px] text-muted-foreground">
+              <span>项目资源</span>
+              {onCreateEmpty ? (
+                <button type="button" className="rounded px-1" style={{ border: `1px solid ${BORDER}` }} onClick={onCreateEmpty}>＋ 新建</button>
+              ) : null}
+            </div>
+            <div className="flex gap-1">
+              {(['Picture', 'Audio', 'Video'] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className="flex-1 rounded px-1 py-0.5 text-[10px]"
                   style={{
-                    border: `1px solid ${item.status === 'ready' ? PRIMARY : '#fbbf24'}`,
-                    color: item.status === 'ready' ? PRIMARY : '#fbbf24',
+                    border: `1px solid ${resType === key ? PRIMARY : BORDER}`,
+                    color: resType === key ? PRIMARY : undefined,
                   }}
+                  onClick={() => setResType(key)}
                 >
-                  {item.status === 'ready' ? '✓' : item.status === 'need' ? '缺' : item.status === 'generating' ? '…' : '!'}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[11px]">{item.name}</span>
-                <span className="shrink-0 text-[9px] text-muted-foreground">{item.relationship.replace(/_/g, ' ')}</span>
-              </button>
-            )
-          })}
-        </div>
+                  {{ Picture: '图片', Audio: '音频', Video: '视频' }[key]} {byType[key].length}
+                </button>
+              ))}
+            </div>
+            <div
+              className="flex min-h-[80px] flex-1 flex-col gap-1 overflow-auto rounded p-1"
+              style={{ border: `1px dashed ${dropTarget === 'pool' ? PRIMARY : 'transparent'}` }}
+              {...dropProps((event) => {
+                const shared = parseShared(event)
+                if (shared) onAddFromShared?.(shared)
+              }, true)}
+            >
+              {byType[resType].length === 0 ? (
+                <div className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+                  还没有{ { Picture: '图片', Audio: '音频', Video: '视频' }[resType] }资源：从右侧点击/拖到「资源」页签，或点「＋ 新建」。
+                </div>
+              ) : byType[resType].map((item) => {
+                const active = selection?.kind === 'resource' && selection.id === item.id
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/easymedia-resource-id', item.id)
+                      event.dataTransfer.effectAllowed = 'copy'
+                    }}
+                    onClick={() => setSelection({ kind: 'resource', id: item.id })}
+                    className="flex items-center gap-1 rounded px-1.5 py-1 text-left"
+                    style={{ background: active ? `${PRIMARY} / 0.16` : FIELD_BG, border: `1px solid ${active ? PRIMARY : BORDER}` }}
+                  >
+                    <span
+                      className="shrink-0 rounded px-1 text-[9px]"
+                      style={{
+                        border: `1px solid ${item.status === 'ready' ? PRIMARY : '#fbbf24'}`,
+                        color: item.status === 'ready' ? PRIMARY : '#fbbf24',
+                      }}
+                    >
+                      {item.status === 'ready' ? '✓' : item.status === 'need' ? '缺' : item.status === 'generating' ? '…' : '!'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[11px]">{item.name}</span>
+                    <span className="shrink-0 text-[9px] text-muted-foreground">{item.relationship.replace(/_/g, ' ')}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* 列2：详情 */}
@@ -396,11 +428,13 @@ export function AssetsTab({
         role="separator"
         aria-orientation="vertical"
         title="拖动调整共享资源宽度（双击复位）"
-        className="w-[6px] shrink-0 cursor-col-resize"
+        className="group flex w-[10px] shrink-0 cursor-col-resize items-center justify-center"
         style={{ borderLeft: `1px solid ${BORDER}` }}
         onMouseDown={(event) => { dragRef.current = { startX: event.clientX, startWidth: browserWidth } }}
-        onDoubleClick={() => setBrowserWidth(560)}
-      />
+        onDoubleClick={() => setBrowserWidth(460)}
+      >
+        <span className="h-8 w-[3px] rounded-full opacity-40 transition-opacity group-hover:opacity-100" style={{ background: PRIMARY }} />
+      </div>
 
       {/* 列3：共享资源 */}
       <div className="flex shrink-0 flex-col gap-2 p-2" style={{ width: browserWidth }}>
