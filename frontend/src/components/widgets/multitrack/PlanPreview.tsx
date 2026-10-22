@@ -105,6 +105,20 @@ export function PlanPreview({
   importedNote?: string
 }) {
   const [confirmApply, setConfirmApply] = useState(false)
+
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState<{ name: string; beat: string; duration: string; summary: string; directorNote: string }>({ name: '', beat: '', duration: '', summary: '', directorNote: '' })
+
+  const startEdit = (index: number, segment: { name?: string; beat?: string; duration_seconds?: number; summary?: string; director_note?: string }) => {
+    setEditingIndex(index)
+    setEditDraft({
+      name: String(segment.name ?? ''),
+      beat: String(segment.beat ?? ''),
+      duration: String(segment.duration_seconds ?? 4),
+      summary: String(segment.summary ?? ''),
+      directorNote: String(segment.director_note ?? ''),
+    })
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -272,17 +286,4 @@ export function PlanPreview({
     </div>
   )
 }
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
-  const [editDraft, setEditDraft] = useState<{ name: string; beat: string; duration: string; summary: string; directorNote: string }>({ name: '', beat: '', duration: '', summary: '', directorNote: '' })
-
-  const startEdit = (index: number, segment: { name?: string; beat?: string; duration_seconds?: number; summary?: string; director_note?: string }) => {
-    setEditingIndex(index)
-    setEditDraft({
-      name: String(segment.name ?? ''),
-      beat: String(segment.beat ?? ''),
-      duration: String(segment.duration_seconds ?? 4),
-      summary: String(segment.summary ?? ''),
-      directorNote: String(segment.director_note ?? ''),
-    })
-  }
 
