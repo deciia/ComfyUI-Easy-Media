@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
-import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
+import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 export type WorkspaceTab = 'storyboard' | 'subjects' | 'assets' | 'enhance'
