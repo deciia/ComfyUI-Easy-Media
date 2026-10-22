@@ -428,12 +428,12 @@ export function AssetsTab({
         role="separator"
         aria-orientation="vertical"
         title="拖动调整共享资源宽度（双击复位）"
-        className="group flex w-[10px] shrink-0 cursor-col-resize items-center justify-center"
+        className="group flex w-[18px] shrink-0 cursor-col-resize items-center justify-center hover:bg-white/5"
         style={{ borderLeft: `1px solid ${BORDER}` }}
         onMouseDown={(event) => { dragRef.current = { startX: event.clientX, startWidth: browserWidth } }}
         onDoubleClick={() => setBrowserWidth(460)}
       >
-        <span className="h-8 w-[3px] rounded-full opacity-40 transition-opacity group-hover:opacity-100" style={{ background: PRIMARY }} />
+        <span className="h-16 w-[4px] rounded-full opacity-50 transition-opacity group-hover:opacity-100" style={{ background: PRIMARY }} />
       </div>
 
       {/* 列3：共享资源 */}
