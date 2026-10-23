@@ -182,6 +182,97 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'add_segment',
+        description: '在分镜脚本中新增一段（可指定插在哪个段之后）',
+        parameters: {
+          type: 'object',
+          properties: {
+            after_index: { type: 'number', description: '插在第几段之后；0 或不传=开头' },
+            name: { type: 'string' },
+            duration_seconds: { type: 'number' },
+            beat: { type: 'string' },
+            summary: { type: 'string' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'delete_segment',
+        description: '删除分镜脚本中的某一段',
+        parameters: {
+          type: 'object',
+          properties: { index: { type: 'number', description: '段序号，从 1 开始' } },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'update_segment',
+        description: '修改某段的元信息（名称/时长/beat/摘要/导演说明/镜头表），不动提示词',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number' },
+            name: { type: 'string' },
+            duration_seconds: { type: 'number' },
+            beat: { type: 'string' },
+            summary: { type: 'string' },
+            director_note: { type: 'string' },
+            shots: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '完整镜头表，替换原镜头' },
+          },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'split_segment',
+        description: '把某段对半拆成两段（时长各半，提示词清空待重写）',
+        parameters: {
+          type: 'object',
+          properties: { index: { type: 'number' }, first_name: { type: 'string' }, second_name: { type: 'string' } },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'merge_segments',
+        description: '把某段与它后面一段合并（时长相加，镜头表拼接）',
+        parameters: {
+          type: 'object',
+          properties: { index: { type: 'number', description: '合并这一段的下一段' } },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'set_plan_settings',
+        description: '设置脚本级生成参数（画幅/任务类型/衔接/参考图尺寸）',
+        parameters: {
+          type: 'object',
+          properties: {
+            ratio: { type: 'string' },
+            taskType: { type: 'string', enum: ['r2v', 'fmlf2v', 'vi2v', 'l2v', 'passthrough'] },
+            contextMode: { type: 'string', enum: ['shot', 'context', 'context_drift'] },
+            refImageSize: { type: 'string', enum: ['match', 'max'] },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_segments',
         description: '列出分镜脚本所有段（序号/名称/时长/任务类型/是否已写提示词/绑定数量）',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -391,6 +482,35 @@ export function AgentRail({
 
   const readPlan = () => (readWorkspace(projectKey).plan ?? null) as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
 
+  const writePlanAll = (planNext: StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) => {
+    const fps = frameRate || 24
+    let cursor = 0
+    const segments = planNext.segments.map((segment, i) => {
+      const duration = Math.max(1, Number(segment.duration_seconds ?? 0) || 4)
+      const frames = Math.max(1, Math.round(duration * fps))
+      const next = {
+        ...segment,
+        index: i + 1,
+        duration_seconds: duration,
+        duration_frames: frames,
+        start_frame: cursor,
+        end_frame: cursor + frames,
+      }
+      cursor += frames
+      return next
+    })
+    const totalSeconds = segments.reduce((acc, segment) => acc + Number(segment.duration_seconds ?? 0), 0)
+    writeWorkspace(projectKey, {
+      plan: {
+        ...(planNext as Record<string, unknown>),
+        segments,
+        total_seconds: Number(totalSeconds.toFixed(2)),
+        total_frames: cursor,
+        frame_rate: fps,
+      } as never,
+    })
+  }
+
   const writePlanSegment = (index1: number, patch: Record<string, unknown>) => {
     const planNow = readPlan()
     if (!planNow?.segments) return { error: '当前没有分镜脚本' }
@@ -413,6 +533,107 @@ export function AgentRail({
   async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const planNow = readPlan()
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+    if (name === 'add_segment') {
+      if (!planNow) return { error: '当前没有分镜脚本，请先用 plan_storyboard 生成' }
+      const after = Math.max(0, Math.min(segments.length, Number(args.after_index ?? 0) || 0))
+      const neighbor = segments[Math.max(0, after - 1)]
+      const newSegment = {
+        name: String(args.name ?? `新段 ${after + 1}`),
+        beat: String(args.beat ?? ''),
+        duration_seconds: Number(args.duration_seconds ?? 4) || 4,
+        summary: String(args.summary ?? ''),
+        director_note: '',
+        shots: [],
+        subjects: [],
+        resources: [],
+        settings: { ...((neighbor?.settings as Record<string, unknown> | undefined) ?? ((planNow as Record<string, unknown>).settings as Record<string, unknown> | undefined) ?? {}) },
+      }
+      const nextSegments = [...segments.slice(0, after), newSegment, ...segments.slice(after)]
+      writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      return { ok: true, inserted_at: after + 1, total: nextSegments.length }
+    }
+    if (name === 'delete_segment') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      const index0 = Number(args.index ?? 0) - 1
+      if (index0 < 0 || index0 >= segments.length) return { error: `段 ${Number(args.index)} 不存在` }
+      const nextSegments = segments.filter((_segment, i) => i !== index0)
+      if (!nextSegments.length) return { error: '不能删除最后一段（脚本至少保留一段）' }
+      writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      return { ok: true, deleted: index0 + 1, total: nextSegments.length }
+    }
+    if (name === 'update_segment') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      const index0 = Number(args.index ?? 0) - 1
+      if (index0 < 0 || index0 >= segments.length) return { error: `段 ${Number(args.index)} 不存在` }
+      const patch: Record<string, unknown> = {}
+      for (const key of ['name', 'beat', 'summary', 'director_note'] as const) {
+        if (typeof args[key] === 'string') patch[key] = args[key]
+      }
+      if (Number.isFinite(Number(args.duration_seconds))) patch.duration_seconds = Number(args.duration_seconds)
+      if (Array.isArray(args.shots)) patch.shots = args.shots
+      const nextSegments = segments.map((segment, i) => (i === index0 ? { ...segment, ...patch } : segment))
+      writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      return { ok: true, updated: index0 + 1, fields: Object.keys(patch) }
+    }
+    if (name === 'split_segment') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      const index0 = Number(args.index ?? 0) - 1
+      const segment = segments[index0]
+      if (!segment) return { error: `段 ${Number(args.index)} 不存在` }
+      const duration = Math.max(1, Number(segment.duration_seconds ?? 4) || 4)
+      const half = Math.max(0.5, Number((duration / 2).toFixed(1)))
+      const baseName = String(segment.name ?? `段${index0 + 1}`)
+      const shots = Array.isArray(segment.shots) ? (segment.shots as Array<Record<string, unknown>>) : []
+      const mid = Math.ceil(shots.length / 2)
+      const first = {
+        ...segment,
+        name: String(args.first_name ?? `${baseName}（上）`),
+        duration_seconds: half,
+        shots: shots.slice(0, mid),
+        promptA: '', promptB: '', finalA: '', finalB: '',
+      }
+      const second = {
+        ...segment,
+        name: String(args.second_name ?? `${baseName}（下）`),
+        duration_seconds: Number((duration - half).toFixed(1)),
+        shots: shots.slice(mid),
+        promptA: '', promptB: '', finalA: '', finalB: '',
+      }
+      const nextSegments = [...segments.slice(0, index0), first, second, ...segments.slice(index0 + 1)]
+      writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      return { ok: true, split: index0 + 1, new_total: nextSegments.length }
+    }
+    if (name === 'merge_segments') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      const index0 = Number(args.index ?? 0) - 1
+      const first = segments[index0]
+      const second = segments[index0 + 1]
+      if (!first || !second) return { error: `段 ${Number(args.index)} 或下一段不存在` }
+      const merged = {
+        ...first,
+        name: String(first.name ?? '') + '+' + String(second.name ?? ''),
+        duration_seconds: Number((Number(first.duration_seconds ?? 0) + Number(second.duration_seconds ?? 0)).toFixed(1)),
+        summary: [first.summary, second.summary].filter(Boolean).join('；'),
+        shots: [
+          ...(Array.isArray(first.shots) ? (first.shots as Array<Record<string, unknown>>) : []),
+          ...(Array.isArray(second.shots) ? (second.shots as Array<Record<string, unknown>>) : []),
+        ].slice(0, 6),
+        promptA: '', promptB: '', finalA: '', finalB: '',
+      }
+      const nextSegments = [...segments.slice(0, index0), merged, ...segments.slice(index0 + 2)]
+      writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      return { ok: true, merged: [index0 + 1, index0 + 2], new_total: nextSegments.length }
+    }
+    if (name === 'set_plan_settings') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      const current = ((planNow as Record<string, unknown>).settings ?? {}) as Record<string, unknown>
+      const nextSettings: Record<string, unknown> = { ...current }
+      for (const key of ['ratio', 'taskType', 'contextMode', 'refImageSize'] as const) {
+        if (typeof args[key] === 'string' && args[key]) nextSettings[key] = args[key]
+      }
+      writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), settings: nextSettings } as never })
+      return { ok: true, settings: nextSettings }
+    }
     if (name === 'get_plan') {
       if (!planNow) return { error: '当前没有分镜脚本' }
       return {

@@ -56,6 +56,21 @@ reply 要用中文、简洁、像同事说话，不要复述 JSON。
 """
 
 
+AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体。你通过**调用工具**干活，而不是输出 JSON 动作。
+
+工作原则：
+1. 先读后写：动手前先 get_plan / list_segments / list_resources 搞清楚现状，不要凭猜测编段号或资源名。
+2. 一次只做用户要求的事，不擅自扩大范围；连续相关的小改动可以合并成一轮完成。
+3. 每次写完用一句话汇报改了什么（改了哪几段、字段变化），不要复述工具输出。
+4. 需要用户拍板（题材方向、是否覆盖、选哪个素材）时调用 ask_user 给选项，不要替用户决定。
+5. 不确定的信息不要编造：没有的素材就用 list_input_files 查，查不到就问用户。
+6. 台词/提示词要符合 MiniMax-H3 规范：台词只写在 <d> 标签里；镜头描述里不写台词原文；参考素材用 <Subject n>/<Picture n>/<Audio n> 令牌引用。
+7. 生成分镜用 plan_storyboard；改分镜用 revise_storyboard 或段级工具；提示词用 generate_prompt / generate_all_prompts；落任务轨用 apply_storyboard；正式生成用 run_generation；生成后可用 list_outputs 查产物。
+8. 应用任务轨/正式生成属于重动作：执行前先用一句话说明将发生什么（除非用户已明确要求）。
+
+直接开始干活，不要解释你有哪些工具。"""
+
+
 def _compact_context(context: dict | None) -> dict:
     context = context or {}
     segments = []
@@ -247,8 +262,9 @@ async def run_agent_step(
     from .prompt_enhancer import PromptEnhancerError, resolve_settings
 
     settings = resolve_settings(config)
+    base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = (
-        AGENT_SYSTEM_PROMPT
+        base_prompt
         + "\n当前项目上下文（JSON）：\n"
         + json.dumps(_compact_context(context), ensure_ascii=False)
     )
