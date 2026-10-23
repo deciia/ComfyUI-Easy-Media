@@ -1163,6 +1163,93 @@ export function PromptEnhancerModal({
                     <span>{row.text}</span>
                   </div>
                 ))}
+                <div className="mt-1 border-t pt-1" style={{ borderColor: BORDER }}>
+                  <div className="mb-1 text-[11px] text-muted-foreground">保存目标（同步到导演台设置）</div>
+                  <div className="flex flex-wrap gap-3">
+                    {(['task', 'video', 'audio', 'subtitle'] as const).map((key) => (
+                      <label key={key} className="flex cursor-pointer items-center gap-1 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={directorSettings.save.targets[key]}
+                          onChange={(event) => {
+                            const next = {
+                              ...directorSettings,
+                              save: {
+                                ...directorSettings.save,
+                                targets: { ...directorSettings.save.targets, [key]: event.target.checked },
+                              },
+                            }
+                            setDirectorSettings(next)
+                            writeDirectorSettings(settingsProject, next)
+                          }}
+                        />
+                        {{ task: '任务轨', video: '视频轨', audio: '音频轨', subtitle: '字幕轨' }[key]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  本次将写入：提示词 {abTab.toUpperCase()} 版 1 条
+                  {directorSettings.save.writeImages ? ` · 参考图 ${(() => {
+                    const pictures = boundIds.flatMap((id) => {
+                      const resource = resources.find((item) => item.id === id)
+                      if (!resource) return []
+                      if (resource.type === 'Subject') {
+                        return (resource.childResourceIds ?? [])
+                          .map((childId) => resources.find((item) => item.id === childId))
+                          .filter((item): item is ProjectResource => Boolean(item) && item!.type === 'Picture')
+                      }
+                      return resource.type === 'Picture' ? [resource] : []
+                    })
+                    return pictures.filter((item) => item.imageFile || item.name).length
+                  })()} 张` : ''}
+                  {directorSettings.save.targets.audio ? ` · 音频段 ${(() => {
+                    const audios = boundIds.flatMap((id) => {
+                      const resource = resources.find((item) => item.id === id)
+                      if (!resource) return []
+                      if (resource.type === 'Subject') {
+                        return (resource.childResourceIds ?? [])
+                          .map((childId) => resources.find((item) => item.id === childId))
+                          .filter((item): item is ProjectResource => Boolean(item) && item!.type === 'Audio')
+                      }
+                      return resource.type === 'Audio' ? [resource] : []
+                    })
+                    return audios.filter((item) => item.audioFile || item.name).length
+                  })()} 个` : ''}
+                  {directorSettings.save.targets.video ? ` · 视频段 ${(() => {
+                    const videos = boundIds.flatMap((id) => {
+                      const resource = resources.find((item) => item.id === id)
+                      if (!resource) return []
+                      if (resource.type === 'Subject') {
+                        return (resource.childResourceIds ?? [])
+                          .map((childId) => resources.find((item) => item.id === childId))
+                          .filter((item): item is ProjectResource => Boolean(item) && item!.type === 'Video')
+                      }
+                      return resource.type === 'Video' ? [resource] : []
+                    })
+                    return videos.filter((item) => item.videoFile || item.name).length
+                  })()} 个` : ''}
+                  {directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled ? ` · 字幕 ${(() => {
+                    let count = 0
+                    if (directorSettings.subtitle.fromDialogue) {
+                      const planData = readWorkspace(storeKey).plan as { segments?: Array<{ shots?: Array<Record<string, unknown>> }> } | null
+                      for (const planSegment of planData?.segments ?? []) {
+                        for (const shot of planSegment.shots ?? []) {
+                          for (const entry of (shot as { dialogue?: Array<{ line?: string }> }).dialogue ?? []) {
+                            count += String(entry.line ?? '').trim()
+                              .split(/(?<=[。！？；…])/).map((item) => item.trim()).filter(Boolean).length
+                          }
+                        }
+                      }
+                    }
+                    if (directorSettings.subtitle.fromTaggedDescription) {
+                      for (const subject of workspaceSubjects) {
+                        count += Array.from((subject.description ?? '').matchAll(/<#([^:>]+):([^>]+)>/g)).length
+                      }
+                    }
+                    return count
+                  })()} 句` : ''}
+                </div>
                 {prompted < segs.length ? (
                   <div className="text-[11px] text-muted-foreground">提示：还有 {segs.length - prompted} 段没写提示词，可在「提示词增强」页补齐。</div>
                 ) : null}
@@ -1809,93 +1896,89 @@ export function PromptEnhancerModal({
                 onClick={() => {
                   const target = finalDraft || finalPrompt
                   if (!target) return
-                  const registry = globalThis as unknown as {
-                    __easyMediaUpdateSegment?: (
-                      segmentId: string,
-                      payload: { prompt?: string; variant?: 'a' | 'b'; images?: Array<{ name: string; subfolder?: string }> },
-                    ) => boolean
-                  }
+                  // 展开绑定（主体→子资源）
+                  const expand = (ids: string[]) => ids.flatMap((id) => {
+                    const resource = resources.find((item) => item.id === id)
+                    if (!resource) return []
+                    if (resource.type === 'Subject') {
+                      return (resource.childResourceIds ?? [])
+                        .map((childId) => resources.find((item) => item.id === childId))
+                        .filter((item): item is ProjectResource => Boolean(item))
+                    }
+                    return [resource]
+                  })
+                  const expanded = expand(boundIds)
+                  const imagesList = directorSettings.save.writeImages
+                    ? expanded
+                        .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
+                        .map((item) => ({ name: item.imageFile ?? item.name, subfolder: item.subfolder }))
+                    : undefined
+                  const audioItems = directorSettings.save.targets.audio
+                    ? expanded
+                        .filter((item) => item.type === 'Audio' && (item.audioFile || item.name))
+                        .map((item) => ({
+                          name: item.audioFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                          trackRole: item.trackRole ?? 'voice',
+                          trackName: directorSettings.audio.roleTracks[item.trackRole ?? 'voice'],
+                          volumeDb: directorSettings.audio.defaultDb[item.trackRole ?? 'voice'] ?? 0,
+                        }))
+                    : []
+                  const videoItems = directorSettings.save.targets.video
+                    ? expanded
+                        .filter((item) => item.type === 'Video' && (item.videoFile || item.name))
+                        .map((item) => ({
+                          name: item.videoFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                        }))
+                    : []
+                  const subtitleEnabled = directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled
                   let written = false
-                  // W2：按设置把绑定的音频/视频资源落到对应轨道
+                  // W4：一体化保存（任务段+音视频+字幕，单次提交 → 撤销单步）
                   if (segmentId) {
-                    const tracksRegistry = globalThis as unknown as {
-                      __easyMediaSaveTracks?: (
+                    const allRegistry = globalThis as unknown as {
+                      __easyMediaApplyAll?: (
                         segmentId: string,
-                        payload: {
-                          audio: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output'; trackRole?: string; trackName?: string; volumeDb?: number }>
-                          video: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' }>
-                          subtitleEnabled?: boolean
-                          subtitleVariant?: 'a' | 'b'
-                        },
+                        payload: Record<string, unknown>,
                       ) => boolean
                     }
-                    if (tracksRegistry.__easyMediaSaveTracks) {
-                      const expand = (ids: string[]) => ids.flatMap((id) => {
-                        const resource = resources.find((item) => item.id === id)
-                        if (!resource) return []
-                        if (resource.type === 'Subject') {
-                          return (resource.childResourceIds ?? [])
-                            .map((childId) => resources.find((item) => item.id === childId))
-                            .filter((item): item is ProjectResource => Boolean(item))
-                        }
-                        return [resource]
-                      })
-                      const expanded = expand(boundIds)
-                      const audioItems = directorSettings.save.targets.audio
-                        ? expanded
-                            .filter((item) => item.type === 'Audio' && (item.audioFile || item.name))
-                            .map((item) => ({
-                              name: item.audioFile ?? item.name,
-                              subfolder: item.subfolder,
-                              sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
-                              trackRole: item.trackRole ?? 'voice',
-                              trackName: directorSettings.audio.roleTracks[item.trackRole ?? 'voice'],
-                              volumeDb: directorSettings.audio.defaultDb[item.trackRole ?? 'voice'] ?? 0,
-                            }))
-                        : []
-                      const videoItems = directorSettings.save.targets.video
-                        ? expanded
-                            .filter((item) => item.type === 'Video' && (item.videoFile || item.name))
-                            .map((item) => ({
-                              name: item.videoFile ?? item.name,
-                              subfolder: item.subfolder,
-                              sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
-                            }))
-                        : []
-                      if (audioItems.length > 0 || videoItems.length > 0) {
-                        try {
-                          tracksRegistry.__easyMediaSaveTracks(segmentId, {
+                    if (allRegistry.__easyMediaApplyAll) {
+                      try {
+                        written = allRegistry.__easyMediaApplyAll(segmentId, {
+                          prompt: target,
+                          variant: abTab,
+                          images: imagesList,
                           audio: audioItems,
                           video: videoItems,
-                          subtitleEnabled: directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled,
+                          subtitleEnabled,
                           subtitleVariant: abTab,
                         })
-                        } catch (error) {
-                          console.error('[EasyMedia] save tracks failed', error)
-                        }
+                      } catch (error) {
+                        console.error('[EasyMedia] apply all failed', error)
                       }
                     }
                   }
-                  if (segmentId && registry.__easyMediaUpdateSegment) {
-                    try {
-                      written = registry.__easyMediaUpdateSegment(segmentId, {
-                        prompt: target,
-                        variant: abTab,
-                        images: directorSettings.save.writeImages ? boundIds.flatMap((id) => {
-                          const resource = resources.find((item) => item.id === id)
-                          if (!resource) return []
-                          const list = resource.type === 'Subject'
-                            ? (resource.childResourceIds ?? [])
-                              .map((childId) => resources.find((item) => item.id === childId))
-                              .filter((item): item is ProjectResource => Boolean(item))
-                            : [resource]
-                          return list
-                            .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
-                            .map((item) => ({ name: item.imageFile ?? item.name, subfolder: item.subfolder }))
-                        }) : undefined,
-                      })
-                    } catch (error) {
-                      console.error('[EasyMedia] update segment failed', error)
+                  // 回退：旧两步路径
+                  if (!written && segmentId) {
+                    const legacy = globalThis as unknown as {
+                      __easyMediaSaveTracks?: (segmentId: string, payload: Record<string, unknown>) => boolean
+                      __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+                    }
+                    if (legacy.__easyMediaSaveTracks && (audioItems.length > 0 || videoItems.length > 0 || subtitleEnabled)) {
+                      try {
+                        legacy.__easyMediaSaveTracks(segmentId, { audio: audioItems, video: videoItems, subtitleEnabled, subtitleVariant: abTab })
+                      } catch (error) {
+                        console.error('[EasyMedia] save tracks failed', error)
+                      }
+                    }
+                    if (legacy.__easyMediaUpdateSegment) {
+                      try {
+                        written = legacy.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: abTab, images: imagesList })
+                      } catch (error) {
+                        console.error('[EasyMedia] update segment failed', error)
+                      }
                     }
                   }
                   if (!written) onApply(target, brief, globalDraft)

@@ -1441,8 +1441,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   })
 
-  // 写入通道（W2）：把④绑定的音频/视频资源落到对应轨道
-  // 音频按角色归轨（同名轨复用，缺则新建，reference 轨默认静音）；视频落视频轨且不锁定，保存后可手动编辑
+  // 写入通道（W2/W4）：音视频/字幕落轨 + 一体化保存（单次提交，撤销单步）
   useEffect(() => {
     type AssetItem = {
       name: string
@@ -1452,17 +1451,23 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       trackName?: string
       volumeDb?: number
     }
-    const saveTracks = (
-      segmentId: string,
-      payload: { audio: AssetItem[]; video: AssetItem[]; subtitleEnabled?: boolean; subtitleVariant?: 'a' | 'b' },
-    ) => {
-      const taskTrack = data.tracks.find((track) => track.type === 'task')
-      const segment = taskTrack?.segments.find((item) => item.id === segmentId)
-      if (!segment) return false
+    type SavePayload = {
+      audio: AssetItem[]
+      video: AssetItem[]
+      subtitleEnabled?: boolean
+      subtitleVariant?: 'a' | 'b'
+    }
+
+    /** 在给定轨道副本上落音频/视频/字幕，返回新轨道数组（不提交） */
+    const buildAssetTracks = (
+      tracksIn: MultiTrack[],
+      segment: MultiTrackSegment,
+      payload: SavePayload,
+      stamp: number,
+    ): MultiTrack[] => {
+      let tracks = [...tracksIn]
       const start = segment.start_frame
       const end = segment.end_frame
-      const stamp = Date.now()
-      let tracks = [...data.tracks]
 
       const ensureTrack = (name: string, type: 'audio' | 'video' | 'subtitle', muted: boolean) => {
         const found = tracks.find((track) => track.type === type && track.name === name)
@@ -1481,11 +1486,10 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
 
       const upsertSegment = (track: MultiTrack, item: AssetItem, mediaType: 'audio' | 'video') => {
-        const stableKey = `asset-${segmentId}-${mediaType}-${item.trackRole ?? 'video'}-${item.name}`
-        const sourceType = item.sourceType ?? 'input'
+        const stableKey = `asset-${segment.id}-${mediaType}-${item.trackRole ?? 'video'}-${item.name}`
         const content: Record<string, unknown> = {
           media_type: mediaType,
-          source_type: sourceType,
+          source_type: item.sourceType ?? 'input',
           file_name: item.name,
           subfolder: item.subfolder ?? '',
           stable_key: stableKey,
@@ -1528,7 +1532,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         upsertSegment(track, item, 'video')
       }
 
-      // W3：字幕轨（按导演台设置抽取台词，按字数比例分配时间，幂等）
+      // 字幕（按导演台设置抽取台词，按字数比例分配时间，幂等）
       if (payload.subtitleEnabled) {
         const projectKey = data.project?.name ?? 'default'
         const settings = readDirectorSettings(projectKey)
@@ -1551,7 +1555,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           }
         }
         if (settings.subtitle.fromTaggedDescription) {
-          const boundIds = store.bindings?.[`${segmentId}:${payload.subtitleVariant ?? 'a'}`] ?? []
+          const boundIds = store.bindings?.[`${segment.id}:${payload.subtitleVariant ?? 'a'}`] ?? []
           for (const subject of (store.resources ?? []).filter((item) => item.type === 'Subject' && boundIds.includes(item.id))) {
             for (const match of (subject.description ?? '').matchAll(/<#([^:>]+):([^>]+)>/g)) {
               lines.push({ speaker: match[1].trim(), text: match[2].trim() })
@@ -1585,7 +1589,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               content: {
                 media_type: 'subtitle',
                 text,
-                stable_key: `sub-${segmentId}-${index}`,
+                stable_key: `sub-${segment.id}-${index}`,
                 subtitle_style: {
                   font_size: settings.subtitle.style.font_size,
                   color: settings.subtitle.style.color,
@@ -1601,7 +1605,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             } as MultiTrackSegment)
             cursor += duration
           })
-          const prefix = `sub-${segmentId}-`
+          const prefix = `sub-${segment.id}-`
           tracks = tracks.map((current) => (
             current.id === track.id
               ? {
@@ -1615,6 +1619,60 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           ))
         }
       }
+      return tracks
+    }
+
+    /** 一体化保存：任务段 patch + 音视频/字幕落轨，单次提交（撤销单步） */
+    const applyAll = (
+      segmentId: string,
+      payload: SavePayload & {
+        prompt?: string
+        variant?: 'a' | 'b'
+        taskMode?: string
+        continuityMode?: string
+        refImageSize?: string
+        images?: Array<{ name: string; subfolder?: string }>
+      },
+    ) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const segment = taskTrack?.segments.find((item) => item.id === segmentId)
+      if (!taskTrack || !segment) return false
+      const stamp = Date.now()
+      let tracks = [...data.tracks]
+      const patch: Record<string, unknown> = {}
+      if (typeof payload.prompt === 'string') {
+        if (payload.variant === 'b') patch.user_prompt_b = payload.prompt
+        else patch.user_prompt = payload.prompt
+      }
+      if (payload.variant) patch.user_prompt_variant = payload.variant
+      if (payload.taskMode) patch.task_mode = payload.taskMode
+      if (payload.continuityMode) patch.continuity_mode = payload.continuityMode
+      if (payload.refImageSize) patch.ref_image_size = payload.refImageSize
+      if (payload.images) {
+        patch.images = payload.images.map((item, index) => ({
+          id: `img-${stamp}-${index + 1}`,
+          source_type: 'input',
+          file_name: item.name,
+          subfolder: item.subfolder ?? '',
+        }))
+      }
+      tracks = tracks.map((track) => (
+        track.id === taskTrack.id
+          ? {
+              ...track,
+              segments: track.segments.map((item) => (
+                item.id === segmentId
+                  ? { ...item, content: { ...item.content, ...patch } as MultiTrackSegment['content'] }
+                  : item
+              )),
+            }
+          : track
+      ))
+      const patchedSegment = tracks
+        .find((track) => track.id === taskTrack.id)
+        ?.segments.find((item) => item.id === segmentId)
+      if (!patchedSegment) return false
+      tracks = buildAssetTracks(tracks, patchedSegment, payload, stamp)
       commitNormalizedTrackChange({
         ...data,
         tracks,
@@ -1622,12 +1680,30 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       })
       return true
     }
-    const registry = globalThis as unknown as { __easyMediaSaveTracks?: typeof saveTracks }
+
+    /** 兼容旧入口：仅落音视频/字幕 */
+    const saveTracks = (segmentId: string, payload: SavePayload) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const segment = taskTrack?.segments.find((item) => item.id === segmentId)
+      if (!segment) return false
+      const tracks = buildAssetTracks([...data.tracks], segment, payload, Date.now())
+      commitNormalizedTrackChange({
+        ...data,
+        tracks,
+        total_length: calculateTotalLength(tracks, data.frame_rate),
+      })
+      return true
+    }
+
+    const registry = globalThis as unknown as {
+      __easyMediaSaveTracks?: typeof saveTracks
+      __easyMediaApplyAll?: typeof applyAll
+    }
     registry.__easyMediaSaveTracks = saveTracks
+    registry.__easyMediaApplyAll = applyAll
     return () => {
-      if (registry.__easyMediaSaveTracks === saveTracks) {
-        delete registry.__easyMediaSaveTracks
-      }
+      if (registry.__easyMediaSaveTracks === saveTracks) delete registry.__easyMediaSaveTracks
+      if (registry.__easyMediaApplyAll === applyAll) delete registry.__easyMediaApplyAll
     }
   })
 
