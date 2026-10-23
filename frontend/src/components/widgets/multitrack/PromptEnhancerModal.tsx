@@ -9,6 +9,8 @@ import { type WorkspaceSubject } from './WorkspacePanels'
 import { AssetsTab } from './AssetsTab'
 import { PromptQualityBar } from './PromptQualityBar'
 import { ReferenceBar } from './ReferenceBar'
+import { DirectorSettingsModal } from './DirectorSettingsModal'
+import { readDirectorSettings, writeDirectorSettings, type DirectorSettings } from './directorSettings'
 import { AgentRail } from './AgentRail'
 import {
   addResourceFromShared,
@@ -370,6 +372,9 @@ export function PromptEnhancerModal({
   const [finalA, setFinalA] = useState('')
   const [finalB, setFinalB] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
+  const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
   const [abTab, setAbTab] = useState<'a' | 'b'>('a')
   const activePrompt = abTab === 'a' ? brief : draftPrompt
   const finalDraft = abTab === 'a' ? finalA : finalB
@@ -1458,6 +1463,18 @@ export function PromptEnhancerModal({
               {/* 中栏：草稿 + @ 引用 */}
               <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">导演台设置</span>
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-[11px]"
+                      style={{ border: '1px solid hsl(var(--border, 240 6% 25%))' }}
+                      onClick={() => setSettingsOpen(true)}
+                      title="保存默认项 / 音频字幕 / AI 上下文 / API"
+                    >
+                      ⚙ 设置
+                    </button>
+                  </div>
                   <span className={labelClass}>全局提示词（整个项目）</span>
                   <textarea
                     style={{ ...fieldStyle, minHeight: 64, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
@@ -1831,6 +1848,15 @@ export function PromptEnhancerModal({
           </>
         )}
       </div>
+      <DirectorSettingsModal
+        open={settingsOpen}
+        settings={directorSettings}
+        onClose={() => setSettingsOpen(false)}
+        onSave={(next) => {
+          setDirectorSettings(next)
+          writeDirectorSettings(settingsProject, next)
+        }}
+      />
     </div>,
     document.body,
   )
