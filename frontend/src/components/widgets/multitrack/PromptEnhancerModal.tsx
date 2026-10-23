@@ -1003,15 +1003,69 @@ export function PromptEnhancerModal({
     }
   }
 
+  /** 发送前确定性清洗：去分镜元信息行、中文章节名映射为官方字段名；令牌原样保留 */
+  const sanitizeBriefForGenerate = (text: string): string => {
+    const sectionMap: Array<[RegExp, string]> = [
+      [/^\s*【画面描述】\s*$/gm, 'integrated_multimodal_description:'],
+      [/^\s*【主体定义】\s*$/gm, 'subject_definitions:'],
+      [/^\s*【环境音】\s*$/gm, 'overall_soundscape:'],
+      [/^\s*【配乐】\s*$/gm, 'non_diegetic_music:'],
+    ]
+    let out = text
+    for (const [pattern, replacement] of sectionMap) out = out.replace(pattern, replacement)
+    return out
+      .split('\n')
+      .filter((line) => !/^\s*(beat|时长|duration|shots|镜头表|导演说明|衔接|参考图)\s*[:：]/i.test(line))
+      .join('\n')
+      .trim()
+  }
+
+  /** 分镜任务模式 → 后端模板参数 */
+  const taskTemplateOf = (raw: string): { task_type: string; task_mode: string } => {
+    const value = raw.toLowerCase()
+    if (value.includes('r2v') || value.includes('ref')) return { task_type: 'r2v', task_mode: 'ref' }
+    if (value.includes('fmlf2v') || value.includes('fl2v')) return { task_type: 'i2v', task_mode: 'default' }
+    if (value.includes('vi2v') || value.includes('edit')) return { task_type: 'r2v', task_mode: 'ref' }
+    if (value.includes('l2v')) return { task_type: 'l2v', task_mode: 'l2v' }
+    return { task_type: 't2v', task_mode: 'default' }
+  }
+
   async function postGenerate(payloadOptions: Record<string, unknown>, text: string) {
     const response = await fetch('/easy-media/prompt-studio/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        brief: text,
+        brief: sanitizeBriefForGenerate(text),
         options: { ...options, ...payloadOptions, ...presetPayload() },
         global_prompt: globalDraft,
-        subjects: (workspaceSubjects.length > 0 ? workspaceSubjects : libraryNames.map((name) => ({ name }))).map((item, index) => ({ name: item.name, label: `<Subject ${index + 1}>` })),
+        // D2：任务模式（脚本段 > 脚本级 > 默认）、段时长、输出语言
+        ...(() => {
+          const segSettings = (activeScriptSegment as unknown as { settings?: { taskType?: string } } | undefined)?.settings
+          const planSettings = (scriptPlan as unknown as { settings?: { taskType?: string } } | null)?.settings
+          const raw = segSettings?.taskType || planSettings?.taskType || ''
+          return { task_type: taskTemplateOf(raw).task_type, task_mode: taskTemplateOf(raw).task_mode, task_label: raw }
+        })(),
+        duration_seconds: Number((activeScriptSegment as unknown as { duration_seconds?: number } | undefined)?.duration_seconds ?? 0) || undefined,
+        language: String(payloadOptions.output_language ?? options.output_language ?? ''),
+        // D2：主体带令牌/描述/保留项（绑定主体用契约编号，未绑定按池序续号）
+        subjects: (() => {
+          const subjectEntries = editorResources.filter((item) => item.type === 'subject')
+          return subjectEntries.map((entry) => {
+            const pool = resources.find((item) => item.name === entry.label.replace(/（.*）$/, ''))
+            return {
+              token: entry.token,
+              name: pool?.name ?? entry.label,
+              description: pool?.description ?? '',
+              retention: pool?.retention ?? [],
+            }
+          })
+        })(),
+        // D2：本段绑定清单（编号契约同源）
+        bindings: {
+          pictures: editorResources.filter((item) => item.type === 'image').map((item) => ({ token: item.token, name: item.label })),
+          audio: editorResources.filter((item) => item.type === 'audio').map((item) => ({ token: item.token, name: item.label })),
+          video: editorResources.filter((item) => item.type === 'video').map((item) => ({ token: item.token, name: item.label })),
+        },
         images: imagePaths ?? [],
         picture_count: pictureCount ?? null,
         audio_count: audioCount ?? null,
