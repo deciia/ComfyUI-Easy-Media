@@ -80,11 +80,11 @@ export function DirectorSettingsModal({
 
   return (
     <div
-      style={{ position: 'fixed', top: 88, left: 0, right: 0, bottom: 0, zIndex: 2147483002, background: 'hsl(var(--background, 240 10% 8%))', display: 'flex', alignItems: 'stretch' }}
+      style={{ position: 'fixed', top: 88, right: 0, bottom: 0, width: 560, maxWidth: '92vw', zIndex: 2147483002, background: 'hsl(var(--card, 240 10% 10%))', borderLeft: '1px solid hsl(var(--border, 240 6% 25%))', boxShadow: '-8px 0 24px rgba(0,0,0,0.35)', display: 'flex', alignItems: 'stretch' }}
       onClick={onClose}
     >
       <div
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'hsl(var(--card, 240 10% 10%))', border: 'none', borderRadius: 0, padding: 16, gap: 12, minHeight: 0 }}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'transparent', border: 'none', borderRadius: 0, padding: 14, gap: 10, minHeight: 0 }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-2">
