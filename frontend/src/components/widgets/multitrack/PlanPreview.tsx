@@ -96,7 +96,7 @@ export function PlanPreview({
   plan: StoryboardPlan
   onBack?: () => void
   onSaveDraft: () => void
-  onOpenEnhance?: () => void
+  onOpenEnhance?: (scriptIndex?: number) => void
   onPatchPlan?: (settings: Record<string, string>) => void
   saved: boolean
   onApply?: () => boolean
@@ -163,7 +163,7 @@ export function PlanPreview({
           </Button>
         ) : null}
         {onOpenEnhance ? (
-          <Button size="sm" variant="secondary" onClick={onOpenEnhance}>→ 提示词增强</Button>
+          <Button size="sm" variant="secondary" onClick={() => onOpenEnhance?.(0)}>→ 提示词增强</Button>
         ) : null}
         <Button size="sm" variant="secondary" onClick={onSaveDraft} disabled={saved}>
           {saved ? '已保存' : '保存草稿'}

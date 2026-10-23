@@ -33,7 +33,7 @@ export interface StoryboardTabProps {
   onImportPlanSubjects?: (plan: StoryboardPlan) => void
   onImportPlanResources?: (plan: StoryboardPlan) => void
   onOpenAssets?: () => void
-  onOpenEnhance?: () => void
+  onOpenEnhance?: (scriptIndex?: number) => void
   planning?: boolean
   projectKey?: string
   onPlan?: any
@@ -141,7 +141,7 @@ export function StoryboardTab({
           setImportedNote(`保存失败：${String(saveError)}`)
         }
       }}
-      onOpenEnhance={onOpenEnhance}
+      onOpenEnhance={() => onOpenEnhance?.(planFocus ?? 0)}
       onPatchPlan={(settings) => {
         const current = readWorkspace(projectKey).plan as StoryboardPlan | null
         if (!current) return

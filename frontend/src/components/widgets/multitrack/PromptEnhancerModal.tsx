@@ -721,13 +721,22 @@ export function PromptEnhancerModal({
   }, [brief, libraryNames])
 
 
-  // 切换脚本段/任务片段后，从脚本段刷新编辑缓冲（任务段旧值作为迁移兜底）
+  // 切换脚本段 / 脚本内容变化后，从脚本段刷新编辑缓冲
+  // A 栏兜底顺序：promptA → 脚本段 brief（分镜内容拼装）→ 对应任务段 user_prompt
   useEffect(() => {
     skipAutosaveRef.current = true
     const planNow = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
     const seg = planNow?.segments?.[activeScriptIndex] as Record<string, unknown> | undefined
     const trackContent = (matchedTaskSegment?.content ?? {}) as unknown as Record<string, unknown>
-    setBrief(repairSpacing(String(seg?.promptA ?? trackContent.user_prompt ?? '')))
+    const scriptBrief = seg ? String(formatPlanSegmentBrief(seg as never) ?? '').trim() : ''
+    const promptA = String(seg?.promptA ?? '').trim()
+      || scriptBrief
+      || String(trackContent.user_prompt ?? '')
+    setBrief(repairSpacing(promptA))
+    // 分镜有内容但还没写过 A 稿时，把兜底稿回填到脚本段，保持脚本层可追踪
+    if (seg && !String(seg.promptA ?? '').trim() && scriptBrief) {
+      patchScriptSegment({ promptA: scriptBrief })
+    }
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
     setFinalA(String(seg?.finalA ?? ''))
     setFinalB(String(seg?.finalB ?? ''))
@@ -742,7 +751,7 @@ export function PromptEnhancerModal({
     }, 300)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segmentId, activeScriptIndex, bindingProjectKey])
+  }, [segmentId, activeScriptIndex, bindingProjectKey, scriptPlan])
 
   useEffect(() => {
     let cancelled = false
@@ -1415,7 +1424,10 @@ export function PromptEnhancerModal({
                 setPlannedResources(next)
               }}
               onOpenAssets={() => setWorkspaceTab('assets')}
-              onOpenEnhance={() => setWorkspaceTab('enhance')}
+              onOpenEnhance={(index?: number) => {
+                if (typeof index === 'number' && index >= 0) setActiveScriptIndex(index)
+                setWorkspaceTab('enhance')
+              }}
               onApplyPlan={(items) => {
                 const registry = globalThis as unknown as {
                   __easyMediaApplyStoryboard?: (value: typeof items) => boolean
