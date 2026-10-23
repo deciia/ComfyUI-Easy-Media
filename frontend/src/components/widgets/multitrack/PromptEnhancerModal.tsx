@@ -376,12 +376,13 @@ export function PromptEnhancerModal({
   const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
   const [abTab, setAbTab] = useState<'a' | 'b'>(() => readDirectorSettings((globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default').save.defaultVariant)
+  const [previewVariant, setPreviewVariant] = useState<'a' | 'b'>('a')
   const activePrompt = abTab === 'a' ? brief : draftPrompt
-  const finalDraft = abTab === 'a' ? finalA : finalB
-  const setFinalDraft = (value: string) => (abTab === 'a' ? setFinalA(value) : setFinalB(value))
-  const finalStoreKey = `easy-media-final-${abTab}:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
+  const finalDraft = previewVariant === 'a' ? finalA : finalB
+  const setFinalDraft = (value: string) => (previewVariant === 'a' ? setFinalA(value) : setFinalB(value))
+  const finalStoreKey = `easy-media-final-${previewVariant}:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
   const bindingProjectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
-  const bindingKey = `${segmentId ?? 'none'}:${abTab}`
+  const bindingKey = `${segmentId ?? 'none'}:${previewVariant}`
   const boundIds = readBindings(bindingProjectKey, bindingKey)
   useEffect(() => {
     try {
@@ -1627,6 +1628,48 @@ export function PromptEnhancerModal({
                     </div>
                   ) : null}
                 </div>
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="text-[11px] text-muted-foreground">分镜段</span>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-6 px-2 text-[11px]"
+                    disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) <= 0}
+                    onClick={() => {
+                      const index = segments.findIndex((item) => item.id === segmentId)
+                      if (index > 0) onActivateSegment?.(segments[index - 1].id)
+                    }}
+                  >
+                    ◀
+                  </Button>
+                  <select
+                    style={{ ...fieldStyle, width: 220 }}
+                    value={segmentId ?? ''}
+                    onChange={(event) => onActivateSegment?.(event.target.value)}
+                  >
+                    {workspaceSegments.map((item, index) => {
+                      const hasPrompt = Boolean(String((item.content as unknown as { user_prompt?: string } | null)?.user_prompt ?? '').trim())
+                      return (
+                        <option key={item.id} value={item.id}>
+                          {`${index + 1}. ${`镜头 ${index + 1}`}${hasPrompt ? ' ✓' : ''}`}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-6 px-2 text-[11px]"
+                    disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) >= segments.length - 1}
+                    onClick={() => {
+                      const index = segments.findIndex((item) => item.id === segmentId)
+                      if (index >= 0 && index < segments.length - 1) onActivateSegment?.(segments[index + 1].id)
+                    }}
+                  >
+                    ▶
+                  </Button>
+                  <span className="text-[10px] text-neutral-500">✓ = 已写提示词；段名/时长在「分镜编排」页编辑</span>
+                </div>
                 <div className="flex items-center gap-1">
                   {([['a', 'A · 片段提示词'], ['b', 'B · 我的尝试']] as const).map(([key, label]) => (
                     <button
@@ -1789,7 +1832,24 @@ export function PromptEnhancerModal({
                     prompt={finalDraft || finalPrompt}
                     onInsertTokens={(next) => setFinalDraft(next)}
                   />
-<span className="text-[11px] text-neutral-400">最终提示词 {abTab === 'a' ? 'A' : 'B'}（会保存到任务轨对应 A/B 用户提示词）</span>
+<span className="text-[11px] text-neutral-400">最终提示词
+                  <span className="flex items-center gap-1">
+                    {([['a', 'A 版'], ['b', 'B 版']] as const).map(([key, text]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{
+                          border: `1px solid ${previewVariant === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`,
+                          color: previewVariant === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined,
+                        }}
+                        onClick={() => setPreviewVariant(key)}
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </span>
+                  （会保存到任务轨对应 A/B 用户提示词）</span>
                   <div className="min-h-[160px] shrink-0 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
                     <PromptContentEditor
                       value={finalDraft || finalPrompt}
@@ -1957,12 +2017,12 @@ export function PromptEnhancerModal({
                       try {
                         written = allRegistry.__easyMediaApplyAll(segmentId, {
                           prompt: target,
-                          variant: abTab,
+                          variant: previewVariant,
                           images: imagesList,
                           audio: audioItems,
                           video: videoItems,
                           subtitleEnabled,
-                          subtitleVariant: abTab,
+                          subtitleVariant: previewVariant,
                         })
                       } catch (error) {
                         console.error('[EasyMedia] apply all failed', error)
@@ -1984,7 +2044,7 @@ export function PromptEnhancerModal({
                     }
                     if (legacy.__easyMediaUpdateSegment) {
                       try {
-                        written = legacy.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: abTab, images: imagesList })
+                        written = legacy.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: previewVariant, images: imagesList })
                       } catch (error) {
                         console.error('[EasyMedia] update segment failed', error)
                       }
