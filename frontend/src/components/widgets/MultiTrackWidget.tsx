@@ -1320,30 +1320,53 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       taskMode?: string
       continuityMode?: string
       refImageSize?: string
+      stableKey?: string
     }>) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       if (!taskTrack || items.length === 0) return false
       let cursor = 0
       const stamp = Date.now()
+      const existingSegments = taskTrack.segments ?? []
+      const byKey = new Map<string, MultiTrackSegment>()
+      const byIndex = new Map<number, MultiTrackSegment>()
+      existingSegments.forEach((segment, index) => {
+        const key = String((segment.content as unknown as { stable_key?: string })?.stable_key ?? '')
+        if (key) byKey.set(key, segment)
+        byIndex.set(index, segment)
+      })
+      const usedIds = new Set<string>()
       const segments: MultiTrackSegment[] = items.map((item, index) => {
+        const stableKey = item.stableKey || `sk-${index + 1}`
+        const matched = byKey.get(stableKey) ?? byIndex.get(index)
+        if (matched) usedIds.add(matched.id)
+        const previous = (matched?.content ?? {}) as Record<string, unknown>
         const frames = Math.max(1, Math.round(item.durationFrames))
         const start = cursor
         cursor += frames
         return {
-          id: item.id || `task-${stamp}-${index + 1}`,
+          id: item.id || matched?.id || `task-${stamp}-${index + 1}`,
           start_frame: start,
           end_frame: start + frames,
-          color: taskTrack.color ?? 'var(--primary)',
+          color: matched?.color ?? taskTrack.color ?? 'var(--primary)',
           content: {
+            ...previous,
             media_type: 'none',
-            task_mode: (item.taskMode as never) ?? 'default',
-            continuity_mode: (item.continuityMode as never) || undefined,
-            ref_image_size: (item.refImageSize as never) || undefined,
+            stable_key: stableKey,
+            task_mode: (item.taskMode as never) ?? (previous.task_mode as never) ?? 'default',
+            continuity_mode: (item.continuityMode as never) ?? (previous.continuity_mode as never) ?? undefined,
+            ref_image_size: (item.refImageSize as never) ?? (previous.ref_image_size as never) ?? undefined,
             user_brief: item.brief,
-            user_prompt: item.prompt ?? '',
+            user_prompt: item.prompt ?? String(previous.user_prompt ?? ''),
+            user_prompt_b: previous.user_prompt_b,
+            user_prompt_variant: previous.user_prompt_variant ?? 'a',
           },
-        } as MultiTrackSegment
+        } as unknown as MultiTrackSegment
       })
+      // 孤儿段（脚本里已不存在）保留在末尾，不自动删除
+      const orphans = existingSegments.filter((segment) => !usedIds.has(segment.id))
+      if (orphans.length > 0) {
+        segments.push(...orphans.map((segment) => ({ ...segment })))
+      }
       const updatedTracks = data.tracks.map((track) => (
         track.id === taskTrack.id ? { ...track, segments } : track
       ))
