@@ -371,7 +371,7 @@ export function PromptEnhancerModal({
   const [draftPrompt, setDraftPrompt] = useState('')
   const [finalA, setFinalA] = useState('')
   const [finalB, setFinalB] = useState('')
-  const [resultTab, setResultTab] = useState<'preview' | 'ai'>('preview')
+  const [resultTab, setResultTab] = useState<'preview' | 'track' | 'ai'>('preview')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
@@ -380,31 +380,52 @@ export function PromptEnhancerModal({
   const activePrompt = abTab === 'a' ? brief : draftPrompt
   const finalDraft = previewVariant === 'a' ? finalA : finalB
   const setFinalDraft = (value: string) => (previewVariant === 'a' ? setFinalA(value) : setFinalB(value))
-  const finalStoreKey = `easy-media-final-${previewVariant}:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
   const bindingProjectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
-  const bindingKey = `${segmentId ?? 'none'}:${previewVariant}`
+  // ④ 只编辑分镜脚本段（plan.segments）；任务轨段仅只读对照
+  const [activeScriptIndex, setActiveScriptIndex] = useState(0)
+  const scriptPlan = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
+  const scriptSegments = scriptPlan?.segments ?? []
+  const activeScriptSegment = scriptSegments[activeScriptIndex] as Record<string, unknown> | undefined
+  const patchScriptSegment = (patch: Record<string, unknown>) => {
+    const current = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
+    if (!current?.segments) return
+    const segments = current.segments.map((segment, index) => (
+      index === activeScriptIndex ? { ...segment, ...patch } : segment
+    ))
+    writeWorkspace(bindingProjectKey, { plan: { ...(current as Record<string, unknown>), segments } as never })
+  }
+  const matchedTaskSegment = (() => {
+    const key = `sk-${activeScriptIndex + 1}`
+    return workspaceSegments.find((item) => (
+      String((item.content as unknown as { stable_key?: string })?.stable_key ?? '') === key
+    )) ?? workspaceSegments[activeScriptIndex]
+  })()
+  const matchedTrackSegmentId = scriptSegments.length > 0 ? matchedTaskSegment?.id : undefined
+  const bindingKey = `script-${activeScriptIndex}:${previewVariant}`
   const boundIds = readBindings(bindingProjectKey, bindingKey)
+  // 编辑缓冲 → 脚本段（防抖写回）
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(finalStoreKey)
-      if (raw !== null) (abTab === 'a' ? setFinalA(raw) : setFinalB(raw))
-    } catch { /* ignore */ }
-    // 仅在段或变体切换时加载
+    if (!activeScriptSegment) return
+    const timer = window.setTimeout(() => {
+      patchScriptSegment({ promptA: brief, promptB: draftPrompt, finalA, finalB })
+    }, 600)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalStoreKey])
+  }, [brief, draftPrompt, finalA, finalB, activeScriptIndex])
+  // 脚本段减少时把选中夹回有效范围
   useEffect(() => {
-    try { window.localStorage.setItem(finalStoreKey, finalDraft) } catch { /* ignore */ }
-  }, [finalDraft, finalStoreKey])
-  const draftStoreKey = `easy-media-brief-b:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(draftStoreKey)
-      if (raw) setDraftPrompt(raw)
-    } catch { /* ignore */ }
-  }, [draftStoreKey])
-  useEffect(() => {
-    try { window.localStorage.setItem(draftStoreKey, draftPrompt) } catch { /* ignore */ }
-  }, [draftPrompt, draftStoreKey])
+    if (scriptSegments.length === 0) {
+      if (activeScriptIndex !== 0) setActiveScriptIndex(0)
+      return
+    }
+    if (activeScriptIndex > scriptSegments.length - 1) setActiveScriptIndex(scriptSegments.length - 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scriptSegments.length])
+  const selectScriptSegment = (index: number) => {
+    if (index === activeScriptIndex) return
+    patchScriptSegment({ promptA: brief, promptB: draftPrompt, finalA, finalB })
+    setActiveScriptIndex(index)
+  }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
@@ -700,11 +721,17 @@ export function PromptEnhancerModal({
   }, [brief, libraryNames])
 
 
-  // 切换任务片段后，用新片段的内容刷新两栏（并跳过这次变化触发的自动保存）
+  // 切换脚本段/任务片段后，从脚本段刷新编辑缓冲（任务段旧值作为迁移兜底）
   useEffect(() => {
     skipAutosaveRef.current = true
+    const planNow = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
+    const seg = planNow?.segments?.[activeScriptIndex] as Record<string, unknown> | undefined
+    const trackContent = (matchedTaskSegment?.content ?? {}) as unknown as Record<string, unknown>
+    setBrief(repairSpacing(String(seg?.promptA ?? trackContent.user_prompt ?? '')))
+    setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
+    setFinalA(String(seg?.finalA ?? ''))
+    setFinalB(String(seg?.finalB ?? ''))
     const fixedResult = repairSpacing(initialResult)
-    setBrief(repairSpacing(initialBrief))
     setResult(fixedResult)
     setSections(splitSections(fixedResult))
     setLastGenerated(repairSpacing(initialResult))
@@ -715,7 +742,7 @@ export function PromptEnhancerModal({
     }, 300)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segmentId])
+  }, [segmentId, activeScriptIndex, bindingProjectKey])
 
   useEffect(() => {
     let cancelled = false
@@ -890,20 +917,6 @@ export function PromptEnhancerModal({
   function setResultText(text: string) {
     setResult(text)
     setSections(splitSections(text))
-  }
-
-  /** 切换段前先落盘当前草稿，避免编辑丢失 */
-  const persistDraft = () => {
-    try {
-      onAutosave?.({ brief, generated: sections.length ? joinSections(sections) : (result || lastGenerated) })
-    } catch (saveError) {
-      console.warn('[EasyMedia][enhancer] autosave failed', saveError)
-    }
-  }
-  const activateSegment = (id?: string) => {
-    if (!id || id === segmentId) return
-    persistDraft()
-    onActivateSegment?.(id)
   }
 
   async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: string) {
@@ -1602,29 +1615,31 @@ export function PromptEnhancerModal({
                   <span className={labelClass}>片段提示词（A/B 原稿，可粗）</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
-                  <span className="text-[11px] text-muted-foreground">分镜段</span>
+                  <span className="text-[11px] text-muted-foreground">分镜脚本段</span>
                   <Button
                     size="sm"
                     variant="secondary"
                     className="h-6 px-2 text-[11px]"
-                    disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) <= 0}
-                    onClick={() => {
-                      const index = segments.findIndex((item) => item.id === segmentId)
-                      if (index > 0) activateSegment(segments[index - 1].id)
-                    }}
+                    disabled={activeScriptIndex <= 0}
+                    onClick={() => selectScriptSegment(activeScriptIndex - 1)}
                   >
                     ◀
                   </Button>
                   <select
                     style={{ ...fieldStyle, width: 220 }}
-                    value={segmentId ?? ''}
-                    onChange={(event) => activateSegment(event.target.value)}
+                    value={String(activeScriptIndex)}
+                    onChange={(event) => selectScriptSegment(Number(event.target.value))}
                   >
-                    {workspaceSegments.map((item, index) => {
-                      const hasPrompt = Boolean(String((item.content as unknown as { user_prompt?: string } | null)?.user_prompt ?? '').trim())
+                    {scriptSegments.length === 0 ? (
+                      <option value="0">（脚本为空，先去「分镜编排」新建）</option>
+                    ) : scriptSegments.map((item, index) => {
+                      const record = item as Record<string, unknown>
+                      const hasA = Boolean(String(record.finalA ?? '').trim())
+                      const hasB = Boolean(String(record.finalB ?? '').trim())
+                      const name = String(record.name ?? `镜头 ${index + 1}`)
                       return (
-                        <option key={item.id} value={item.id}>
-                          {`${index + 1}. ${`镜头 ${index + 1}`}${hasPrompt ? ' ✓' : ''}`}
+                        <option key={index} value={String(index)}>
+                          {`${index + 1}. ${name}${hasA ? ' ✓A' : ''}${hasB ? ' ✓B' : ''}`}
                         </option>
                       )
                     })}
@@ -1633,15 +1648,12 @@ export function PromptEnhancerModal({
                     size="sm"
                     variant="secondary"
                     className="h-6 px-2 text-[11px]"
-                    disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) >= segments.length - 1}
-                    onClick={() => {
-                      const index = segments.findIndex((item) => item.id === segmentId)
-                      if (index >= 0 && index < segments.length - 1) activateSegment(segments[index + 1].id)
-                    }}
+                    disabled={activeScriptIndex >= scriptSegments.length - 1}
+                    onClick={() => selectScriptSegment(activeScriptIndex + 1)}
                   >
                     ▶
                   </Button>
-                  <span className="text-[10px] text-neutral-500">✓ = 已写提示词；段名/时长在「分镜编排」页编辑</span>
+                  <span className="text-[10px] text-neutral-500">✓ = 已写最终提示词；任务轨在右栏「任务轨」只读对照</span>
                 </div>
                 <div className="flex items-center gap-1">
                   {([['a', 'A · 片段提示词'], ['b', 'B · 我的尝试']] as const).map(([key, label]) => (
@@ -1762,7 +1774,7 @@ export function PromptEnhancerModal({
               <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2">
                 <div className="flex items-center justify-between">
                   <div className="flex gap-1">
-                    {([['preview', '预览'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
+                    {([['preview', '预览'], ['track', '任务轨'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
                       <button
                         key={key}
                         type="button"
@@ -1871,6 +1883,34 @@ export function PromptEnhancerModal({
                     />
                   )}
                 </div>
+                <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'track' ? undefined : 'none' }}>
+                  <div className="text-[11px] text-muted-foreground">任务轨片段（只读对照，不可编辑）</div>
+                  {!matchedTaskSegment ? (
+                    <div className="rounded p-2 text-[11px]" style={{ border: `1px dashed ${BORDER}` }}>
+                      该分镜脚本段尚未落地到任务轨。请先在「分镜编排」点「应用到任务轨」，再回来对照。
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span>片段 {String(matchedTaskSegment.id)}</span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {matchedTaskSegment.start_frame}–{matchedTaskSegment.end_frame} 帧
+                        </span>
+                        <span className="text-muted-foreground">
+                          任务 {String(((matchedTaskSegment.content as unknown as { task_mode?: string })?.task_mode) ?? '—')}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">A 版 user_prompt</div>
+                      <div className="whitespace-pre-wrap rounded p-2 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                        {String((matchedTaskSegment.content as unknown as { user_prompt?: string })?.user_prompt ?? '') || '（空）'}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">B 版 user_prompt</div>
+                      <div className="whitespace-pre-wrap rounded p-2 text-[11px]" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
+                        {String((matchedTaskSegment.content as unknown as { user_prompt_b?: string })?.user_prompt_b ?? '') || '（空）'}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
                   <AgentRail
                     projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
@@ -1977,9 +2017,14 @@ export function PromptEnhancerModal({
                         }))
                     : []
                   const subtitleEnabled = directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled
+                  const targetSegmentId = matchedTrackSegmentId
                   let written = false
+                  if (!targetSegmentId) {
+                    setError('该分镜脚本段尚未落地到任务轨；请先在「分镜编排」点「应用到任务轨」。')
+                    return
+                  }
                   // W4：一体化保存（任务段+音视频+字幕，单次提交 → 撤销单步）
-                  if (segmentId) {
+                  if (targetSegmentId) {
                     const allRegistry = globalThis as unknown as {
                       __easyMediaApplyAll?: (
                         segmentId: string,
@@ -1988,7 +2033,7 @@ export function PromptEnhancerModal({
                     }
                     if (allRegistry.__easyMediaApplyAll) {
                       try {
-                        written = allRegistry.__easyMediaApplyAll(segmentId, {
+                        written = allRegistry.__easyMediaApplyAll(targetSegmentId, {
                           prompt: target,
                           variant: previewVariant,
                           images: imagesList,
@@ -2003,21 +2048,21 @@ export function PromptEnhancerModal({
                     }
                   }
                   // 回退：旧两步路径
-                  if (!written && segmentId) {
+                  if (!written && targetSegmentId) {
                     const legacy = globalThis as unknown as {
                       __easyMediaSaveTracks?: (segmentId: string, payload: Record<string, unknown>) => boolean
                       __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
                     }
                     if (legacy.__easyMediaSaveTracks && (audioItems.length > 0 || videoItems.length > 0 || subtitleEnabled)) {
                       try {
-                        legacy.__easyMediaSaveTracks(segmentId, { audio: audioItems, video: videoItems, subtitleEnabled, subtitleVariant: abTab })
+                        legacy.__easyMediaSaveTracks(targetSegmentId, { audio: audioItems, video: videoItems, subtitleEnabled, subtitleVariant: previewVariant })
                       } catch (error) {
                         console.error('[EasyMedia] save tracks failed', error)
                       }
                     }
                     if (legacy.__easyMediaUpdateSegment) {
                       try {
-                        written = legacy.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: previewVariant, images: imagesList })
+                        written = legacy.__easyMediaUpdateSegment(targetSegmentId, { prompt: target, variant: previewVariant, images: imagesList })
                       } catch (error) {
                         console.error('[EasyMedia] update segment failed', error)
                       }
@@ -2025,9 +2070,9 @@ export function PromptEnhancerModal({
                   }
                   if (!written) onApply(target, brief, globalDraft)
                 }}
-                disabled={!(finalDraft || finalPrompt) || failures.length > 0}
+                disabled={!(finalDraft || finalPrompt) || failures.length > 0 || scriptSegments.length === 0}
               >
-                应用到任务轨（{abTab === 'a' ? 'A' : 'B'}）
+                写入任务轨（{previewVariant === 'a' ? 'A' : 'B'}）
               </Button>
             </div>
           </>
