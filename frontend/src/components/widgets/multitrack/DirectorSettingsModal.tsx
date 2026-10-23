@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { DEFAULT_DIRECTOR_SETTINGS, DEFAULT_PROMPT_RULES, type DirectorSettings } from './directorSettings'
+import { DEFAULT_DIRECTOR_SETTINGS, DEFAULT_PROMPT_RULES, PROMPT_RULES_PRESETS, type DirectorSettings } from './directorSettings'
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -182,7 +182,7 @@ export function DirectorSettingsModal({
                 <select
                   style={{ ...fieldStyle, width: '100%' }}
                   value={draft.agent.skillPreset}
-                  onChange={(event) => patch((d) => ({ ...d, agent: { ...d.agent, skillPreset: event.target.value, promptRules: event.target.value === 'custom' ? d.agent.promptRules : '' } }))}
+                  onChange={(event) => patch((d) => ({ ...d, agent: { ...d.agent, skillPreset: event.target.value, promptRules: event.target.value === 'custom' ? d.agent.promptRules : (PROMPT_RULES_PRESETS[event.target.value] ?? '') } }))}
                 >
                   <option value="h3">H3 通用（官方结构简化版）</option>
                   <option value="action">动作片（快节奏/强运镜）</option>
@@ -193,7 +193,8 @@ export function DirectorSettingsModal({
                 <span className="text-[11px] text-muted-foreground">提示词写作规则（随每次对话发送给助手）</span>
                 <textarea
                   style={{ ...fieldStyle, width: '100%', minHeight: 96, resize: 'vertical', fontSize: 11 }}
-                  value={draft.agent.promptRules || DEFAULT_PROMPT_RULES}
+                  value={draft.agent.promptRules}
+                  placeholder={DEFAULT_PROMPT_RULES}
                   onChange={(event) => patch((d) => ({ ...d, agent: { ...d.agent, promptRules: event.target.value } }))}
                 />
               </div>
