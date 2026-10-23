@@ -150,6 +150,37 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'plan_storyboard',
+        description: '按用户想法生成整片分镜脚本（段落/beat/时长/镜头表/台词/微表情/声音/简化版用户提示词）',
+        parameters: {
+          type: 'object',
+          properties: {
+            brief: { type: 'string', description: '用户的故事想法/文案，尽量保留原文' },
+            duration_seconds: { type: 'number', description: '目标总时长（秒）' },
+            ratio: { type: 'string', description: '画幅，如 9:16 / 16:9' },
+            style: { type: 'string', description: '风格或参考描述' },
+          },
+          required: ['brief'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'revise_storyboard',
+        description: '在现有分镜基础上按修改要求重写（拆段/合并/改台词/调节奏/换风格）',
+        parameters: {
+          type: 'object',
+          properties: {
+            instruction: { type: 'string', description: '修改要求' },
+          },
+          required: ['instruction'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_segments',
         description: '列出分镜脚本所有段（序号/名称/时长/任务类型/是否已写提示词/绑定数量）',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -293,6 +324,43 @@ export function AgentRail({
   async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const planNow = readPlan()
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+    if (name === 'plan_storyboard' || name === 'revise_storyboard') {
+      const isRevision = name === 'revise_storyboard'
+      const brief = String(args.brief ?? '').trim()
+      const instruction = String(args.instruction ?? '').trim()
+      if (isRevision && !instruction) return { error: '缺少修改要求' }
+      if (!isRevision && !brief) return { error: '缺少故事想法' }
+      const planNow = readPlan()
+      const body: Record<string, unknown> = {
+        brief,
+        instruction,
+        duration_seconds: args.duration_seconds ?? undefined,
+        ratio: args.ratio ?? ratio,
+        style: args.style ?? undefined,
+        frame_rate: frameRate || 24,
+      }
+      if (isRevision) {
+        if (!planNow) return { error: '当前没有分镜脚本可修改' }
+        body.previous_plan = planNow
+      }
+      const response = await fetch('/easy-media/prompt-studio/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `规划失败（HTTP ${response.status}）`) }
+      const nextPlan = data.plan
+      if (!nextPlan?.segments?.length) return { error: '规划结果为空' }
+      writeWorkspace(projectKey, { plan: nextPlan })
+      return {
+        ok: true,
+        segments: nextPlan.segments.length,
+        total_seconds: nextPlan.total_seconds,
+        title: nextPlan.title,
+        note: '分镜已写入项目，可在「分镜编排」页查看，或让我继续完善主体与资源、生成提示词',
+      }
+    }
     if (name === 'list_segments') {
       return {
         count: segments.length,
