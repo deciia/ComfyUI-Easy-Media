@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { formatPlanSegmentBrief } from './PlanPreview'
+import { readDirectorSettings } from './directorSettings'
 import {
   ensureHydrated,
   patchWorkspaceMessages,
@@ -162,23 +163,41 @@ export function AgentRail({
             ...(readWorkspace(projectKey).messages ?? []).map((message) => ({ role: message.role, text: message.text })),
             { role: 'user', text },
           ],
-          context: {
-            project: projectKey,
-            frame_rate: frameRate,
-            ratio,
-            tab,
-            plan,
-            segments: segments.map((segment) => ({
-              index: segment.index,
-              name: segment.name,
-              duration_seconds: segment.durationSeconds,
-              images: segment.images ?? [],
-              has_prompt: Boolean(segment.hasPrompt),
-            })),
-            subjects: subjects.map((subject) => ({ name: subject.name, description: subject.desc ?? '' })),
-            audio_tracks: audioTracks,
-            planned_resources: resources.map((resource) => resource.name),
-          },
+          context: (() => {
+            const agent = readDirectorSettings(projectKey).agent
+            const context: Record<string, unknown> = { project: projectKey, tab }
+            if (agent.includeNodeSettings) {
+              context.frame_rate = frameRate
+              context.ratio = ratio
+            }
+            if (agent.includePlan) context.plan = plan
+            if (agent.includeTrackData) {
+              context.segments = segments.map((segment) => ({
+                index: segment.index,
+                name: segment.name,
+                duration_seconds: segment.durationSeconds,
+                images: segment.images ?? [],
+                has_prompt: Boolean(segment.hasPrompt),
+              }))
+              context.audio_tracks = audioTracks
+            }
+            if (agent.includeManualSubjects) {
+              context.subjects = subjects.map((subject) => ({ name: subject.name, description: subject.desc ?? '' }))
+            }
+            if (agent.includeManualResources) {
+              context.planned_resources = resources.map((resource) => resource.name)
+            }
+            if (agent.includeBindings) {
+              const bindings = readWorkspace(projectKey).bindings ?? {}
+              context.bindings = Object.entries(bindings).map(([key, ids]) => ({
+                segment_variant: key,
+                resources: ids
+                  .map((id) => (readWorkspace(projectKey).resources ?? []).find((item) => item.id === id)?.name)
+                  .filter(Boolean),
+              }))
+            }
+            return context
+          })(),
         }),
         signal: controller.signal,
       })

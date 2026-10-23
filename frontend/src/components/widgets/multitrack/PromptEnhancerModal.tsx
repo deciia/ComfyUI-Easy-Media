@@ -375,7 +375,7 @@ export function PromptEnhancerModal({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
-  const [abTab, setAbTab] = useState<'a' | 'b'>('a')
+  const [abTab, setAbTab] = useState<'a' | 'b'>(() => readDirectorSettings((globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default').save.defaultVariant)
   const activePrompt = abTab === 'a' ? brief : draftPrompt
   const finalDraft = abTab === 'a' ? finalA : finalB
   const setFinalDraft = (value: string) => (abTab === 'a' ? setFinalA(value) : setFinalB(value))
@@ -1821,7 +1821,7 @@ export function PromptEnhancerModal({
                       written = registry.__easyMediaUpdateSegment(segmentId, {
                         prompt: target,
                         variant: abTab,
-                        images: boundIds.flatMap((id) => {
+                        images: directorSettings.save.writeImages ? boundIds.flatMap((id) => {
                           const resource = resources.find((item) => item.id === id)
                           if (!resource) return []
                           const list = resource.type === 'Subject'
@@ -1832,7 +1832,7 @@ export function PromptEnhancerModal({
                           return list
                             .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
                             .map((item) => ({ name: item.imageFile ?? item.name, subfolder: item.subfolder }))
-                        }),
+                        }) : undefined,
                       })
                     } catch (error) {
                       console.error('[EasyMedia] update segment failed', error)
