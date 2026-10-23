@@ -232,6 +232,102 @@ async def _stream_plan(payload: dict, config: dict | None) -> AsyncIterator[tupl
         raise AgentError(f"流式规划异常（{type(error).__name__}）：{error}") from error
 
 
+
+async def run_agent_step(
+    messages: list[dict],
+    context: dict | None = None,
+    tools: list[dict] | None = None,
+    config: dict | None = None,
+    system_extra: str = "",
+) -> dict:
+    """单步工具调用：一次 LLM 请求，返回 {text, tool_calls, thinking}。
+
+    工具执行在前端（项目数据在 localStorage），后端只负责构造请求与解析 tool_calls。
+    """
+    from .prompt_enhancer import PromptEnhancerError, resolve_settings
+
+    settings = resolve_settings(config)
+    system = (
+        AGENT_SYSTEM_PROMPT
+        + "\n当前项目上下文（JSON）：\n"
+        + json.dumps(_compact_context(context), ensure_ascii=False)
+    )
+    if system_extra:
+        system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
+    if tools:
+        system += (
+            "\n\n你现在可以使用工具读写项目数据（分镜脚本/主体/资源/绑定）。规则："
+            "① 先读后写，写之前用 list_/get_ 确认现状；② 一次只做用户要求的事，不自作主张扩大范围；"
+            "③ 改完用一句话汇报改了什么；④ 不确定时先 ask_user 提问；⑤ 不要编造段号或资源名。"
+        )
+    history = []
+    for message in (messages or [])[-24:]:
+        role = str(message.get("role") or "user")
+        if role not in ("user", "assistant", "tool"):
+            continue
+        item: dict[str, Any] = {"role": role, "content": str(message.get("text") or message.get("content") or "")}
+        if role == "tool":
+            item["tool_call_id"] = str(message.get("tool_call_id") or "")
+        tool_calls = message.get("tool_calls")
+        if role == "assistant" and isinstance(tool_calls, list) and tool_calls:
+            item["tool_calls"] = tool_calls
+            if not item["content"]:
+                item["content"] = None
+        history.append(item)
+    if not history:
+        history = [{"role": "user", "content": "你好"}]
+
+    body: dict[str, Any] = {
+        "model": settings.model,
+        "messages": [{"role": "system", "content": system}, *history],
+        "temperature": 0.3,
+        "stream": False,
+    }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+
+    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+    import aiohttp
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=180)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(settings.base_url, json=body, headers=headers) as response:
+                raw = await response.text()
+                if response.status >= 400:
+                    raise AgentError(f"模型请求失败（{response.status}）：{raw[:300]}")
+                data = json.loads(raw)
+    except AgentError:
+        raise
+    except PromptEnhancerError as error:
+        raise AgentError(str(error)) from error
+    except Exception as error:  # noqa: BLE001
+        raise AgentError(f"模型请求异常（{type(error).__name__}）：{error}") from error
+
+    try:
+        choice = data["choices"][0]
+        message = choice.get("message") or {}
+    except (KeyError, IndexError, TypeError) as error:
+        raise AgentError("模型响应格式异常") from error
+
+    text = str(message.get("content") or "")
+    calls = []
+    for call in (message.get("tool_calls") or [])[:8]:
+        fn = call.get("function") or {}
+        args = fn.get("arguments")
+        calls.append({
+            "id": str(call.get("id") or ""),
+            "name": str(fn.get("name") or ""),
+            "arguments": args if isinstance(args, str) else json.dumps(args or {}, ensure_ascii=False),
+        })
+    return {
+        "text": text,
+        "tool_calls": calls,
+        "usage": (data.get("usage") or {}),
+        "model": settings.model,
+    }
+
 async def run_agent(
     messages: list[dict],
     context: dict | None = None,

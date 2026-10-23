@@ -63,7 +63,7 @@ from .utils.prompt_enhancer import (
     masked_config as mask_prompt_enhancer_config,
     save_config as save_prompt_enhancer_config,
 )
-from .utils.agent import run_agent
+from .utils.agent import run_agent, run_agent_step
 from .utils.plan_segments import (
     PlanError,
     generate_plan,
@@ -1095,6 +1095,26 @@ async def handle_agent_info(request: web.Request) -> web.Response:
         )
     except Exception as error:  # noqa: BLE001
         return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/agent/step")
+async def handle_agent_step(request: web.Request) -> web.Response:
+    """单步工具调用：返回 {text, tool_calls}；工具在前端执行。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return web.json_response({"ok": False, "error": "payload must be an object"}, status=400)
+        result = await run_agent_step(
+            payload.get("messages") if isinstance(payload.get("messages"), list) else [],
+            payload.get("context") if isinstance(payload.get("context"), dict) else {},
+            payload.get("tools") if isinstance(payload.get("tools"), list) else None,
+            None,
+            str(payload.get("system_extra") or ""),
+        )
+        return web.json_response({"ok": True, **result})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
 
 
 @PromptServer.instance.routes.post("/easy-media/agent/chat")

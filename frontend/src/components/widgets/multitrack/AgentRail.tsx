@@ -18,10 +18,15 @@ function fillPromptA(projectKey: string, segIndex: number, text: string): boolea
 import {
   ensureHydrated,
   patchWorkspaceMessages,
+  readResources,
   readWorkspace,
   subscribeWorkspace,
+  upsertResource,
+  patchResource,
+  writeBindings,
   writeWorkspace,
   type AgentMessage,
+  type ProjectResource,
   type StoryboardPlanLike,
 } from './agentStore'
 
@@ -139,6 +144,472 @@ export function AgentRail({
     )),
     [messages],
   )
+
+  /** ---------- D-P1：工具定义（前端执行，只改项目数据） ---------- */
+  const AGENT_TOOLS = [
+    {
+      type: 'function',
+      function: {
+        name: 'list_segments',
+        description: '列出分镜脚本所有段（序号/名称/时长/任务类型/是否已写提示词/绑定数量）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_segment',
+        description: '读取某段完整内容（promptA/promptB/finalA/finalB/设置/镜头/台词）',
+        parameters: {
+          type: 'object',
+          properties: { index: { type: 'number', description: '段序号，从 1 开始' } },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'patch_segment',
+        description: '修改某段的用户提示词/最终提示词/生成设置（只写项目数据，不动任务轨）',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '段序号，从 1 开始' },
+            promptA: { type: 'string', description: 'A 版片段提示词（用户稿）' },
+            promptB: { type: 'string', description: 'B 版片段提示词' },
+            finalA: { type: 'string', description: 'A 版最终提示词' },
+            finalB: { type: 'string', description: 'B 版最终提示词' },
+            taskType: { type: 'string', description: 'r2v / fmlf2v / vi2v / l2v / passthrough' },
+            continuityMode: { type: 'string', description: 'shot / context / context_drift' },
+            refImageSize: { type: 'string', description: 'match / max' },
+          },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_resources',
+        description: '列出项目主体与资源（名称/类型/描述/保留项/是否有文件）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'upsert_subject',
+        description: '新增或更新一个主体（按名称匹配，存在则更新描述与保留项）',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            description: { type: 'string' },
+            retention: { type: 'array', items: { type: 'string' }, description: '必须保持不变的特征' },
+          },
+          required: ['name'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'bind_resources',
+        description: '把资源绑定到某段某变体（按资源名称，子资源自动跟随主体）',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number' },
+            variant: { type: 'string', enum: ['a', 'b'] },
+            resource_names: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['index', 'resource_names'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_prompt',
+        description: '为该段调用提示词生成接口，产出标准提示词并写入 finalA/finalB',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number' },
+            variant: { type: 'string', enum: ['a', 'b'] },
+            language: { type: 'string', enum: ['中文', 'English'] },
+          },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'apply_storyboard',
+        description: '把当前分镜脚本应用到任务轨（需要用户在编辑器可用时执行）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ask_user',
+        description: '向用户提问并给出选项（当需要用户拍板时使用）',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            options: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['question', 'options'],
+        },
+      },
+    },
+  ] as const
+
+  const readPlan = () => (readWorkspace(projectKey).plan ?? null) as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
+
+  const writePlanSegment = (index1: number, patch: Record<string, unknown>) => {
+    const planNow = readPlan()
+    if (!planNow?.segments) return { error: '当前没有分镜脚本' }
+    const index0 = index1 - 1
+    if (index0 < 0 || index0 >= planNow.segments.length) return { error: `段 ${index1} 不存在（共 ${planNow.segments.length} 段）` }
+    const segments = planNow.segments.map((segment, i) => (i === index0 ? { ...segment, ...patch } : segment))
+    writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments } as never })
+    return { ok: true, index: index1 }
+  }
+
+  const taskTemplate = (raw: string) => {
+    const value = String(raw || '').toLowerCase()
+    if (value.includes('r2v') || value.includes('ref')) return { task_type: 'r2v', task_mode: 'ref' }
+    if (value.includes('fmlf2v') || value.includes('fl2v')) return { task_type: 'i2v', task_mode: 'default' }
+    if (value.includes('vi2v') || value.includes('edit')) return { task_type: 'r2v', task_mode: 'ref' }
+    if (value.includes('l2v')) return { task_type: 'l2v', task_mode: 'l2v' }
+    return { task_type: 't2v', task_mode: 'default' }
+  }
+
+  async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const planNow = readPlan()
+    const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+    if (name === 'list_segments') {
+      return {
+        count: segments.length,
+        segments: segments.map((segment, i) => {
+          const settings = (segment.settings ?? {}) as Record<string, unknown>
+          return {
+            index: i + 1,
+            name: String(segment.name ?? ''),
+            duration_seconds: Number(segment.duration_seconds ?? settings.duration ?? 0),
+            task_type: String(settings.taskType ?? ''),
+            continuity: String(settings.contextMode ?? ''),
+            has_promptA: Boolean(String(segment.promptA ?? '').trim()),
+            has_finalA: Boolean(String(segment.finalA ?? '').trim()),
+          }
+        }),
+      }
+    }
+    if (name === 'get_segment') {
+      const index0 = Number(args.index ?? 0) - 1
+      const segment = segments[index0]
+      if (!segment) return { error: `段 ${Number(args.index)} 不存在` }
+      return { index: index0 + 1, segment }
+    }
+    if (name === 'patch_segment') {
+      const patch: Record<string, unknown> = {}
+      for (const key of ['promptA', 'promptB', 'finalA', 'finalB'] as const) {
+        if (typeof args[key] === 'string') patch[key] = args[key]
+      }
+      const settingsPatch: Record<string, unknown> = {}
+      if (typeof args.taskType === 'string') settingsPatch.taskType = args.taskType
+      if (typeof args.continuityMode === 'string') settingsPatch.contextMode = args.continuityMode
+      if (typeof args.refImageSize === 'string') settingsPatch.refImageSize = args.refImageSize
+      if (Object.keys(settingsPatch).length) {
+        const index0 = Number(args.index ?? 0) - 1
+        patch.settings = { ...((segments[index0]?.settings ?? {}) as Record<string, unknown>), ...settingsPatch }
+      }
+      return writePlanSegment(Number(args.index ?? 0), patch)
+    }
+    if (name === 'list_resources') {
+      const pool = readResources(projectKey) as ProjectResource[]
+      return {
+        subjects: pool.filter((item) => item.type === 'Subject').map((item) => ({
+          name: item.name,
+          description: item.description ?? '',
+          retention: item.retention ?? [],
+          children: (item.childResourceIds ?? []).length,
+        })),
+        resources: pool.filter((item) => item.type !== 'Subject').map((item) => ({
+          name: item.name,
+          type: item.type,
+          status: item.status,
+          has_file: Boolean(item.imageFile || item.audioFile || item.videoFile),
+        })),
+      }
+    }
+    if (name === 'upsert_subject') {
+      const subjectName = String(args.name ?? '').trim()
+      if (!subjectName) return { error: 'name 不能为空' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const existing = pool.find((item) => item.type === 'Subject' && item.name === subjectName)
+      const retention = Array.isArray(args.retention) ? args.retention.map(String) : undefined
+      if (existing) {
+        patchResource(projectKey, existing.id, {
+          description: typeof args.description === 'string' ? args.description : existing.description,
+          ...(retention ? { retention } : {}),
+        })
+        return { ok: true, updated: subjectName }
+      }
+      upsertResource(projectKey, {
+        id: `subject-${Date.now().toString(36)}`,
+        type: 'Subject',
+        name: subjectName,
+        relationship: 'reuse',
+        description: typeof args.description === 'string' ? args.description : '',
+        retention: retention ?? [],
+        status: 'need',
+        childResourceIds: [],
+        source: 'manual',
+      } as unknown as ProjectResource)
+      return { ok: true, created: subjectName }
+    }
+    if (name === 'bind_resources') {
+      const index1 = Number(args.index ?? 0)
+      const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
+      const names = Array.isArray(args.resource_names) ? args.resource_names.map(String) : []
+      if (!segments[index1 - 1]) return { error: `段 ${index1} 不存在` }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const ids = names
+        .map((resourceName) => pool.find((item) => item.name === resourceName))
+        .filter((item): item is ProjectResource => Boolean(item))
+        .map((item) => item.id)
+      if (!ids.length) return { error: '没有匹配到资源，请先用 list_resources 确认名称' }
+      const key = `script-${index1 - 1}:${variant}`
+      writeBindings(projectKey, key, ids)
+      return { ok: true, bound: ids.length, names: names.filter((resourceName) => pool.some((item) => item.name === resourceName)) }
+    }
+    if (name === 'generate_prompt') {
+      const index1 = Number(args.index ?? 0)
+      const segment = segments[index1 - 1]
+      if (!segment) return { error: `段 ${index1} 不存在` }
+      const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
+      const sourcePrompt = String((variant === 'b' ? segment.promptB : segment.promptA) ?? segment.promptA ?? segment.user_prompt ?? '').trim()
+      if (!sourcePrompt) return { error: `段 ${index1} 的 ${variant.toUpperCase()} 稿为空，请先写片段提示词` }
+      const settings = (segment.settings ?? {}) as Record<string, unknown>
+      const mapped = taskTemplate(String(settings.taskType ?? ''))
+      const duration = Number(segment.duration_seconds ?? 0) || 6
+      const response = await fetch('/easy-media/prompt-studio/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brief: sourcePrompt,
+          options: { ...mapped, duration_seconds: duration, output_language: String(args.language ?? '中文') },
+          task_type: mapped.task_type,
+          task_mode: mapped.task_mode,
+          duration_seconds: duration,
+          language: String(args.language ?? '中文'),
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) return { error: String(data?.error || `生成失败（HTTP ${response.status}）`) }
+      const prompt = String(data?.prompt || '')
+      if (!prompt) return { error: '生成结果为空' }
+      writePlanSegment(index1, variant === 'b' ? { finalB: prompt } : { finalA: prompt })
+      return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
+    }
+    if (name === 'apply_storyboard') {
+      const planCurrent = readWorkspace(projectKey).plan
+      if (!planCurrent || !onApplyPlan) return { error: '当前没有可应用的分镜脚本' }
+      const ok = onApplyPlan(planCurrent)
+      return ok ? { ok: true, applied: true } : { error: '应用失败：编辑器可能不可用' }
+    }
+    if (name === 'ask_user') {
+      const answer = await askUser(String(args.question ?? ''), Array.isArray(args.options) ? args.options.map(String) : ['好的', '算了'])
+      return { answer }
+    }
+    return { error: `未知工具：${name}` }
+  }
+
+  const askResolveRef = useRef<((answer: string) => void) | null>(null)
+  function askUser(question: string, options: string[]): Promise<string> {
+    return new Promise((resolve) => {
+      askResolveRef.current = resolve
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+        message.id === activeReplyRef.current
+          ? { ...message, question: { id: `q-${Date.now()}`, text: question, options } }
+          : message
+      )))
+    })
+  }
+  function answerQuestion(answer: string) {
+    const resolve = askResolveRef.current
+    askResolveRef.current = null
+    patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+      message.id === activeReplyRef.current && message.question
+        ? { ...message, question: { ...message.question, answer } }
+        : message
+    )))
+    resolve?.(answer)
+  }
+  const activeReplyRef = useRef<string>('')
+
+  /** D-P1：前端驱动的工具循环（最多 8 步） */
+  async function sendStepLoop() {
+    const text = input.trim()
+    if (!text || busy) return
+    setInput('')
+    const stamp = Date.now()
+    const replyId = `a-${stamp}`
+    const controller = new AbortController()
+    abortRef.current = controller
+    activeReplyRef.current = replyId
+    writeWorkspace(projectKey, { agentBusy: true })
+    setBusy(true)
+    const startedAt = Date.now()
+    patchWorkspaceMessages(projectKey, (current) => [
+      ...current,
+      { id: `u-${stamp}`, role: 'user', text },
+      { id: replyId, role: 'assistant', text: '', status: 'running', steps: [], toolCalls: [] },
+    ])
+    setRailTab('chat')
+    const update = (patch: Partial<AgentMessage>) => {
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+        message.id === replyId ? { ...message, ...patch } : message
+      )))
+    }
+    const appendText = (delta: string) => {
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+        message.id === replyId ? { ...message, text: `${message.text}${delta}` } : message
+      )))
+    }
+    const upsertToolCall = (call: { id: string; name: string; args?: unknown; result?: string; status?: 'running' | 'success' | 'error' }) => {
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => {
+        if (message.id !== replyId) return message
+        const list = message.toolCalls ?? []
+        const exists = list.some((item) => item.id === call.id)
+        return {
+          ...message,
+          toolCalls: exists ? list.map((item) => (item.id === call.id ? { ...item, ...call } : item)) : [...list, call],
+        }
+      }))
+    }
+
+    const buildContext = () => {
+      const agent = readDirectorSettings(projectKey).agent
+      const context: Record<string, unknown> = { project: projectKey, tab }
+      if (agent.includeNodeSettings) {
+        context.frame_rate = frameRate
+        context.ratio = ratio
+      }
+      if (agent.includePlan) context.plan = plan
+      if (agent.includeTrackData) {
+        context.segments = segments.map((segment) => ({
+          index: segment.index,
+          name: segment.name,
+          duration_seconds: segment.durationSeconds,
+          images: segment.images ?? [],
+          has_prompt: Boolean(segment.hasPrompt),
+        }))
+        context.audio_tracks = audioTracks
+      }
+      if (agent.includeManualSubjects) {
+        context.subjects = subjects.map((subject) => ({ name: subject.name, description: subject.desc ?? '' }))
+      }
+      if (agent.includeManualResources) {
+        context.planned_resources = resources.map((resource) => resource.name)
+      }
+      if (agent.includeBindings) {
+        const bindings = readWorkspace(projectKey).bindings ?? {}
+        context.bindings = Object.entries(bindings).map(([key, ids]) => ({
+          segment_variant: key,
+          resources: ids
+            .map((id) => (readWorkspace(projectKey).resources ?? []).find((item) => item.id === id)?.name)
+            .filter(Boolean),
+        }))
+      }
+      return context
+    }
+
+    const history = (readWorkspace(projectKey).messages ?? [])
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .map((message) => ({ role: message.role, text: message.text }))
+    const chatMessages: Array<Record<string, unknown>> = [...history]
+    let stepCount = 0
+    try {
+      for (let step = 0; step < 8; step += 1) {
+        if (controller.signal.aborted) break
+        stepCount = step + 1
+        const response = await fetch('/easy-media/agent/step', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            messages: chatMessages,
+            context: buildContext(),
+            tools: AGENT_TOOLS,
+            system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
+          }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !data?.ok) throw new Error(String(data?.error || `请求失败（HTTP ${response.status}）`))
+        const replyText = String(data.text || '')
+        if (replyText) appendText(replyText)
+        const calls = Array.isArray(data.tool_calls) ? data.tool_calls : []
+        if (!calls.length) break
+        chatMessages.push({
+          role: 'assistant',
+          text: replyText,
+          tool_calls: calls.map((call: { id: string; name: string; arguments: string }) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.name, arguments: call.arguments },
+          })),
+        })
+        for (const call of calls as Array<{ id: string; name: string; arguments: string }>) {
+          upsertToolCall({ id: call.id, name: call.name, args: call.arguments, status: 'running' })
+          let parsedArgs: Record<string, unknown> = {}
+          try {
+            parsedArgs = JSON.parse(call.arguments || '{}')
+          } catch {
+            parsedArgs = {}
+          }
+          try {
+            const result = await executeAgentTool(call.name, parsedArgs)
+            upsertToolCall({
+              id: call.id,
+              name: call.name,
+              args: parsedArgs,
+              status: result.error ? 'error' : 'success',
+              result: JSON.stringify(result).slice(0, 2000),
+            })
+            chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 4000) })
+          } catch (toolError) {
+            const message = toolError instanceof Error ? toolError.message : String(toolError)
+            upsertToolCall({ id: call.id, name: call.name, args: parsedArgs, status: 'error', result: message })
+            chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify({ error: message }) })
+          }
+        }
+      }
+      update({
+        status: controller.signal.aborted ? 'done' : 'done',
+        elapsedMs: Date.now() - startedAt,
+        steps: [{ label: `工具循环 ${stepCount} 步`, status: controller.signal.aborted ? 'failed' : 'done' }],
+        ...(controller.signal.aborted ? { text: '已停止。' } : {}),
+      })
+    } catch (failure) {
+      const aborted = controller.signal.aborted
+      update({
+        status: aborted ? 'done' : 'failed',
+        elapsedMs: Date.now() - startedAt,
+        text: aborted ? '已停止。' : `请求失败：${String(failure)}`,
+      })
+    } finally {
+      abortRef.current = null
+      writeWorkspace(projectKey, { agentBusy: false })
+      setBusy(false)
+    }
+  }
 
   async function send() {
     const text = input.trim()
@@ -408,6 +879,53 @@ export function AgentRail({
                   </div>
                 ) : null}
                 {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
+                {message.toolCalls?.length ? (
+                  <div className="mt-1 flex flex-col gap-1">
+                    {message.toolCalls.map((call) => (
+                      <details
+                        key={call.id}
+                        className="rounded px-1.5 py-1 text-[10px]"
+                        style={{ border: `1px solid ${BORDER}`, background: FIELD_BG }}
+                      >
+                        <summary className="cursor-pointer select-none">
+                          <span style={{ color: call.status === 'error' ? '#fbbf24' : PRIMARY }}>
+                            {call.status === 'error' ? '✕' : call.status === 'running' ? '●' : '✓'}
+                          </span>
+                          {' '}
+                          {call.name}
+              </summary>
+                        <div className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                          {call.args ? JSON.stringify(call.args).slice(0, 600) : ''}
+                        </div>
+                        {call.result ? (
+                          <div className="mt-1 whitespace-pre-wrap">{String(call.result).slice(0, 1200)}</div>
+                        ) : null}
+                      </details>
+                    ))}
+                  </div>
+                ) : null}
+                {message.question ? (
+                  <div className="mt-1 rounded p-1.5 text-[11px]" style={{ border: `1px solid ${BORDER}`, background: PANEL_BG }}>
+                    <div>{message.question.text}</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {message.question.options.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          className="rounded px-1.5 py-0.5 text-[10px]"
+                          style={{
+                            border: `1px solid ${message.question?.answer === option ? PRIMARY : BORDER}`,
+                            color: message.question?.answer === option ? PRIMARY : undefined,
+                          }}
+                          disabled={Boolean(message.question?.answer)}
+                          onClick={() => answerQuestion(option)}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {(message.role === 'assistant' && message.text ? Array.from(message.text.matchAll(/```userprompt\s*段(\d+)[^\n]*\n([\s\S]*?)```/g)) : []).map((match, blockIndex) => {
                   const segIndex = Number(match[1]) - 1
                   const body = match[2].trim()
@@ -578,7 +1096,7 @@ export function AgentRail({
               setBusy(false)
               return
             }
-            void send()
+            void sendStepLoop()
           }}
         >
           {busy ? '停止' : '发送'}

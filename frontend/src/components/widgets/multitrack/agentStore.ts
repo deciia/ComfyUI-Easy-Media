@@ -8,6 +8,21 @@ export interface AgentStep {
 }
 
 export interface AgentMessage {
+  /** D-P1：工具调用轨迹（name/args/result/status） */
+  toolCalls?: Array<{
+    id: string
+    name: string
+    args?: unknown
+    result?: string
+    status?: 'running' | 'success' | 'error'
+  }>
+  /** D-P1：需要用户点选的提问（ask_user 工具） */
+  question?: {
+    id: string
+    text: string
+    options: string[]
+    answer?: string
+  }
   id: string
   role: 'user' | 'assistant' | 'system'
   text: string
