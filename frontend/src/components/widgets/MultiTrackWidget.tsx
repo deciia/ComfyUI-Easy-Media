@@ -80,6 +80,8 @@ import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
 import { stripProjectMeta } from '@/lib/project-timeline'
+import { readWorkspace } from './multitrack/agentStore'
+import { readDirectorSettings } from './multitrack/directorSettings'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { ProjectBar } from './multitrack/ProjectBar'
@@ -1452,7 +1454,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
     const saveTracks = (
       segmentId: string,
-      payload: { audio: AssetItem[]; video: AssetItem[] },
+      payload: { audio: AssetItem[]; video: AssetItem[]; subtitleEnabled?: boolean; subtitleVariant?: 'a' | 'b' },
     ) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const segment = taskTrack?.segments.find((item) => item.id === segmentId)
@@ -1462,7 +1464,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const stamp = Date.now()
       let tracks = [...data.tracks]
 
-      const ensureTrack = (name: string, type: 'audio' | 'video', muted: boolean) => {
+      const ensureTrack = (name: string, type: 'audio' | 'video' | 'subtitle', muted: boolean) => {
         const found = tracks.find((track) => track.type === type && track.name === name)
         if (found) return found
         const created: MultiTrack = {
@@ -1526,6 +1528,93 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         upsertSegment(track, item, 'video')
       }
 
+      // W3：字幕轨（按导演台设置抽取台词，按字数比例分配时间，幂等）
+      if (payload.subtitleEnabled) {
+        const projectKey = data.project?.name ?? 'default'
+        const settings = readDirectorSettings(projectKey)
+        const store = readWorkspace(projectKey)
+        const lines: Array<{ text: string; speaker?: string }> = []
+        if (settings.subtitle.fromDialogue) {
+          const plan = store.plan as { segments?: Array<{ shots?: Array<Record<string, unknown>> }> } | null
+          const stableKey = String((segment.content as unknown as { stable_key?: string })?.stable_key ?? '')
+          const planIndex = Number.parseInt(stableKey.replace(/^sk-/, ''), 10)
+          const planSegment = Number.isFinite(planIndex) ? plan?.segments?.[planIndex - 1] : undefined
+          for (const shot of planSegment?.shots ?? []) {
+            const dialogue = (shot as { dialogue?: Array<{ speaker?: string; line?: string }> }).dialogue ?? []
+            for (const entry of dialogue) {
+              const raw = String(entry.line ?? '').trim()
+              if (!raw) continue
+              for (const part of raw.split(/(?<=[。！？；…])/).map((item) => item.trim()).filter(Boolean)) {
+                lines.push({ text: part, speaker: entry.speaker })
+              }
+            }
+          }
+        }
+        if (settings.subtitle.fromTaggedDescription) {
+          const boundIds = store.bindings?.[`${segmentId}:${payload.subtitleVariant ?? 'a'}`] ?? []
+          for (const subject of (store.resources ?? []).filter((item) => item.type === 'Subject' && boundIds.includes(item.id))) {
+            for (const match of (subject.description ?? '').matchAll(/<#([^:>]+):([^>]+)>/g)) {
+              lines.push({ speaker: match[1].trim(), text: match[2].trim() })
+            }
+          }
+        }
+        const cleaned = lines
+          .map((line) => ({
+            speaker: line.speaker,
+            text: line.text.replace(/<\/?d>/g, '').replace(/[“”"]/g, '').trim(),
+          }))
+          .filter((line) => line.text.length > 0)
+        if (cleaned.length > 0) {
+          const track = ensureTrack('字幕', 'subtitle', false)
+          const total = Math.max(1, end - start)
+          const weights = cleaned.map((line) => Math.max(1, line.text.length))
+          const weightSum = weights.reduce((acc, value) => acc + value, 0)
+          let durations = weights.map((value) => Math.max(24, Math.round((total * value) / weightSum)))
+          if (durations.reduce((acc, value) => acc + value, 0) > total) {
+            durations = weights.map((value) => Math.max(1, Math.round((total * value) / weightSum)))
+          }
+          const subtitleSegments: MultiTrackSegment[] = []
+          let cursor = start
+          cleaned.forEach((line, index) => {
+            const duration = durations[index]
+            const text = settings.subtitle.keepSpeaker && line.speaker ? `${line.speaker}：${line.text}` : line.text
+            subtitleSegments.push({
+              id: `seg-sub-${stamp}-${index}`,
+              start_frame: cursor,
+              end_frame: Math.min(end, cursor + duration),
+              content: {
+                media_type: 'subtitle',
+                text,
+                stable_key: `sub-${segmentId}-${index}`,
+                subtitle_style: {
+                  font_size: settings.subtitle.style.font_size,
+                  color: settings.subtitle.style.color,
+                  outline_color: settings.subtitle.style.outline_color,
+                  background_color: '#000000',
+                  background_opacity: settings.subtitle.style.background_opacity,
+                  x: 0.5,
+                  y: settings.subtitle.style.y,
+                  width: 0.9,
+                },
+              } as unknown as MultiTrackSegment['content'],
+              color: track.color ?? 'var(--primary)',
+            } as MultiTrackSegment)
+            cursor += duration
+          })
+          const prefix = `sub-${segmentId}-`
+          tracks = tracks.map((current) => (
+            current.id === track.id
+              ? {
+                  ...current,
+                  segments: [
+                    ...current.segments.filter((existing) => !String((existing.content as unknown as { stable_key?: string })?.stable_key ?? '').startsWith(prefix)),
+                    ...subtitleSegments,
+                  ],
+                }
+              : current
+          ))
+        }
+      }
       commitNormalizedTrackChange({
         ...data,
         tracks,

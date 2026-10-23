@@ -1824,6 +1824,8 @@ export function PromptEnhancerModal({
                         payload: {
                           audio: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output'; trackRole?: string; trackName?: string; volumeDb?: number }>
                           video: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' }>
+                          subtitleEnabled?: boolean
+                          subtitleVariant?: 'a' | 'b'
                         },
                       ) => boolean
                     }
@@ -1862,7 +1864,12 @@ export function PromptEnhancerModal({
                         : []
                       if (audioItems.length > 0 || videoItems.length > 0) {
                         try {
-                          tracksRegistry.__easyMediaSaveTracks(segmentId, { audio: audioItems, video: videoItems })
+                          tracksRegistry.__easyMediaSaveTracks(segmentId, {
+                          audio: audioItems,
+                          video: videoItems,
+                          subtitleEnabled: directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled,
+                          subtitleVariant: abTab,
+                        })
                         } catch (error) {
                           console.error('[EasyMedia] save tracks failed', error)
                         }
