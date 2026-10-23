@@ -434,6 +434,27 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'generate_resource',
+        description: '生成缺失资源（图片/配音/音乐/参考视频）：调用配置好的 ComfyUI 工作流并自动挂到资源上',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['image', 'voice', 'music', 'refvideo'] },
+            name: { type: 'string', description: '资源名称（已存在则更新，不存在则新建）' },
+            prompt: { type: 'string', description: '画面/音乐描述（image/music/refvideo 用）' },
+            text: { type: 'string', description: '配音文本（voice 用）' },
+            duration: { type: 'number', description: '目标时长秒（music/refvideo 用）' },
+            reference_file: { type: 'string', description: '参考素材 input 路径（音色/首帧/风格）' },
+            negative: { type: 'string', description: '负面提示词（可选）' },
+            resource_type: { type: 'string', enum: ['Picture', 'Audio', 'Video'], description: '资源类型，默认按 type 推断' },
+          },
+          required: ['type', 'name'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_outputs',
         description: '列出项目最近的生成产物（视频/图片路径），用于生成后自查',
         parameters: { type: 'object', properties: { limit: { type: 'number' } }, required: [] },
@@ -722,6 +743,68 @@ export function AgentRail({
       }
       patchResource(projectKey, target.id, patch as never)
       return { ok: true, updated: resourceName, file: fileName || undefined }
+    }
+    if (name === 'generate_resource') {
+      const resourceType = String(args.type ?? '').trim()
+      const targetName = String(args.name ?? '').trim()
+      if (!resourceType || !targetName) return { error: 'type 与 name 必填' }
+      const mediaKind = resourceType === 'image' ? 'picture' : resourceType === 'voice' || resourceType === 'music' ? 'audio' : 'video'
+      const response = await fetch('/easy-media/resource-workflows/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: resourceType,
+          params: {
+            prompt: String(args.prompt ?? ''),
+            text: String(args.text ?? ''),
+            duration: args.duration ?? '',
+            negative: String(args.negative ?? ''),
+            reference_file: String(args.reference_file ?? ''),
+            reference_image: String(args.reference_file ?? ''),
+            reference_audio: String(args.reference_file ?? ''),
+            seed: Math.floor(Math.random() * 1_000_000),
+          },
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) {
+        return {
+          error: String(data?.error || `生成失败（HTTP ${response.status}）`),
+          hint: '请检查 ComfyUI 的 user/DeciiaEasyMedia/resource_workflows.json 是否为该类型配置了 API 格式工作流',
+        }
+      }
+      const fileName = String(data.file_name || '')
+      const subfolder = String(data.subfolder || '')
+      const root = String(data.root || 'output') === 'input' ? 'input' : 'output'
+      const pool = readResources(projectKey) as ProjectResource[]
+      const existing = pool.find((item) => item.name === targetName)
+      const filePatch = mediaKind === 'picture' ? { imageFile: fileName } : mediaKind === 'audio' ? { audioFile: fileName } : { videoFile: fileName }
+      if (existing) {
+        patchResource(projectKey, existing.id, { ...filePatch, subfolder, sharedRoot: root, status: 'ready' } as never)
+      } else {
+        upsertResource(projectKey, {
+          id: `res-${Date.now().toString(36)}`,
+          type: args.resource_type || (mediaKind === 'picture' ? 'Picture' : mediaKind === 'audio' ? 'Audio' : 'Video'),
+          name: targetName,
+          relationship: 'generated',
+          description: String(args.prompt ?? args.text ?? ''),
+          retention: [],
+          status: 'ready',
+          childResourceIds: [],
+          source: 'generated',
+          ...filePatch,
+          subfolder,
+          sharedRoot: root,
+        } as unknown as ProjectResource)
+      }
+      return {
+        ok: true,
+        type: resourceType,
+        name: targetName,
+        file: fileName,
+        path: data.path,
+        note: '资源已生成并挂到主体与资源页，可直接 bind_resources 绑定',
+      }
     }
     if (name === 'list_outputs') {
       const limit = Number(args.limit ?? 8) || 8

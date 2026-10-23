@@ -1097,6 +1097,49 @@ async def handle_agent_info(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
+@PromptServer.instance.routes.get("/easy-media/resource-workflows")
+async def handle_get_resource_workflows(request: web.Request) -> web.Response:
+    """读取资源生成工作流配置。"""
+    try:
+        from .utils.resource_gen import config_path, load_config
+
+        return web.json_response({"ok": True, "config": load_config(), "path": str(config_path())})
+    except Exception as error:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
+@PromptServer.instance.routes.put("/easy-media/resource-workflows")
+async def handle_put_resource_workflows(request: web.Request) -> web.Response:
+    """保存资源生成工作流配置。"""
+    try:
+        payload = await request.json()
+        config = payload.get("config") if isinstance(payload, dict) and "config" in payload else payload
+        from .utils.resource_gen import save_config
+
+        save_config(config)
+        return web.json_response({"ok": True})
+    except Exception as error:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
+@PromptServer.instance.routes.post("/easy-media/resource-workflows/generate")
+async def handle_generate_resource(request: web.Request) -> web.Response:
+    """按类型生成资源（图片/配音/音乐/参考视频），阻塞到完成。"""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        resource_type = str(payload.get("type") or "").strip()
+        params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+        from .utils.resource_gen import ResourceGenError, generate_resource
+
+        result = await generate_resource(resource_type, params)
+        return web.json_response(result)
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
 @PromptServer.instance.routes.get("/easy-media/assets/input")
 async def handle_list_input_assets(request: web.Request) -> web.Response:
     """列出 input 目录下的素材（可按 subdir 过滤），供智能体挑选参考图/音频。"""
