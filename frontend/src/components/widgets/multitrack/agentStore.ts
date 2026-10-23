@@ -146,6 +146,20 @@ export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   if ('plannedResources' in patch) mirror(`easy-media-workspace-resources:${key}`, patch.plannedResources)
   if ('resources' in patch) mirror(`easy-media-project-resources:${key}`, patch.resources)
   if ('bindings' in patch) mirror(`easy-media-bindings:${key}`, patch.bindings)
+  if ('messages' in patch) {
+    // 对话历史持久化：跟随项目键；只保留最近 200 条，且单条 text/thinking/gen 截断到 20000 字符
+    try {
+      const capped = (patch.messages ?? []).slice(-200).map((message) => ({
+        ...message,
+        text: message.text.length > 20000 ? message.text.slice(0, 20000) : message.text,
+        thinking: message.thinking && message.thinking.length > 20000 ? message.thinking.slice(0, 20000) : message.thinking,
+        gen: message.gen && message.gen.length > 20000 ? message.gen.slice(0, 20000) : message.gen,
+      }))
+      window.localStorage.setItem(`easy-media-messages:${key}`, JSON.stringify(capped))
+    } catch {
+      /* 超出配额时静默放弃镜像 */
+    }
+  }
   for (const listener of listeners.get(key) ?? []) listener()
 }
 
@@ -183,6 +197,25 @@ export function ensureHydrated(key: string) {
       if (raw) {
         next.plannedResources = JSON.parse(raw)
         changed = true
+      }
+    } catch {
+      /* 忽略坏数据 */
+    }
+  }
+  if (!('messages' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-messages:${key}`)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          // 上次运行被刷新/关闭打断的消息：running -> stopped，避免永远显示“运行中”
+          next.messages = parsed.map((message) => (
+            message && message.status === 'running'
+              ? { ...message, status: 'stopped', text: message.text || '（上次运行被中断）' }
+              : message
+          ))
+          changed = true
+        }
       }
     } catch {
       /* 忽略坏数据 */
