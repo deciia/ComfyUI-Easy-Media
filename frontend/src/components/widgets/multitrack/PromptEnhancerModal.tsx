@@ -1101,7 +1101,7 @@ export function PromptEnhancerModal({
               size="icon"
               title={t('multitrack.enhancerSettings')}
               className={cn('h-7 w-7', view === 'settings' && 'text-primary')}
-              onClick={() => setView(view === 'settings' ? 'main' : 'settings')}
+              onClick={() => setSettingsOpen(true)}
             >
               <Settings className="h-4 w-4" />
             </Button>

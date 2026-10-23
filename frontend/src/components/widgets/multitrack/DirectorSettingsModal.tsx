@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { DEFAULT_DIRECTOR_SETTINGS, type DirectorSettings } from './directorSettings'
 
@@ -33,6 +33,47 @@ export function DirectorSettingsModal({
 }) {
   const [draft, setDraft] = useState<DirectorSettings>(settings)
   const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api'>('save')
+  const [api, setApi] = useState({ provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', upload_images: true })
+  const [apiSaving, setApiSaving] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    fetch('/easy-media/prompt-studio/config')
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data?.ok) return
+        setApi({
+          provider: String(data.provider ?? ''),
+          model: String(data.model ?? ''),
+          base_url: String(data.base_url ?? ''),
+          api_key: '',
+          api_key_masked: String(data.api_key_masked ?? (data.api_key ? '已保存' : '')),
+          upload_images: data.upload_images !== false,
+        })
+      })
+      .catch(() => { /* ignore */ })
+  }, [open])
+
+  async function persistApi() {
+    setApiSaving(true)
+    try {
+      await fetch('/easy-media/prompt-studio/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: api.provider,
+          model: api.model,
+          base_url: api.base_url,
+          api_key: api.api_key || undefined,
+          upload_images: api.upload_images,
+        }),
+      })
+    } catch {
+      /* ignore */
+    } finally {
+      setApiSaving(false)
+    }
+  }
+
   if (!open) return null
 
   const patch = (fn: (value: DirectorSettings) => DirectorSettings) => setDraft((value) => fn(value))
@@ -154,23 +195,35 @@ export function DirectorSettingsModal({
           {tab === 'api' ? (
             <>
               <div className="text-[11px] text-muted-foreground">
-                提示词增强与 AI 助手使用的模型配置（凭据存放在 ComfyUI/user/DeciiaEasyMedia/prompt_studio.json，此处仅显示非敏感项）
+                提示词增强与 AI 助手使用的模型配置；凭据保存在 ComfyUI/user/DeciiaEasyMedia/prompt_studio.json
               </div>
               <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-16 text-muted-foreground">provider</span>
-                <input style={{ ...fieldStyle, width: 220 }} value={draft.api.provider}
-                  onChange={(e) => patch((d) => ({ ...d, api: { ...d.api, provider: e.target.value } }))} />
+                <span className="w-20 text-muted-foreground">Provider</span>
+                <input style={{ ...fieldStyle, width: 220 }} value={api.provider}
+                  onChange={(e) => setApi({ ...api, provider: e.target.value })} />
               </div>
               <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-16 text-muted-foreground">model</span>
-                <input style={{ ...fieldStyle, width: 220 }} value={draft.api.model}
-                  onChange={(e) => patch((d) => ({ ...d, api: { ...d.api, model: e.target.value } }))} />
+                <span className="w-20 text-muted-foreground">Model</span>
+                <input style={{ ...fieldStyle, width: 220 }} value={api.model}
+                  onChange={(e) => setApi({ ...api, model: e.target.value })} />
               </div>
               <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-16 text-muted-foreground">base_url</span>
-                <input style={{ ...fieldStyle, width: 360 }} value={draft.api.base_url}
-                  onChange={(e) => patch((d) => ({ ...d, api: { ...d.api, base_url: e.target.value } }))} />
+                <span className="w-20 text-muted-foreground">Base URL</span>
+                <input style={{ ...fieldStyle, width: 420 }} value={api.base_url}
+                  onChange={(e) => setApi({ ...api, base_url: e.target.value })} />
               </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="w-20 text-muted-foreground">API key</span>
+                <input
+                  style={{ ...fieldStyle, width: 300 }}
+                  placeholder={api.api_key_masked ? `已保存 ${api.api_key_masked}（留空不改）` : '填写 API key'}
+                  value={api.api_key}
+                  onChange={(e) => setApi({ ...api, api_key: e.target.value })}
+                />
+              </div>
+              <Toggle label="上传参考图给模型" checked={api.upload_images}
+                onChange={(v) => setApi({ ...api, upload_images: v })} />
+              <div className="text-[10px] text-muted-foreground">配置路径：ComfyUI/user/DeciiaEasyMedia/prompt_studio.json</div>
             </>
           ) : null}
         </div>
@@ -180,7 +233,7 @@ export function DirectorSettingsModal({
             onClick={() => setDraft({ ...DEFAULT_DIRECTOR_SETTINGS })}>恢复默认</Button>
           <span className="ml-auto" />
           <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={onClose}>取消</Button>
-          <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => { onSave(draft); onClose() }}>保存设置</Button>
+          <Button size="sm" className="h-6 px-2 text-[11px]" disabled={apiSaving} onClick={async () => { await persistApi(); onSave(draft); onClose() }}>{apiSaving ? "保存中…" : "保存设置"}</Button>
         </div>
       </div>
     </div>
