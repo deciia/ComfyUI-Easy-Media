@@ -26,6 +26,8 @@ interface PromptContentEditorProps {
   placeholder: string
   resources?: PromptReferenceResource[]
   mentionsEnabled?: boolean
+  /** 选择 @ 候选时回调：父级可自动补绑定并返回带正确段内编号的资源 */
+  onResourceChosen?: (resource: PromptReferenceResource) => PromptReferenceResource | void
   interactivePlaceholder?: boolean
   highlightSystemVariables?: boolean
   highlightPromptSemantics?: boolean
@@ -377,9 +379,9 @@ function appendReferenceChip(
 
   const label = document.createElement('span')
   label.className = 'inline-flex h-full items-center leading-none'
-  label.textContent = token
+  label.textContent = resource?.label ?? token
   chip.append(label)
-  chip.title = resource?.detail ?? token
+  chip.title = resource ? `${resource.label}（${token}）` : token
   container.append(chip)
 }
 
@@ -511,6 +513,7 @@ export function PromptContentEditor({
   placeholder,
   resources = [],
   mentionsEnabled = false,
+  onResourceChosen,
   interactivePlaceholder = false,
   highlightSystemVariables = false,
   highlightPromptSemantics = false,
@@ -666,9 +669,10 @@ export function PromptContentEditor({
   function chooseResource(resource: PromptReferenceResource) {
     const editor = editorRef.current
     if (!editor || !mention) return
+    const effectiveResource = onResourceChosen ? (onResourceChosen(resource) ?? resource) : resource
     const currentValue = serializeEditor(editor)
     const currentToken = currentValue.slice(mention.start, mention.end)
-    const replacementToken = replacementReferenceToken(currentToken, resource)
+    const replacementToken = replacementReferenceToken(currentToken, effectiveResource)
     const nextValue = `${currentValue.slice(0, mention.start)}${replacementToken}${currentValue.slice(mention.end)}`
     renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
     setEditorEmpty(false)

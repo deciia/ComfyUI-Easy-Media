@@ -403,6 +403,51 @@ export function PromptEnhancerModal({
   const matchedTrackSegmentId = scriptSegments.length > 0 ? matchedTaskSegment?.id : undefined
   const bindingKey = `script-${activeScriptIndex}:${previewVariant}`
   const boundIds = readBindings(bindingProjectKey, bindingKey)
+
+  /** 段内令牌编号契约：绑定清单顺序展开（主体→自身+子图），同类型按出现顺序编号 */
+  const computeBindingTokens = (ids: string[]): Map<string, string> => {
+    const map = new Map<string, string>()
+    const counters: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
+    const bump = (kind: string) => {
+      counters[kind] = (counters[kind] ?? 0) + 1
+      return `<${kind} ${counters[kind]}>`
+    }
+    for (const id of ids) {
+      const resource = resources.find((item) => item.id === id)
+      if (!resource) continue
+      if (resource.type === 'Subject') {
+        map.set(resource.id, bump('Subject'))
+        for (const childId of resource.childResourceIds ?? []) {
+          const child = resources.find((item) => item.id === childId)
+          if (!child) continue
+          if (child.type === 'Picture') map.set(child.id, bump('Picture'))
+          else if (child.type === 'Audio') map.set(child.id, bump('Audio'))
+          else if (child.type === 'Video') map.set(child.id, bump('Video'))
+        }
+        continue
+      }
+      if (resource.type === 'Picture') map.set(resource.id, bump('Picture'))
+      else if (resource.type === 'Audio') map.set(resource.id, bump('Audio'))
+      else if (resource.type === 'Video') map.set(resource.id, bump('Video'))
+    }
+    return map
+  }
+  const bindingTokens = computeBindingTokens(boundIds)
+  /** @ 选中未绑定资源：自动补绑定（子图绑父主体），按新编号返回替换资源 */
+  const handleResourceChosen = (resource: PromptReferenceResource): PromptReferenceResource => {
+    const target = resources.find((item) => `res-${item.id}` === resource.id)
+    if (!target) return resource
+    if (bindingTokens.has(target.id)) return resource
+    const parent = resources.find((item) => item.type === 'Subject' && (item.childResourceIds ?? []).includes(target.id))
+    const bindId = parent ? parent.id : target.id
+    const nextIds = boundIds.includes(bindId) ? boundIds : [...boundIds, bindId]
+    writeBindings(bindingProjectKey, bindingKey, nextIds)
+    const nextTokens = computeBindingTokens(nextIds)
+    const token = nextTokens.get(target.id)
+    if (!token) return resource
+    const index = Number(token.replace(/^<\w+\s+(\d+)>$/, '$1'))
+    return { ...resource, token, index }
+  }
   // 编辑缓冲 → 脚本段（防抖写回）
   useEffect(() => {
     if (!activeScriptSegment) return
@@ -862,136 +907,89 @@ export function PromptEnhancerModal({
   }
 
   const editorResources = useMemo<PromptReferenceResource[]>(() => {
-    const list: PromptReferenceResource[] = []
-    let subjectIndex = 0
-    let pictureIndex = 0
-    let audioIndex = 0
-    let videoIndex = 0
+    const tokens = computeBindingTokens(boundIds)
+    const counters: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
+    for (const token of tokens.values()) {
+      const matched = token.match(/^<(\w+)\s+(\d+)>$/)
+      if (matched) {
+        const kind = matched[1]
+        counters[kind] = Math.max(counters[kind] ?? 0, Number(matched[2]))
+      }
+    }
+    const bump = (kind: string) => {
+      counters[kind] = (counters[kind] ?? 0) + 1
+      return { index: counters[kind], token: `<${kind} ${counters[kind]}>` }
+    }
     const viewOf = (resource: ProjectResource) => {
       if (resource.type !== 'Picture' || !resource.imageFile) return undefined
       const sub = resource.subfolder ? `&subfolder=${encodeURIComponent(resource.subfolder)}` : ''
       return `/view?filename=${encodeURIComponent(resource.imageFile)}&type=${resource.sharedRoot ?? 'input'}${sub}`
     }
-    const pushSubject = (label: string, id: string) => {
-      subjectIndex += 1
-      list.push({
-        id,
-        type: 'subject',
-        index: subjectIndex,
-        label,
-        detail: `<Subject ${subjectIndex}>`,
-        token: `<Subject ${subjectIndex}>`,
-        color: TOKEN_COLORS.subject,
-      })
-    }
-    const pushResource = (resource: ProjectResource, tag: string) => {
-      const label = tag ? `${resource.name}（${tag}）` : resource.name
-      if (resource.type === 'Subject') {
-        pushSubject(label, `res-${resource.id}`)
-        return
-      }
-      if (resource.type === 'Picture') {
-        pictureIndex += 1
-        list.push({
-          id: `res-${resource.id}`,
-          type: 'image',
-          index: pictureIndex,
-          label,
-          detail: `<Picture ${pictureIndex}>`,
-          token: `<Picture ${pictureIndex}>`,
-          color: TOKEN_COLORS.picture,
-          thumbnailUrl: viewOf(resource),
-        })
-        return
-      }
-      if (resource.type === 'Audio') {
-        audioIndex += 1
-        list.push({
-          id: `res-${resource.id}`,
-          type: 'audio',
-          index: audioIndex,
-          label,
-          detail: `<Audio ${audioIndex}>`,
-          token: `<Audio ${audioIndex}>`,
-          color: TOKEN_COLORS.audio,
-        })
-        return
-      }
-      videoIndex += 1
+    const list: PromptReferenceResource[] = []
+    const pushWithToken = (resource: ProjectResource, label: string, token?: string) => {
+      const kind = resource.type
+      const slot = token ? { index: Number(token.replace(/^<\w+\s+(\d+)>$/, '$1')), token } : bump(kind)
+      const type = resource.type === 'Subject' ? 'subject'
+        : resource.type === 'Picture' ? 'image'
+          : resource.type === 'Audio' ? 'audio' : 'video'
       list.push({
         id: `res-${resource.id}`,
-        type: 'video',
-        index: videoIndex,
+        type,
+        index: slot.index,
         label,
-        detail: `<Video ${videoIndex}>`,
-        token: `<Video ${videoIndex}>`,
-        color: TOKEN_COLORS.video,
+        detail: slot.token,
+        token: slot.token,
+        color: TOKEN_COLORS[kind === 'Subject' ? 'subject' : kind === 'Picture' ? 'picture' : kind === 'Audio' ? 'audio' : 'video'],
+        thumbnailUrl: viewOf(resource),
       })
     }
-    const seen = new Set<string>()
-    const pushOnce = (resource: ProjectResource, tag: string) => {
-      if (seen.has(resource.id)) return
-      seen.add(resource.id)
-      pushResource(resource, tag)
-    }
-    // 1) 当前段已绑定的资源置顶
+    // 1) 绑定清单顺序展开（编号契约，不再置顶重排——就是绑定顺序本身）
     for (const id of boundIds) {
       const resource = resources.find((item) => item.id === id)
-      if (resource) pushOnce(resource, '已绑定')
+      if (!resource) continue
+      if (resource.type === 'Subject') {
+        pushWithToken(resource, resource.name, tokens.get(resource.id))
+        for (const childId of resource.childResourceIds ?? []) {
+          const child = resources.find((item) => item.id === childId)
+          if (child) pushWithToken(child, child.name, tokens.get(child.id))
+        }
+      } else {
+        pushWithToken(resource, resource.name, tokens.get(resource.id))
+      }
     }
-    // 2) 项目资源池（主体优先，再图片/音频/视频）
+    // 2) 未绑定资源池：续号（主体优先）
+    const seen = new Set(boundIds)
     for (const resource of resources) {
-      if (resource.type === 'Subject') pushOnce(resource, '')
+      if (resource.type === 'Subject' && !seen.has(resource.id)) pushWithToken(resource, resource.name)
     }
     for (const resource of resources) {
-      if (resource.type !== 'Subject') pushOnce(resource, '')
+      if (resource.type !== 'Subject' && !seen.has(resource.id)) {
+        const parent = resources.find((item) => item.type === 'Subject' && (item.childResourceIds ?? []).includes(resource.id))
+        if (!parent || !seen.has(parent.id)) pushWithToken(resource, resource.name)
+      }
     }
     // 3) 画布主体库补充（按 label 去重）
-    const seenSubjectNames = new Set(
-      list.filter((item) => item.type === 'subject').map((item) => item.label.replace(/（.*）$/, '')),
-    )
+    const seenSubjectNames = new Set(list.filter((item) => item.type === 'subject').map((item) => item.label))
     for (const name of libraryNames) {
       if (seenSubjectNames.has(name)) continue
-      pushSubject(name, `subject-${subjectIndex + 1}`)
+      const slot = bump('Subject')
+      list.push({ id: `subject-${slot.index}`, type: 'subject', index: slot.index, label: name, detail: slot.token, token: slot.token, color: TOKEN_COLORS.subject })
     }
-    // 4) 任务段已挂素材
+    // 4) 任务段已挂素材兜底
     for (const item of resourceTokens) {
-      const kind = item.type === 'image' ? 'picture' : (item.type ?? 'picture')
-      if (kind === 'picture') {
-        pictureIndex += 1
-        list.push({
-          id: `picture-${pictureIndex}`,
-          type: 'image',
-          index: pictureIndex,
-          label: item.label,
-          detail: item.label,
-          token: `<Picture ${pictureIndex}>`,
-          color: TOKEN_COLORS.picture,
-          thumbnailUrl: item.thumbnailUrl || inputViewUrl(imagePaths?.[pictureIndex - 1]),
-        })
-      } else if (kind === 'audio') {
-        audioIndex += 1
-        list.push({
-          id: `audio-${audioIndex}`,
-          type: 'audio',
-          index: audioIndex,
-          label: item.label,
-          detail: item.label,
-          token: `<Audio ${audioIndex}>`,
-          color: TOKEN_COLORS.audio,
-        })
-      } else if (kind === 'video') {
-        videoIndex += 1
-        list.push({
-          id: `video-${videoIndex}`,
-          type: 'video',
-          index: videoIndex,
-          label: item.label,
-          detail: item.label,
-          token: `<Video ${videoIndex}>`,
-          color: TOKEN_COLORS.video,
-        })
-      }
+      const kind = item.type === 'image' ? 'Picture' : (item.type === 'audio' ? 'Audio' : item.type === 'video' ? 'Video' : 'Picture')
+      const slot = bump(kind)
+      const type = kind === 'Picture' ? 'image' : kind === 'Audio' ? 'audio' : 'video'
+      list.push({
+        id: `${kind}-${slot.index}`,
+        type,
+        index: slot.index,
+        label: item.label,
+        detail: item.label,
+        token: slot.token,
+        color: TOKEN_COLORS[kind === 'Picture' ? 'picture' : kind === 'Audio' ? 'audio' : 'video'],
+        thumbnailUrl: item.thumbnailUrl || (kind === 'Picture' ? inputViewUrl(imagePaths?.[slot.index - 1]) : undefined),
+      })
     }
     return list
   }, [resources, boundIds, resourceTokens, imagePaths, libraryNames])
@@ -1821,6 +1819,7 @@ export function PromptEnhancerModal({
                     placeholder={abTab === 'a' ? t('multitrack.enhancerBriefPlaceholder') : '自己试着写一版最终效果（作为 AI 参考，不直接送模型）'}
                     resources={editorResources}
                     mentionsEnabled
+                    onResourceChosen={handleResourceChosen}
                     highlightPromptSemantics
                     className="h-full border-none bg-transparent"
                     testId="enhancer-brief-editor"
@@ -1972,6 +1971,7 @@ export function PromptEnhancerModal({
                       placeholder="AI 生成结果会出现在这里，也可手改；写入任务轨的就是这段文本"
                       resources={editorResources}
                       mentionsEnabled
+                      onResourceChosen={handleResourceChosen}
                       highlightPromptSemantics
                       className="h-full min-h-[160px] border-none bg-transparent"
                       testId="enhancer-final-editor"
