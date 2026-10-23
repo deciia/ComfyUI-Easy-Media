@@ -115,6 +115,8 @@ export interface WorkspaceCache {
   subjects?: unknown[]
   plannedResources?: Array<{ kind: string; name: string; purpose?: string }>
   resources?: ProjectResource[]
+  /** ④ 提示词增强的引用绑定：键 `${segmentId}:${variant}` -> 资源 id 列表 */
+  bindings?: Record<string, string[]>
 }
 
 const cache = new Map<string, WorkspaceCache>()
@@ -141,6 +143,7 @@ export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   if ('subjects' in patch) mirror(`easy-media-workspace-subjects:${key}`, patch.subjects)
   if ('plannedResources' in patch) mirror(`easy-media-workspace-resources:${key}`, patch.plannedResources)
   if ('resources' in patch) mirror(`easy-media-project-resources:${key}`, patch.resources)
+  if ('bindings' in patch) mirror(`easy-media-bindings:${key}`, patch.bindings)
   for (const listener of listeners.get(key) ?? []) listener()
 }
 
@@ -177,6 +180,17 @@ export function ensureHydrated(key: string) {
       const raw = window.localStorage.getItem(`easy-media-workspace-resources:${key}`)
       if (raw) {
         next.plannedResources = JSON.parse(raw)
+        changed = true
+      }
+    } catch {
+      /* 忽略坏数据 */
+    }
+  }
+  if (!('bindings' in next)) {
+    try {
+      const raw = window.localStorage.getItem(`easy-media-bindings:${key}`)
+      if (raw) {
+        next.bindings = JSON.parse(raw)
         changed = true
       }
     } catch {
@@ -341,6 +355,17 @@ export function unbindResourceFile(key: string, resourceId: string) {
     videoFile: undefined,
     audioFile: undefined,
   })
+}
+
+/** 读取某个 段:变体 的绑定资源 id */
+export function readBindings(key: string, bindingKey: string): string[] {
+  return readWorkspace(key).bindings?.[bindingKey] ?? []
+}
+
+/** 写入某个 段:变体 的绑定资源 id */
+export function writeBindings(key: string, bindingKey: string, ids: string[]) {
+  const current = readWorkspace(key).bindings ?? {}
+  writeWorkspace(key, { bindings: { ...current, [bindingKey]: ids } })
 }
 
 /** 主体挂/卸子资源 */

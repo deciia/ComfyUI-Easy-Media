@@ -8,6 +8,7 @@ import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { type WorkspaceSubject } from './WorkspacePanels'
 import { AssetsTab } from './AssetsTab'
 import { PromptQualityBar } from './PromptQualityBar'
+import { ReferenceBar } from './ReferenceBar'
 import { AgentRail } from './AgentRail'
 import {
   addResourceFromShared,
@@ -17,12 +18,14 @@ import {
   kindToType,
   patchResource,
   readWorkspace,
+  readBindings,
   removeResource,
   resourceUid,
   unbindResourceFile,
   subscribeWorkspace,
   typeToKind,
   upsertResource,
+  writeBindings,
   writeWorkspace,
   type ProjectResource,
 } from './agentStore'
@@ -372,6 +375,9 @@ export function PromptEnhancerModal({
   const finalDraft = abTab === 'a' ? finalA : finalB
   const setFinalDraft = (value: string) => (abTab === 'a' ? setFinalA(value) : setFinalB(value))
   const finalStoreKey = `easy-media-final-${abTab}:${(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}:${segmentId ?? 'none'}`
+  const bindingProjectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
+  const bindingKey = `${segmentId ?? 'none'}:${abTab}`
+  const boundIds = readBindings(bindingProjectKey, bindingKey)
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(finalStoreKey)
@@ -1663,7 +1669,14 @@ export function PromptEnhancerModal({
                     referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
                     onChangePrompt={(next) => setFinalDraft(next)}
                   />
-                  <span className="text-[11px] text-neutral-400">最终提示词 {abTab === 'a' ? 'A' : 'B'}（会保存到任务轨对应 A/B 用户提示词）</span>
+                                    <ReferenceBar
+                    resources={resources}
+                    boundIds={boundIds}
+                    onChange={(ids) => writeBindings(bindingProjectKey, bindingKey, ids)}
+                    prompt={finalDraft || finalPrompt}
+                    onInsertTokens={(next) => setFinalDraft(next)}
+                  />
+<span className="text-[11px] text-neutral-400">最终提示词 {abTab === 'a' ? 'A' : 'B'}（会保存到任务轨对应 A/B 用户提示词）</span>
                   <div className="min-h-[160px] shrink-0 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
                     <PromptContentEditor
                       value={finalDraft || finalPrompt}
@@ -1782,13 +1795,28 @@ export function PromptEnhancerModal({
                   const registry = globalThis as unknown as {
                     __easyMediaUpdateSegment?: (
                       segmentId: string,
-                      payload: { prompt?: string; variant?: 'a' | 'b' },
+                      payload: { prompt?: string; variant?: 'a' | 'b'; images?: Array<{ name: string; subfolder?: string }> },
                     ) => boolean
                   }
                   let written = false
                   if (segmentId && registry.__easyMediaUpdateSegment) {
                     try {
-                      written = registry.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: abTab })
+                      written = registry.__easyMediaUpdateSegment(segmentId, {
+                        prompt: target,
+                        variant: abTab,
+                        images: boundIds.flatMap((id) => {
+                          const resource = resources.find((item) => item.id === id)
+                          if (!resource) return []
+                          const list = resource.type === 'Subject'
+                            ? (resource.childResourceIds ?? [])
+                              .map((childId) => resources.find((item) => item.id === childId))
+                              .filter((item): item is ProjectResource => Boolean(item))
+                            : [resource]
+                          return list
+                            .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
+                            .map((item) => ({ name: item.imageFile ?? item.name, subfolder: item.subfolder }))
+                        }),
+                      })
                     } catch (error) {
                       console.error('[EasyMedia] update segment failed', error)
                     }
