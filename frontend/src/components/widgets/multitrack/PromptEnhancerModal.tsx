@@ -1816,6 +1816,59 @@ export function PromptEnhancerModal({
                     ) => boolean
                   }
                   let written = false
+                  // W2：按设置把绑定的音频/视频资源落到对应轨道
+                  if (segmentId) {
+                    const tracksRegistry = globalThis as unknown as {
+                      __easyMediaSaveTracks?: (
+                        segmentId: string,
+                        payload: {
+                          audio: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output'; trackRole?: string; trackName?: string; volumeDb?: number }>
+                          video: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' }>
+                        },
+                      ) => boolean
+                    }
+                    if (tracksRegistry.__easyMediaSaveTracks) {
+                      const expand = (ids: string[]) => ids.flatMap((id) => {
+                        const resource = resources.find((item) => item.id === id)
+                        if (!resource) return []
+                        if (resource.type === 'Subject') {
+                          return (resource.childResourceIds ?? [])
+                            .map((childId) => resources.find((item) => item.id === childId))
+                            .filter((item): item is ProjectResource => Boolean(item))
+                        }
+                        return [resource]
+                      })
+                      const expanded = expand(boundIds)
+                      const audioItems = directorSettings.save.targets.audio
+                        ? expanded
+                            .filter((item) => item.type === 'Audio' && (item.audioFile || item.name))
+                            .map((item) => ({
+                              name: item.audioFile ?? item.name,
+                              subfolder: item.subfolder,
+                              sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                              trackRole: item.trackRole ?? 'voice',
+                              trackName: directorSettings.audio.roleTracks[item.trackRole ?? 'voice'],
+                              volumeDb: directorSettings.audio.defaultDb[item.trackRole ?? 'voice'] ?? 0,
+                            }))
+                        : []
+                      const videoItems = directorSettings.save.targets.video
+                        ? expanded
+                            .filter((item) => item.type === 'Video' && (item.videoFile || item.name))
+                            .map((item) => ({
+                              name: item.videoFile ?? item.name,
+                              subfolder: item.subfolder,
+                              sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                            }))
+                        : []
+                      if (audioItems.length > 0 || videoItems.length > 0) {
+                        try {
+                          tracksRegistry.__easyMediaSaveTracks(segmentId, { audio: audioItems, video: videoItems })
+                        } catch (error) {
+                          console.error('[EasyMedia] save tracks failed', error)
+                        }
+                      }
+                    }
+                  }
                   if (segmentId && registry.__easyMediaUpdateSegment) {
                     try {
                       written = registry.__easyMediaUpdateSegment(segmentId, {

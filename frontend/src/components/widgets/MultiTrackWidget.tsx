@@ -1439,6 +1439,109 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   })
 
+  // 写入通道（W2）：把④绑定的音频/视频资源落到对应轨道
+  // 音频按角色归轨（同名轨复用，缺则新建，reference 轨默认静音）；视频落视频轨且不锁定，保存后可手动编辑
+  useEffect(() => {
+    type AssetItem = {
+      name: string
+      subfolder?: string
+      sourceType?: 'input' | 'output'
+      trackRole?: string
+      trackName?: string
+      volumeDb?: number
+    }
+    const saveTracks = (
+      segmentId: string,
+      payload: { audio: AssetItem[]; video: AssetItem[] },
+    ) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const segment = taskTrack?.segments.find((item) => item.id === segmentId)
+      if (!segment) return false
+      const start = segment.start_frame
+      const end = segment.end_frame
+      const stamp = Date.now()
+      let tracks = [...data.tracks]
+
+      const ensureTrack = (name: string, type: 'audio' | 'video', muted: boolean) => {
+        const found = tracks.find((track) => track.type === type && track.name === name)
+        if (found) return found
+        const created: MultiTrack = {
+          id: `track-${type}-${stamp}-${tracks.length + 1}`,
+          name,
+          type,
+          color: 'var(--primary)',
+          muted,
+          locked: false,
+          segments: [],
+        }
+        tracks = [...tracks, created]
+        return created
+      }
+
+      const upsertSegment = (track: MultiTrack, item: AssetItem, mediaType: 'audio' | 'video') => {
+        const stableKey = `asset-${segmentId}-${mediaType}-${item.trackRole ?? 'video'}-${item.name}`
+        const sourceType = item.sourceType ?? 'input'
+        const content: Record<string, unknown> = {
+          media_type: mediaType,
+          source_type: sourceType,
+          file_name: item.name,
+          subfolder: item.subfolder ?? '',
+          stable_key: stableKey,
+          asset_kind: 'reference',
+        }
+        if (mediaType === 'audio') {
+          content.volume_db = item.volumeDb ?? 0
+        }
+        const newSegment = {
+          id: `seg-${mediaType}-${stamp}-${Math.random().toString(36).slice(2, 6)}`,
+          start_frame: start,
+          end_frame: end,
+          content: content as unknown as MultiTrackSegment['content'],
+          color: track.color ?? 'var(--primary)',
+        } as MultiTrackSegment
+        tracks = tracks.map((current) => (
+          current.id === track.id
+            ? {
+                ...current,
+                segments: [
+                  ...current.segments.filter((existing) => (
+                    (existing.content as unknown as { stable_key?: string })?.stable_key !== stableKey
+                  )),
+                  newSegment,
+                ],
+              }
+            : current
+        ))
+      }
+
+      for (const item of payload.audio) {
+        const role = item.trackRole ?? 'voice'
+        const trackName = item.trackName || `音频·${role}`
+        const track = ensureTrack(trackName, 'audio', role === 'reference')
+        upsertSegment(track, item, 'audio')
+      }
+      for (const item of payload.video) {
+        const track = tracks.find((current) => current.type === 'video' && current.name === '视频')
+          ?? ensureTrack('视频', 'video', false)
+        upsertSegment(track, item, 'video')
+      }
+
+      commitNormalizedTrackChange({
+        ...data,
+        tracks,
+        total_length: calculateTotalLength(tracks, data.frame_rate),
+      })
+      return true
+    }
+    const registry = globalThis as unknown as { __easyMediaSaveTracks?: typeof saveTracks }
+    registry.__easyMediaSaveTracks = saveTracks
+    return () => {
+      if (registry.__easyMediaSaveTracks === saveTracks) {
+        delete registry.__easyMediaSaveTracks
+      }
+    }
+  })
+
   function patchTaskSegmentContent(segmentId: string, patch: Record<string, unknown>) {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
     if (!taskTrack) return

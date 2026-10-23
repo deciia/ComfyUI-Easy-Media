@@ -61,6 +61,8 @@ export interface ProjectResource {
   sharedPath?: string
   subfolder?: string
   sharedRoot?: 'input' | 'output' | 'temp'
+  /** 仅 Audio：落轨角色 voice/lipsync/sfx/bgm/reference（决定保存到哪条音频轨） */
+  trackRole?: string
   generator?: { workflow?: string; brief?: string; seed?: number }
   createdAt: number
   updatedAt: number

@@ -505,6 +505,22 @@ export function AssetsTab({
         >
           {relationshipOptions(resource.type).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
+        {resource.type === 'Audio' ? (
+          <label className="flex items-center gap-1 text-[11px]">
+            <span className="text-muted-foreground">落轨角色</span>
+            <select
+              style={{ ...fieldStyle, width: 150 }}
+              value={resource.trackRole ?? 'voice'}
+              onChange={(event) => onPatch?.(resource.id, { trackRole: event.target.value })}
+            >
+              <option value="voice">voice 口播</option>
+              <option value="lipsync">lipsync 原声</option>
+              <option value="sfx">sfx 音效</option>
+              <option value="bgm">bgm 音乐</option>
+              <option value="reference">reference 仅参考</option>
+            </select>
+          </label>
+        ) : null}
       </div>
       {(() => {
         const mediaKind: 'image' | 'audio' | 'video' = resource.type === 'Picture' ? 'image' : resource.type === 'Video' ? 'video' : 'audio'
