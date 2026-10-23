@@ -830,8 +830,15 @@ export function PromptEnhancerModal({
     // A 栏取值链：promptA → 分镜段 user_prompt（〔名〕物化为令牌并自动绑定）→ 任务段 user_prompt
     let promptA = String(seg?.promptA ?? '').trim() || String(trackContent.user_prompt ?? '')
     if (seg && !String(seg.promptA ?? '').trim() && String(seg.user_prompt ?? '').trim()) {
-      promptA = materializePlanUserPrompt(String(seg.user_prompt))
-      patchScriptSegment({ promptA })
+      const rawUserPrompt = String(seg.user_prompt)
+      const materialized = materializePlanUserPrompt(rawUserPrompt)
+      // 未解析出任何令牌时不落盘，保留〔名〕等用户补全主体后下次再试
+      if (materialized !== rawUserPrompt) {
+        promptA = materialized
+        patchScriptSegment({ promptA: materialized })
+      } else {
+        promptA = rawUserPrompt
+      }
     }
     setBrief(repairSpacing(promptA))
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
@@ -1063,19 +1070,32 @@ export function PromptEnhancerModal({
     const response = await fetch('/easy-media/prompt-studio/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        brief: sanitizeBriefForGenerate(text),
-        options: { ...options, ...payloadOptions, ...presetPayload() },
-        global_prompt: globalDraft,
+      body: JSON.stringify((() => {
         // D2：任务模式（脚本段 > 脚本级 > 默认）、段时长、输出语言
-        ...(() => {
-          const segSettings = (activeScriptSegment as unknown as { settings?: { taskType?: string } } | undefined)?.settings
-          const planSettings = (scriptPlan as unknown as { settings?: { taskType?: string } } | null)?.settings
-          const raw = segSettings?.taskType || planSettings?.taskType || ''
-          return { task_type: taskTemplateOf(raw).task_type, task_mode: taskTemplateOf(raw).task_mode, task_label: raw }
-        })(),
-        duration_seconds: Number((activeScriptSegment as unknown as { duration_seconds?: number } | undefined)?.duration_seconds ?? 0) || undefined,
-        language: String(payloadOptions.output_language ?? options.output_language ?? ''),
+        // 注意：options 里存在默认 task_type='Ref2VA' / duration_seconds=5，必须覆盖而不是并列传，否则后端读 options 优先会屏蔽
+        const segSettings = (activeScriptSegment as unknown as { settings?: { taskType?: string } } | undefined)?.settings
+        const planSettings = (scriptPlan as unknown as { settings?: { taskType?: string } } | null)?.settings
+        const rawTask = segSettings?.taskType || planSettings?.taskType || ''
+        const mapped = taskTemplateOf(rawTask)
+        const segmentDuration = Number((activeScriptSegment as unknown as { duration_seconds?: number } | undefined)?.duration_seconds ?? 0) || 0
+        const language = String(payloadOptions.output_language ?? options.output_language ?? '')
+        return {
+          brief: sanitizeBriefForGenerate(text),
+          options: {
+            ...options,
+            ...payloadOptions,
+            ...presetPayload(),
+            task_type: mapped.task_type,
+            task_mode: mapped.task_mode,
+            task_label: rawTask,
+            ...(segmentDuration > 0 ? { duration_seconds: segmentDuration } : {}),
+            output_language: language,
+          },
+          global_prompt: globalDraft,
+          task_type: mapped.task_type,
+          task_mode: mapped.task_mode,
+          duration_seconds: segmentDuration || undefined,
+          language,
         // D2：主体带令牌/描述/保留项（绑定主体用契约编号，未绑定按池序续号）
         subjects: (() => {
           const subjectEntries = editorResources.filter((item) => item.type === 'subject')
@@ -1095,11 +1115,12 @@ export function PromptEnhancerModal({
           audio: editorResources.filter((item) => item.type === 'audio').map((item) => ({ token: item.token, name: item.label })),
           video: editorResources.filter((item) => item.type === 'video').map((item) => ({ token: item.token, name: item.label })),
         },
-        images: imagePaths ?? [],
-        picture_count: pictureCount ?? null,
-        audio_count: audioCount ?? null,
-        video_count: videoCount ?? null,
-      }),
+          images: imagePaths ?? [],
+          picture_count: pictureCount ?? null,
+          audio_count: audioCount ?? null,
+          video_count: videoCount ?? null,
+        }
+      })()),
     })
     const data = await response.json().catch(() => ({}))
     return { ok: response.ok, data }
