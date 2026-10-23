@@ -47,7 +47,7 @@ def load_config() -> dict:
     if not path.exists():
         return {"types": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as error:  # noqa: BLE001
         raise ResourceGenError(f"resource_workflows.json 解析失败：{error}") from error
     if not isinstance(data, dict):
