@@ -669,24 +669,56 @@ export function PromptEnhancerModal({
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const skipAutosaveRef = useRef(true)
   const [mentionPos, setMentionPos] = useState<{ top: number; left: number } | null>(null)
-  const officialToken = (type: string | undefined, index: number): string => {
-    const kind = type ?? 'picture'
-    if (kind === 'subject') return `<Subject ${index + 1}>`
-    if (kind === 'audio') return `<Audio ${index + 1}>`
-    if (kind === 'video') return `<Video ${index + 1}>`
-    return `<Picture ${index + 1}>`
-  }
 
   const candidates = useMemo(() => {
-    const list: Array<{ token: string; label: string; type?: string; thumbnailUrl?: string; path?: string; insert?: string }> = []
-    libraryNames.forEach((name, index) => {
-      list.push({ token: `@${name}`, label: name, type: 'subject', insert: `<Subject ${index + 1}>` })
-    })
-    let imageIndex = 0
-    let audioIndex = 0
-    let videoIndex = 0
+    type Cand = { token: string; label: string; type?: string; thumbnailUrl?: string; path?: string; insert?: string }
+    const list: Cand[] = []
+    const counters: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
+    const nextLabel = (type: string) => {
+      counters[type] = (counters[type] ?? 0) + 1
+      return `<${type} ${counters[type]}>`
+    }
+    const thumbOf = (resource: ProjectResource) => {
+      if (resource.type !== 'Picture' || !resource.imageFile) return undefined
+      const sub = resource.subfolder ? `&subfolder=${encodeURIComponent(resource.subfolder)}` : ''
+      return `/view?filename=${encodeURIComponent(resource.imageFile)}&type=${resource.sharedRoot ?? 'input'}${sub}`
+    }
+    const seen = new Set<string>()
+    const pushResource = (resource: ProjectResource, tag: string) => {
+      if (seen.has(resource.id)) return
+      seen.add(resource.id)
+      const type = resource.type === 'Subject' ? 'subject'
+        : resource.type === 'Picture' ? 'picture'
+          : resource.type === 'Audio' ? 'audio' : 'video'
+      list.push({
+        token: `@${resource.name}`,
+        label: tag ? `${resource.name}（${tag}）` : resource.name,
+        type,
+        thumbnailUrl: thumbOf(resource),
+        insert: nextLabel(resource.type),
+      })
+    }
+    // 1) 当前段已绑定的资源置顶
+    for (const id of boundIds) {
+      const resource = resources.find((item) => item.id === id)
+      if (resource) pushResource(resource, '已绑定')
+    }
+    // 2) 项目资源池（主体优先，再图片/音频/视频）
+    for (const resource of resources) {
+      if (resource.type === 'Subject') pushResource(resource, '')
+    }
+    for (const resource of resources) {
+      if (resource.type !== 'Subject') pushResource(resource, resource.status === 'ready' ? '' : '未就绪')
+    }
+    // 3) 画布主体库补充（去重）
+    for (const name of libraryNames) {
+      const token = `@${name}`
+      if (list.some((item) => item.token === token)) continue
+      list.push({ token, label: name, type: 'subject', insert: nextLabel('Subject') })
+    }
+    // 4) 任务段已挂素材
     for (const item of resourceTokens) {
-      const entry: { token: string; label: string; type?: string; thumbnailUrl?: string; path?: string; insert?: string } = {
+      const entry: Cand = {
         token: item.token,
         label: item.label,
         type: item.type,
@@ -694,22 +726,19 @@ export function PromptEnhancerModal({
       }
       const kind = item.type === 'image' ? 'picture' : (item.type ?? 'picture')
       if (kind === 'picture') {
-        entry.path = imagePaths?.[imageIndex]
-        entry.insert = `<Picture ${imageIndex + 1}>`
-        imageIndex += 1
+        entry.path = imagePaths?.[counters.Picture ?? 0]
+        entry.insert = nextLabel('Picture')
       } else if (kind === 'audio') {
-        entry.insert = `<Audio ${audioIndex + 1}>`
-        audioIndex += 1
+        entry.insert = nextLabel('Audio')
       } else if (kind === 'video') {
-        entry.insert = `<Video ${videoIndex + 1}>`
-        videoIndex += 1
+        entry.insert = nextLabel('Video')
       } else {
-        entry.insert = officialToken(kind, 0)
+        entry.insert = nextLabel('Subject')
       }
       list.push(entry)
     }
     return list
-  }, [libraryNames, resourceTokens])
+  }, [resources, boundIds, libraryNames, resourceTokens, imagePaths])
   const referenced = useMemo(() => {
     const names = new Set(parseMentions(brief))
     // 官方令牌 <Subject n> 也视为引用了对应主体
@@ -728,15 +757,9 @@ export function PromptEnhancerModal({
     const planNow = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
     const seg = planNow?.segments?.[activeScriptIndex] as Record<string, unknown> | undefined
     const trackContent = (matchedTaskSegment?.content ?? {}) as unknown as Record<string, unknown>
-    const scriptBrief = seg ? String(formatPlanSegmentBrief(seg as never) ?? '').trim() : ''
-    const promptA = String(seg?.promptA ?? '').trim()
-      || scriptBrief
-      || String(trackContent.user_prompt ?? '')
+    // A 栏只取用户/AI 写过的稿；分镜原稿改为按钮按需导入，避免把分镜摘要灌进提示词
+    const promptA = String(seg?.promptA ?? '').trim() || String(trackContent.user_prompt ?? '')
     setBrief(repairSpacing(promptA))
-    // 分镜有内容但还没写过 A 稿时，把兜底稿回填到脚本段，保持脚本层可追踪
-    if (seg && !String(seg.promptA ?? '').trim() && scriptBrief) {
-      patchScriptSegment({ promptA: scriptBrief })
-    }
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
     setFinalA(String(seg?.finalA ?? ''))
     setFinalB(String(seg?.finalB ?? ''))
@@ -1683,8 +1706,24 @@ export function PromptEnhancerModal({
                     </button>
                   ))}
                   <span className="ml-auto text-[10px] text-neutral-500">
-                    {abTab === 'a' ? '来自分镜，可粗' : '自由填写，作 AI 参考'}
+                    {abTab === 'a' ? '手写或从分镜导入' : '自由填写，作 AI 参考'}
                   </span>
+                  {abTab === 'a' && activeScriptSegment ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-[10px]"
+                      style={{ border: `1px solid ${BORDER}` }}
+                      title="把分镜段的名称/镜头/台词拼成原稿填入 A 栏"
+                      onClick={() => {
+                        const briefFromPlan = String(formatPlanSegmentBrief(activeScriptSegment as never) ?? '').trim()
+                        if (!briefFromPlan) return
+                        setBrief(briefFromPlan)
+                        patchScriptSegment({ promptA: briefFromPlan })
+                      }}
+                    >
+                      ⤓ 从分镜导入原稿
+                    </button>
+                  ) : null}
                 </div>
                 <PromptQualityBar
                 prompt={brief}
