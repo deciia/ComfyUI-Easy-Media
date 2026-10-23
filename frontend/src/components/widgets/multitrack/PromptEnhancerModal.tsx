@@ -892,6 +892,20 @@ export function PromptEnhancerModal({
     setSections(splitSections(text))
   }
 
+  /** 切换段前先落盘当前草稿，避免编辑丢失 */
+  const persistDraft = () => {
+    try {
+      onAutosave?.({ brief, generated: sections.length ? joinSections(sections) : (result || lastGenerated) })
+    } catch (saveError) {
+      console.warn('[EasyMedia][enhancer] autosave failed', saveError)
+    }
+  }
+  const activateSegment = (id?: string) => {
+    if (!id || id === segmentId) return
+    persistDraft()
+    onActivateSegment?.(id)
+  }
+
   async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: string) {
     const outputLanguage = language ?? options.output_language
     setBusy(true)
@@ -1585,48 +1599,7 @@ export function PromptEnhancerModal({
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
-                  <span className={labelClass}>{t('multitrack.enhancerBrief')}</span>
-                  {segments.length > 1 ? (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="secondary"
-                        className="h-6 px-2 text-[11px]"
-                        onClick={() => {
-                          const index = segments.findIndex((item) => item.id === segmentId)
-                          const previous = segments[(index - 1 + segments.length) % segments.length]
-                          if (!previous || !onActivateSegment) return
-                          try { onAutosave?.({ brief, generated: sections.length ? joinSections(sections) : (result || lastGenerated) }) } catch (saveError) { console.warn("[EasyMedia][enhancer] autosave failed", saveError) }
-                          onActivateSegment(previous.id)
-                        }}
-                      >
-                        ◀
-                      </Button>
-                      <select
-                        style={{ ...fieldStyle, width: 132, height: 24 }}
-                        value={segmentId ?? segments[0]?.id}
-                        onChange={(event) => {
-                          if (event.target.value === segmentId) return
-                          try { onAutosave?.({ brief, generated: sections.length ? joinSections(sections) : (result || lastGenerated) }) } catch (saveError) { console.warn("[EasyMedia][enhancer] autosave failed", saveError) }
-                          onActivateSegment?.(event.target.value)
-                        }}
-                      >
-                        {segments.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                      </select>
-                      <Button
-                        variant="secondary"
-                        className="h-6 px-2 text-[11px]"
-                        onClick={() => {
-                          const index = segments.findIndex((item) => item.id === segmentId)
-                          const next = segments[(index + 1) % segments.length]
-                          if (!next || !onActivateSegment) return
-                          try { onAutosave?.({ brief, generated: sections.length ? joinSections(sections) : (result || lastGenerated) }) } catch (saveError) { console.warn("[EasyMedia][enhancer] autosave failed", saveError) }
-                          onActivateSegment(next.id)
-                        }}
-                      >
-                        ▶
-                      </Button>
-                    </div>
-                  ) : null}
+                  <span className={labelClass}>片段提示词（A/B 原稿，可粗）</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
                   <span className="text-[11px] text-muted-foreground">分镜段</span>
@@ -1637,7 +1610,7 @@ export function PromptEnhancerModal({
                     disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) <= 0}
                     onClick={() => {
                       const index = segments.findIndex((item) => item.id === segmentId)
-                      if (index > 0) onActivateSegment?.(segments[index - 1].id)
+                      if (index > 0) activateSegment(segments[index - 1].id)
                     }}
                   >
                     ◀
@@ -1645,7 +1618,7 @@ export function PromptEnhancerModal({
                   <select
                     style={{ ...fieldStyle, width: 220 }}
                     value={segmentId ?? ''}
-                    onChange={(event) => onActivateSegment?.(event.target.value)}
+                    onChange={(event) => activateSegment(event.target.value)}
                   >
                     {workspaceSegments.map((item, index) => {
                       const hasPrompt = Boolean(String((item.content as unknown as { user_prompt?: string } | null)?.user_prompt ?? '').trim())
@@ -1663,7 +1636,7 @@ export function PromptEnhancerModal({
                     disabled={!onActivateSegment || segments.findIndex((item) => item.id === segmentId) >= segments.length - 1}
                     onClick={() => {
                       const index = segments.findIndex((item) => item.id === segmentId)
-                      if (index >= 0 && index < segments.length - 1) onActivateSegment?.(segments[index + 1].id)
+                      if (index >= 0 && index < segments.length - 1) activateSegment(segments[index + 1].id)
                     }}
                   >
                     ▶
