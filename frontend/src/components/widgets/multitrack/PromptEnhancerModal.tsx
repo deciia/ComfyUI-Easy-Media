@@ -434,6 +434,31 @@ export function PromptEnhancerModal({
   }
   const bindingTokens = computeBindingTokens(boundIds)
   /** @ 选中未绑定资源：自动补绑定（子图绑父主体），按新编号返回替换资源 */
+  /** 分镜段 user_prompt 物化：〔名〕→ 官方令牌；匹配到资源则自动补绑定，未匹配保留占位 */
+  const materializePlanUserPrompt = (text: string): string => {
+    const names = Array.from(new Set(
+      Array.from(text.matchAll(/〔([^〕]+)〕/g)).map((match) => match[1].trim()).filter(Boolean),
+    ))
+    if (names.length === 0) return text
+    const nextIds = [...boundIds]
+    const nameToResource = new Map<string, ProjectResource>()
+    for (const name of names) {
+      const found = resources.find((item) => item.name === name && item.type === 'Subject')
+        ?? resources.find((item) => item.name === name)
+      if (!found) continue
+      nameToResource.set(name, found)
+      const parent = resources.find((item) => item.type === 'Subject' && (item.childResourceIds ?? []).includes(found.id))
+      const bindId = parent ? parent.id : found.id
+      if (!nextIds.includes(bindId)) nextIds.push(bindId)
+    }
+    if (nameToResource.size === 0) return text
+    writeBindings(bindingProjectKey, bindingKey, nextIds)
+    const tokens = computeBindingTokens(nextIds)
+    return text.replace(/〔([^〕]+)〕/g, (whole, name: string) => {
+      const found = nameToResource.get(name.trim())
+      return (found && tokens.get(found.id)) || whole
+    })
+  }
   const handleResourceChosen = (resource: PromptReferenceResource): PromptReferenceResource => {
     const target = resources.find((item) => `res-${item.id}` === resource.id)
     if (!target) return resource
@@ -802,8 +827,12 @@ export function PromptEnhancerModal({
     const planNow = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
     const seg = planNow?.segments?.[activeScriptIndex] as Record<string, unknown> | undefined
     const trackContent = (matchedTaskSegment?.content ?? {}) as unknown as Record<string, unknown>
-    // A 栏只取用户/AI 写过的稿；分镜原稿改为按钮按需导入，避免把分镜摘要灌进提示词
-    const promptA = String(seg?.promptA ?? '').trim() || String(trackContent.user_prompt ?? '')
+    // A 栏取值链：promptA → 分镜段 user_prompt（〔名〕物化为令牌并自动绑定）→ 任务段 user_prompt
+    let promptA = String(seg?.promptA ?? '').trim() || String(trackContent.user_prompt ?? '')
+    if (seg && !String(seg.promptA ?? '').trim() && String(seg.user_prompt ?? '').trim()) {
+      promptA = materializePlanUserPrompt(String(seg.user_prompt))
+      patchScriptSegment({ promptA })
+    }
     setBrief(repairSpacing(promptA))
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
     setFinalA(String(seg?.finalA ?? ''))

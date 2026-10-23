@@ -47,6 +47,11 @@ PLAN_SYSTEM_PROMPT = """你是一位资深影视导演兼分镜师，同时熟�
 - 同一空间先建立（全景/中景），再进入细节，避免观众迷失。
 - 每段最多 4 个镜头；不要编造不存在的素材。
 
+五点五、每段写 user_prompt（H3 官方提示词的简化版，用户能读懂）
+- 用〔主体名〕占位引用主体/资源（全片名称一致；不要写 <Subject n> 编号，编号由前端按绑定分配）。
+- 六要素齐全：主体定义句（〔名〕是…，由〔图名〕定义）→ 场景与动作（时间顺序）→ 镜头语言 → 声音 → 台词（<d>…</d>）→ 禁止项（文字/字幕/水印）。
+- 按本段时长安排 [Shot N]；台词前不加引导语；不虚构素材。
+
 五、推导主体与资源（分镜决定它们，不要等提示词阶段再想）
 - subjects：本段出现的角色/场景/物体，{name, type(人物/场景/物体/风格), description, retention[]}。
   名字用中文短名，全片保持一致；retention 写必须保持不变的外观/空间要素。
@@ -79,6 +84,7 @@ PLAN_SYSTEM_PROMPT = """你是一位资深影视导演兼分镜师，同时熟�
           "transition": "动作匹配切下一镜"
         }
       ],
+      "user_prompt": "〔小赵〕是……，由〔小赵四视图〕定义\n场景：……\n[Shot 1] 中景……\n台词：<d>……</d>\n声音：……\n禁止：文字、字幕、水印",
       "subjects": [{"name": "小赵", "type": "人物", "description": "外观与身份", "retention": ["发型", "服装"]}],
       "resources": [{"kind": "image", "name": "诊室全景", "note": "空景", "for": "建立空间"}]
     }
@@ -311,6 +317,8 @@ def normalize_plan(data: dict, frame_rate: float = 30.0) -> dict:
             "shots": _normalize_shots(raw.get("shots")),
             "subjects": subjects,
             "resources": resources,
+            # D5：AI 产出的简化版用户提示词（〔名〕占位），④ 导入时物化为令牌
+            "user_prompt": _text(raw.get("user_prompt"), 8000),
             # 分镜阶段不强制英文提示词；保留字段供 ④ 填充
             "prompt_draft": _text(raw.get("prompt_draft"), 8000),
         })
