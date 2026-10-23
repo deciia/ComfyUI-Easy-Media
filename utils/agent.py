@@ -281,14 +281,42 @@ async def run_agent_step(
         role = str(message.get("role") or "user")
         if role not in ("user", "assistant", "tool"):
             continue
-        item: dict[str, Any] = {"role": role, "content": str(message.get("text") or message.get("content") or "")}
-        if role == "tool":
-            item["tool_call_id"] = str(message.get("tool_call_id") or "")
+        text = str(message.get("text") or message.get("content") or "")
         tool_calls = message.get("tool_calls")
-        if role == "assistant" and isinstance(tool_calls, list) and tool_calls:
-            item["tool_calls"] = tool_calls
-            if not item["content"]:
-                item["content"] = None
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or "")
+            if not call_id:
+                continue
+            history.append({"role": "tool", "tool_call_id": call_id, "content": text or ""})
+            continue
+        item: dict[str, Any] = {"role": role}
+        if isinstance(tool_calls, list) and tool_calls:
+            # 补全 id/type/function 结构；content 为空时省略（GLM 不接受 null）
+            normalized = []
+            for index, call in enumerate(tool_calls):
+                if not isinstance(call, dict):
+                    continue
+                fn = call.get("function") or {}
+                if not fn.get("name"):
+                    continue
+                normalized.append({
+                    "id": str(call.get("id") or f"call_{index}"),
+                    "type": "function",
+                    "function": {
+                        "name": str(fn.get("name")),
+                        "arguments": str(fn.get("arguments") or "{}"),
+                    },
+                })
+            if normalized:
+                item["tool_calls"] = normalized
+                if text:
+                    item["content"] = text
+            elif text:
+                item["content"] = text
+            else:
+                continue
+        else:
+            item["content"] = text
         history.append(item)
     if not history:
         history = [{"role": "user", "content": "你好"}]
@@ -306,14 +334,42 @@ async def run_agent_step(
     headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
     import aiohttp
 
-    try:
+    def _strip_tool_protocol(items: list[dict]) -> list[dict]:
+        """把工具协议历史压平成纯文本，兼容不接受 tool 角色的模型。"""
+        out: list[dict] = []
+        for item in items:
+            role = item.get("role")
+            if role == "system":
+                out.append(item)
+                continue
+            if role == "tool":
+                continue
+            content = item.get("content") or ""
+            calls = item.get("tool_calls") or []
+            if calls:
+                summary = "；".join(
+                    f"{call['function']['name']}({call['function']['arguments'][:120]})" for call in calls if call.get("function")
+                )
+                content = (content + "\n[上一轮已调用工具：" + summary + "]").strip()
+            out.append({"role": role, "content": content or "已执行工具调用。"})
+        return out
+
+    async def _post(payload_body: dict) -> tuple[int, str]:
         timeout = aiohttp.ClientTimeout(total=180)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(settings.base_url, json=body, headers=headers) as response:
-                raw = await response.text()
-                if response.status >= 400:
-                    raise AgentError(f"模型请求失败（{response.status}）：{raw[:300]}")
-                data = json.loads(raw)
+            async with session.post(settings.base_url, json=payload_body, headers=headers) as response:
+                return response.status, await response.text()
+
+    try:
+        status, raw = await _post(body)
+        if status >= 400 and tools and ("1214" in raw or "tool" in raw.lower() or "messages" in raw):
+            # 把工具历史压平后重试一次（仍保留 tools 定义）
+            fallback = dict(body)
+            fallback["messages"] = _strip_tool_protocol(body["messages"])
+            status, raw = await _post(fallback)
+        if status >= 400:
+            raise AgentError(f"模型请求失败（{status}）：{raw[:300]}")
+        data = json.loads(raw)
     except AgentError:
         raise
     except PromptEnhancerError as error:
