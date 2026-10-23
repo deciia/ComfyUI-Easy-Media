@@ -1097,6 +1097,82 @@ async def handle_agent_info(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
+@PromptServer.instance.routes.get("/easy-media/assets/input")
+async def handle_list_input_assets(request: web.Request) -> web.Response:
+    """列出 input 目录下的素材（可按 subdir 过滤），供智能体挑选参考图/音频。"""
+    try:
+        subdir = str(request.rel_url.query.get("subdir") or "").strip().strip("/\\")
+        limit = max(1, min(500, int(request.rel_url.query.get("limit") or 200)))
+        import folder_paths as _fp
+
+        root = Path(_fp.get_input_directory())
+        base = (root / subdir) if subdir else root
+        if not base.exists():
+            return web.json_response({"ok": False, "error": f"目录不存在：{subdir or 'input'}"}, status=404)
+        items = []
+        for file in sorted(base.rglob("*")):
+            if not file.is_file():
+                continue
+            if file.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".wav", ".mp3", ".m4a", ".flac", ".mp4", ".mov", ".webm", ".mkv"}:
+                continue
+            rel = file.relative_to(root).as_posix()
+            items.append({
+                "path": rel,
+                "file_name": file.name,
+                "subfolder": str(Path(rel).parent).replace("\\", "/") if "/" in rel else "",
+                "size": file.stat().st_size,
+                "kind": "image" if file.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"} else ("audio" if file.suffix.lower() in {".wav", ".mp3", ".m4a", ".flac"} else "video"),
+            })
+            if len(items) >= limit:
+                break
+        return web.json_response({"ok": True, "root": str(root), "items": items})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/assets/outputs")
+async def handle_list_project_outputs(request: web.Request) -> web.Response:
+    """列出某项目最近的生成产物（视频/图片），供智能体在生成后自查。"""
+    try:
+        project = str(request.rel_url.query.get("project") or "").strip()
+        limit = max(1, min(100, int(request.rel_url.query.get("limit") or 12)))
+        import folder_paths as _fp
+
+        out_root = Path(_fp.get_output_directory())
+        candidates = []
+        if project:
+            candidates.append(out_root / "easy_media" / "projects" / project)
+        candidates.append(out_root / "easy_media")
+        candidates.append(out_root)
+        found = []
+        for base in candidates:
+            if not base.exists():
+                continue
+            for file in base.rglob("*"):
+                if not file.is_file():
+                    continue
+                if file.suffix.lower() not in {".mp4", ".webm", ".mov", ".mkv", ".png", ".jpg"}:
+                    continue
+                if "easy_media" not in file.as_posix() and project and project not in file.as_posix():
+                    continue
+                found.append(file)
+            if len(found) >= limit * 4:
+                break
+        found.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+        items = [{
+            "path": str(file),
+            "file_name": file.name,
+            "size": file.stat().st_size,
+            "mtime": file.stat().st_mtime,
+            "kind": "video" if file.suffix.lower() in {".mp4", ".webm", ".mov", ".mkv"} else "image",
+        } for file in found[:limit]]
+        return web.json_response({"ok": True, "items": items})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/agent/step")
 async def handle_agent_step(request: web.Request) -> web.Response:
     """单步工具调用：返回 {text, tool_calls}；工具在前端执行。"""

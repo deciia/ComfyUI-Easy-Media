@@ -18,6 +18,7 @@ function fillPromptA(projectKey: string, segIndex: number, text: string): boolea
 import {
   ensureHydrated,
   patchWorkspaceMessages,
+  readBindings,
   readResources,
   readWorkspace,
   subscribeWorkspace,
@@ -286,6 +287,94 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'get_plan',
+        description: '读取完整分镜脚本（每段名称/时长/beat/摘要/镜头/台词/设置/A稿长度/绑定的主体与资源）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_input_files',
+        description: '列出 ComfyUI input 目录下的可用素材（图片/音频/视频），用于挑选参考图、参考音频',
+        parameters: {
+          type: 'object',
+          properties: {
+            subdir: { type: 'string', description: '子目录，如 yusheng/ep2' },
+            limit: { type: 'number' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'upsert_resource',
+        description: '新增或更新一个资源（图片/音频/视频），可同时挂文件路径',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            type: { type: 'string', enum: ['Picture', 'Audio', 'Video'] },
+            relationship: { type: 'string', description: 'reuse / reference / style 等，可选' },
+            description: { type: 'string' },
+            file_path: { type: 'string', description: 'input 目录相对路径，如 yusheng/ep2/老赵四视图.png' },
+          },
+          required: ['name', 'type'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'attach_media',
+        description: '给已存在的资源挂上文件（图片/音频/视频）并置为 ready',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '资源名称' },
+            file_path: { type: 'string', description: 'input 目录相对路径' },
+          },
+          required: ['name', 'file_path'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_outputs',
+        description: '列出项目最近的生成产物（视频/图片路径），用于生成后自查',
+        parameters: { type: 'object', properties: { limit: { type: 'number' } }, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'run_generation',
+        description: '触发 ComfyUI 正式生成（等同点击运行队列）。调用前必须确认分镜已应用到任务轨',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_all_prompts',
+        description: '为指定段批量生成标准提示词并写入 finalA（按段任务类型自动选模板）',
+        parameters: {
+          type: 'object',
+          properties: {
+            indices: { type: 'array', items: { type: 'number' }, description: '段序号数组；不传则全部段' },
+            variant: { type: 'string', enum: ['a', 'b'] },
+            language: { type: 'string', enum: ['中文', 'English'] },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'ask_user',
         description: '向用户提问并给出选项（当需要用户拍板时使用）',
         parameters: {
@@ -324,6 +413,123 @@ export function AgentRail({
   async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const planNow = readPlan()
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+    if (name === 'get_plan') {
+      if (!planNow) return { error: '当前没有分镜脚本' }
+      return {
+        title: String((planNow as Record<string, unknown>).title ?? ''),
+        total_seconds: Number((planNow as Record<string, unknown>).total_seconds ?? 0),
+        segments: segments.map((segment, i) => {
+          const settings = (segment.settings ?? {}) as Record<string, unknown>
+          const bindA = readBindings(projectKey, `script-${i}:a`).length
+          const bindB = readBindings(projectKey, `script-${i}:b`).length
+          return {
+            index: i + 1,
+            name: String(segment.name ?? ''),
+            duration_seconds: Number(segment.duration_seconds ?? 0),
+            beat: String(segment.beat ?? ''),
+            summary: String(segment.summary ?? '').slice(0, 200),
+            shots: ((segment.shots ?? []) as Array<Record<string, unknown>>).map((shot) => ({
+              framing: shot.framing,
+              action: String(shot.action ?? '').slice(0, 120),
+              dialogue: shot.dialogue,
+            })),
+            settings: { taskType: settings.taskType ?? '', contextMode: settings.contextMode ?? '', refImageSize: settings.refImageSize ?? '' },
+            promptA_len: String(segment.promptA ?? '').length,
+            finalA_len: String(segment.finalA ?? '').length,
+            bound_a: bindA,
+            bound_b: bindB,
+            subjects: ((segment.subjects ?? []) as Array<Record<string, unknown>>).map((item) => item.name),
+            resources: ((segment.resources ?? []) as Array<Record<string, unknown>>).map((item) => item.name),
+          }
+        }),
+      }
+    }
+    if (name === 'list_input_files') {
+      const query = new URLSearchParams()
+      if (typeof args.subdir === 'string' && args.subdir) query.set('subdir', args.subdir)
+      query.set('limit', String(Number(args.limit ?? 60) || 60))
+      const response = await fetch(`/easy-media/assets/input?${query.toString()}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `列目录失败（HTTP ${response.status}）`) }
+      return { root: data.root, items: (data.items ?? []).slice(0, Number(args.limit ?? 60)) }
+    }
+    if (name === 'upsert_resource' || name === 'attach_media') {
+      const resourceName = String(args.name ?? '').trim()
+      if (!resourceName) return { error: 'name 不能为空' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      let target = pool.find((item) => item.name === resourceName)
+      const filePath = typeof args.file_path === 'string' ? args.file_path.trim().replace(/\\/g, '/') : ''
+      const fileName = filePath ? filePath.split('/').pop() || '' : ''
+      const subfolder = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : ''
+      const kind = String(args.type ?? '').toLowerCase()
+      const ext = (fileName.split('.').pop() || '').toLowerCase()
+      const mediaKind = kind
+        || (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext) ? 'picture'
+          : ['wav', 'mp3', 'm4a', 'flac'].includes(ext) ? 'audio' : 'video')
+      if (name === 'attach_media' && !target) return { error: `资源「${resourceName}」不存在，请先用 list_resources 确认，或改用 upsert_resource 新建` }
+      if (!target) {
+        const created = {
+          id: `res-${Date.now().toString(36)}`,
+          type: mediaKind === 'picture' ? 'Picture' : mediaKind === 'audio' ? 'Audio' : 'Video',
+          name: resourceName,
+          relationship: typeof args.relationship === 'string' && args.relationship ? args.relationship : 'reuse',
+          description: typeof args.description === 'string' ? args.description : '',
+          retention: [],
+          status: filePath ? 'ready' : 'need',
+          childResourceIds: [],
+          source: 'manual',
+          ...(fileName ? {
+            ...(mediaKind === 'picture' ? { imageFile: fileName } : mediaKind === 'audio' ? { audioFile: fileName } : { videoFile: fileName }),
+            subfolder,
+            sharedRoot: 'input',
+          } : {}),
+        } as unknown as ProjectResource
+        upsertResource(projectKey, created)
+        return { ok: true, created: resourceName, type: created.type, file: fileName || null }
+      }
+      const patch: Record<string, unknown> = {}
+      if (typeof args.description === 'string') patch.description = args.description
+      if (typeof args.relationship === 'string' && args.relationship) patch.relationship = args.relationship
+      if (fileName) {
+        const targetKind = mediaKind || String(target.type).toLowerCase()
+        if (targetKind === 'picture' || targetKind === 'image') patch.imageFile = fileName
+        else if (targetKind === 'audio') patch.audioFile = fileName
+        else patch.videoFile = fileName
+        patch.subfolder = subfolder
+        patch.sharedRoot = 'input'
+        patch.status = 'ready'
+      }
+      patchResource(projectKey, target.id, patch as never)
+      return { ok: true, updated: resourceName, file: fileName || undefined }
+    }
+    if (name === 'list_outputs') {
+      const limit = Number(args.limit ?? 8) || 8
+      const response = await fetch(`/easy-media/assets/outputs?project=${encodeURIComponent(projectKey)}&limit=${limit}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `查询产物失败（HTTP ${response.status}）`) }
+      return { items: data.items ?? [] }
+    }
+    if (name === 'run_generation') {
+      const app = (globalThis as unknown as { app?: { queuePrompt?: (number: number, batch: number) => Promise<unknown> } }).app
+      if (!app?.queuePrompt) return { error: '当前环境无法触发队列（app.queuePrompt 不可用）' }
+      try {
+        await app.queuePrompt(0, 1)
+        return { ok: true, queued: true, note: '已提交到 ComfyUI 队列，可用 list_outputs 查看产物' }
+      } catch (error) {
+        return { error: `提交失败：${error instanceof Error ? error.message : String(error)}` }
+      }
+    }
+    if (name === 'generate_all_prompts') {
+      const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
+      const requested = Array.isArray(args.indices) ? args.indices.map((item) => Number(item)) : null
+      const targets = (requested ?? segments.map((_segment, i) => i + 1)).filter((index) => index >= 1 && index <= segments.length).slice(0, 12)
+      const results: Array<Record<string, unknown>> = []
+      for (const index of targets) {
+        const single = await executeAgentTool('generate_prompt', { index, variant, language: args.language ?? '中文' })
+        results.push({ index, ...single })
+      }
+      return { ok: true, generated: results.filter((item) => !item.error).length, total: targets.length, results }
+    }
     if (name === 'plan_storyboard' || name === 'revise_storyboard') {
       const isRevision = name === 'revise_storyboard'
       const brief = String(args.brief ?? '').trim()
@@ -522,7 +728,7 @@ export function AgentRail({
   }
   const activeReplyRef = useRef<string>('')
 
-  /** D-P1：前端驱动的工具循环（最多 8 步） */
+  /** D-P1：前端驱动的工具循环（最多 24 步） */
   async function sendStepLoop() {
     const text = input.trim()
     if (!text || busy) return
@@ -605,7 +811,7 @@ export function AgentRail({
     const chatMessages: Array<Record<string, unknown>> = [...history]
     let stepCount = 0
     try {
-      for (let step = 0; step < 8; step += 1) {
+      for (let step = 0; step < 24; step += 1) {
         if (controller.signal.aborted) break
         stepCount = step + 1
         const response = await fetch('/easy-media/agent/step', {
