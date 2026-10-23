@@ -863,20 +863,98 @@ export function PromptEnhancerModal({
 
   const editorResources = useMemo<PromptReferenceResource[]>(() => {
     const list: PromptReferenceResource[] = []
-    libraryNames.forEach((name, index) => {
-      list.push({
-        id: `subject-${index + 1}`,
-        type: 'subject',
-        index: index + 1,
-        label: name,
-        detail: `<Subject ${index + 1}>`,
-        token: `<Subject ${index + 1}>`,
-        color: TOKEN_COLORS.subject,
-      })
-    })
+    let subjectIndex = 0
     let pictureIndex = 0
     let audioIndex = 0
     let videoIndex = 0
+    const viewOf = (resource: ProjectResource) => {
+      if (resource.type !== 'Picture' || !resource.imageFile) return undefined
+      const sub = resource.subfolder ? `&subfolder=${encodeURIComponent(resource.subfolder)}` : ''
+      return `/view?filename=${encodeURIComponent(resource.imageFile)}&type=${resource.sharedRoot ?? 'input'}${sub}`
+    }
+    const pushSubject = (label: string, id: string) => {
+      subjectIndex += 1
+      list.push({
+        id,
+        type: 'subject',
+        index: subjectIndex,
+        label,
+        detail: `<Subject ${subjectIndex}>`,
+        token: `<Subject ${subjectIndex}>`,
+        color: TOKEN_COLORS.subject,
+      })
+    }
+    const pushResource = (resource: ProjectResource, tag: string) => {
+      const label = tag ? `${resource.name}（${tag}）` : resource.name
+      if (resource.type === 'Subject') {
+        pushSubject(label, `res-${resource.id}`)
+        return
+      }
+      if (resource.type === 'Picture') {
+        pictureIndex += 1
+        list.push({
+          id: `res-${resource.id}`,
+          type: 'image',
+          index: pictureIndex,
+          label,
+          detail: `<Picture ${pictureIndex}>`,
+          token: `<Picture ${pictureIndex}>`,
+          color: TOKEN_COLORS.picture,
+          thumbnailUrl: viewOf(resource),
+        })
+        return
+      }
+      if (resource.type === 'Audio') {
+        audioIndex += 1
+        list.push({
+          id: `res-${resource.id}`,
+          type: 'audio',
+          index: audioIndex,
+          label,
+          detail: `<Audio ${audioIndex}>`,
+          token: `<Audio ${audioIndex}>`,
+          color: TOKEN_COLORS.audio,
+        })
+        return
+      }
+      videoIndex += 1
+      list.push({
+        id: `res-${resource.id}`,
+        type: 'video',
+        index: videoIndex,
+        label,
+        detail: `<Video ${videoIndex}>`,
+        token: `<Video ${videoIndex}>`,
+        color: TOKEN_COLORS.video,
+      })
+    }
+    const seen = new Set<string>()
+    const pushOnce = (resource: ProjectResource, tag: string) => {
+      if (seen.has(resource.id)) return
+      seen.add(resource.id)
+      pushResource(resource, tag)
+    }
+    // 1) 当前段已绑定的资源置顶
+    for (const id of boundIds) {
+      const resource = resources.find((item) => item.id === id)
+      if (resource) pushOnce(resource, '已绑定')
+    }
+    // 2) 项目资源池（主体优先，再图片/音频/视频）
+    for (const resource of resources) {
+      if (resource.type === 'Subject') pushOnce(resource, '')
+    }
+    for (const resource of resources) {
+      if (resource.type !== 'Subject') pushOnce(resource, '')
+    }
+    // 3) 画布主体库补充（按 label 去重）
+    const seenSubjectNames = new Set(
+      list.filter((item) => item.type === 'subject').map((item) => item.label.replace(/（.*）$/, '')),
+    )
+    for (const name of libraryNames) {
+      if (seenSubjectNames.has(name)) continue
+      pushSubject(name, `subject-${subjectIndex + 1}`)
+    }
+    // 4) 任务段已挂素材
     for (const item of resourceTokens) {
       const kind = item.type === 'image' ? 'picture' : (item.type ?? 'picture')
       if (kind === 'picture') {
@@ -916,7 +994,7 @@ export function PromptEnhancerModal({
       }
     }
     return list
-  }, [resourceTokens, imagePaths, libraryNames])
+  }, [resources, boundIds, resourceTokens, imagePaths, libraryNames])
 
   function presetPayload() {
     return {
