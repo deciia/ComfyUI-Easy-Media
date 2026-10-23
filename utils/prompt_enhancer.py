@@ -220,12 +220,15 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             {"role": "user", "content": brief},
         ]
 
+    task_type = str(options.get("task_type") or payload.get("task_type") or "Ref2VA")
+    task_mode = str(options.get("task_mode") or payload.get("task_mode") or "")
+    duration_seconds = options.get("duration_seconds") or payload.get("duration_seconds") or 5
     lines = [
-        f"输出语言：{options.get('output_language') or '中文'}",
+        f"输出语言：{payload.get('language') or options.get('output_language') or '中文'}",
         (f"全局约束（整支视频）：{payload.get('global_prompt')}" if payload.get("global_prompt") else ""),
-        f"生成类型：{options.get('task_type') or 'Ref2VA'}",
+        f"生成类型：{task_type}" + (f"（模式 {task_mode}）" if task_mode else ""),
         f"镜头数量：{options.get('shot_count') or 'AUTO'}",
-        f"目标时长（秒）：{options.get('duration_seconds') or 5}",
+        f"目标时长（秒）：{duration_seconds}",
         f"改写模式：{options.get('rewrite_mode') or 'balanced'}",
         f"目标长度（0=自动）：{options.get('description_word_target') or 0}",
         f"提示词模式：{options.get('prompt_mode') or '官方增强'}",
@@ -256,18 +259,42 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     if subjects:
         subject_lines = []
         for index, subject in enumerate(subjects[:16], start=1):
-            label = subject.get("label") or ""
+            label = subject.get("label") or subject.get("token") or ""
+            retention = subject.get("retention") or []
+            retention_text = ""
+            if retention:
+                retention_text = "；保留特征：" + "、".join(str(item) for item in retention[:8])
             subject_lines.append(
                 f"- {subject.get('name')} → {label or f'<Subject {index}>'}: "
-                f"{subject.get('description') or subject.get('role') or ''}"
+                f"{subject.get('description') or subject.get('role') or ''}{retention_text}"
             )
-        lines.append("可用主体（令牌里出现的名字必须在此表中）：\n" + "\n".join(subject_lines))
+        lines.append("可用主体（令牌里出现的名字必须在此表中，编号以此为准，禁止错位/重定义）：\n" + "\n".join(subject_lines))
+
+    bindings = payload.get("bindings") or {}
+    binding_parts = []
+    for key, label in (("pictures", "图片"), ("audio", "音频"), ("video", "视频")):
+        entries = bindings.get(key) or []
+        if entries:
+            binding_parts.append(
+                label + "：" + "、".join(
+                    f"{entry.get('token')}={entry.get('name')}" for entry in entries[:12] if isinstance(entry, dict)
+                )
+            )
+    if binding_parts:
+        lines.append("本段绑定素材（编号与参考图顺序一一对应）：\n" + "\n".join(binding_parts))
     reference_context = str(options.get("reference_context") or "").strip()
     if reference_context:
         lines.append("参考素材补充：" + reference_context)
     constraints = str(options.get("constraints") or "").strip()
     if constraints:
         lines.append("硬性要求：" + constraints)
+    lines.append(
+        "归一化要求：输出必须使用官方结构（subject_definitions / detailed_description（含 [Shot N] 与 At 00:0X.XXX 时间戳）/ "
+        "overall_soundscape / non_diegetic_music）。R2V/VI2V 必须含 subject_definitions 六段式；T2V/L2V 可用三段式。"
+        "用户片段中的中文自由描述、中文章节名都要就地改写成官方字段；"
+        "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌原样保留，禁止新增、重命名或重定义；"
+        "At 时间戳必须递增且不得超过目标时长；禁止出现文字、字幕、logo、水印。"
+    )
     lines.append("用户片段（可能不规范，请改写成规范版本）：\n" + brief)
     instruction = "\n".join(lines)
 
@@ -299,7 +326,7 @@ def localize_tokens(prompt: str, subjects: list[dict]) -> tuple[str, list[str]]:
         name = str(subject.get("name") or "").strip()
         if not name:
             continue
-        mapping[name.casefold()] = str(subject.get("label") or f"<Subject {index}>")
+        mapping[name.casefold()] = str(subject.get("label") or subject.get("token") or f"<Subject {index}>")
     if not mapping:
         return prompt, []
 

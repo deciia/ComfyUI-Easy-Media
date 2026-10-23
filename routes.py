@@ -1017,15 +1017,37 @@ async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
         payload["images"] = _resolve_enhancer_images(payload.get("images"))
         result = await generate_prompt(payload)
         options = payload.get("options") or {}
-        task_type = str(options.get("task_type") or "")
-        failures = validate_prompt(
-            result.get("prompt", ""),
-            require_sections="Ref" in task_type,
-            picture_count=payload.get("picture_count"),
-            audio_count=payload.get("audio_count"),
-            video_count=payload.get("video_count"),
-            max_shots=payload.get("max_shots"),
-        )
+        task_type = str(payload.get("task_type") or options.get("task_type") or "")
+        task_mode = str(payload.get("task_mode") or options.get("task_mode") or "")
+        require_sections = task_mode == "ref" or task_type.lower() in {"r2v", "ref2va", "vi2v"}
+
+        def _validate(text: str) -> list:
+            return validate_prompt(
+                text,
+                require_sections=require_sections,
+                picture_count=payload.get("picture_count"),
+                audio_count=payload.get("audio_count"),
+                video_count=payload.get("video_count"),
+                max_shots=payload.get("max_shots"),
+            )
+
+        failures = _validate(result.get("prompt", ""))
+        # 结构校验未过：带失败项自动重试一次，仍失败则原样返回失败清单
+        if failures:
+            retry_payload = dict(payload)
+            retry_options = dict(options)
+            retry_options["constraints"] = (
+                str(options.get("constraints") or "")
+                + "\n上次输出未通过结构校验，必须全部修复：" + "；".join(str(item) for item in failures[:6])
+            ).strip()
+            retry_payload["options"] = retry_options
+            try:
+                retry_result = await generate_prompt(retry_payload)
+                retry_failures = _validate(retry_result.get("prompt", ""))
+                if len(retry_failures) < len(failures):
+                    result, failures = retry_result, retry_failures
+            except PromptEnhancerError:
+                pass
         return web.json_response({**result, "failures": failures})
     except PromptEnhancerError as error:
         return web.json_response({"error": str(error)}, status=400)
