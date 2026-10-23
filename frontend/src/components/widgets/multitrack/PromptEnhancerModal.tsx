@@ -427,6 +427,7 @@ export function PromptEnhancerModal({
   const [creatingProject, setCreatingProject] = useState(false)
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
   const [saveCheckOpen, setSaveCheckOpen] = useState(false)
+  const [replaceArmed, setReplaceArmed] = useState(false)
 
   async function confirmCreateProject() {
     const create = (globalThis as unknown as {
@@ -1254,21 +1255,29 @@ export function PromptEnhancerModal({
                   <div className="text-[11px] text-muted-foreground">提示：还有 {segs.length - prompted} 段没写提示词，可在「提示词增强」页补齐。</div>
                 ) : null}
                 <div className="mt-1 flex justify-end gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setSaveCheckOpen(false)}>返回完善</Button>
+                  <Button size="sm" variant="secondary" onClick={() => { setSaveCheckOpen(false); setReplaceArmed(false) }}>返回完善</Button>
                   <Button
                     size="sm"
+                    variant={directorSettings.save.overwrite === 'replace' && !replaceArmed ? 'secondary' : 'default'}
                     disabled={!plan || !registry}
                     onClick={() => {
                       if (!plan || !registry) return
+                      if (directorSettings.save.overwrite === 'replace' && !replaceArmed) {
+                        setReplaceArmed(true)
+                        return
+                      }
                       registry(plan.segments.map((segment) => ({
                         name: segment.name,
                         durationFrames: segment.duration_frames,
                         brief: formatPlanSegmentBrief(segment as never),
                       })))
+                      setReplaceArmed(false)
                       setSaveCheckOpen(false)
                     }}
                   >
-                    仍然保存
+                    {directorSettings.save.overwrite === 'replace'
+                      ? (replaceArmed ? '⚠ 确认整轨替换（手改将丢失）' : `仍然保存（${{ merge: '合并', 'fill-missing': '仅补缺', replace: '整轨替换' }[directorSettings.save.overwrite]}）`)
+                      : '仍然保存'}
                   </Button>
                 </div>
               </div>

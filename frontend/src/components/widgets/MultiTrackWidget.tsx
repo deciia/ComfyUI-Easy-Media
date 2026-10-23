@@ -1326,9 +1326,10 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }>) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       if (!taskTrack || items.length === 0) return false
+      const strategy = readDirectorSettings(data.project?.name ?? 'default').save.overwrite
       let cursor = 0
       const stamp = Date.now()
-      const existingSegments = taskTrack.segments ?? []
+      const existingSegments = strategy === 'replace' ? [] : (taskTrack.segments ?? [])
       const byKey = new Map<string, MultiTrackSegment>()
       const byIndex = new Map<number, MultiTrackSegment>()
       existingSegments.forEach((segment, index) => {
@@ -1358,7 +1359,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             continuity_mode: (item.continuityMode as never) ?? (previous.continuity_mode as never) ?? undefined,
             ref_image_size: (item.refImageSize as never) ?? (previous.ref_image_size as never) ?? undefined,
             user_brief: item.brief,
-            user_prompt: item.prompt ?? String(previous.user_prompt ?? ''),
+            user_prompt: strategy === 'fill-missing' && String(previous.user_prompt ?? '').trim()
+              ? String(previous.user_prompt ?? '')
+              : (item.prompt ?? String(previous.user_prompt ?? '')),
             user_prompt_b: previous.user_prompt_b,
             user_prompt_variant: previous.user_prompt_variant ?? 'a',
           },
@@ -1411,16 +1414,23 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       const segment = taskTrack?.segments.find((item) => item.id === segmentId)
       if (!segment) return false
+      const strategy = readDirectorSettings(data.project?.name ?? 'default').save.overwrite
+      const previousContent = segment.content as unknown as Record<string, unknown>
       const patch: Record<string, unknown> = {}
-      if (typeof payload.prompt === 'string') {
+      const previousPrompt = String(
+        payload.variant === 'b' ? (previousContent.user_prompt_b ?? '') : (previousContent.user_prompt ?? ''),
+      )
+      const promptAllowed = strategy !== 'fill-missing' || !previousPrompt.trim()
+      if (typeof payload.prompt === 'string' && promptAllowed) {
         if (payload.variant === 'b') patch.user_prompt_b = payload.prompt
         else patch.user_prompt = payload.prompt
       }
       if (payload.variant) patch.user_prompt_variant = payload.variant
-      if (payload.taskMode) patch.task_mode = payload.taskMode
-      if (payload.continuityMode) patch.continuity_mode = payload.continuityMode
-      if (payload.refImageSize) patch.ref_image_size = payload.refImageSize
-      if (payload.images) {
+      if (payload.taskMode && (strategy !== 'fill-missing' || !previousContent.task_mode)) patch.task_mode = payload.taskMode
+      if (payload.continuityMode && (strategy !== 'fill-missing' || !previousContent.continuity_mode)) patch.continuity_mode = payload.continuityMode
+      if (payload.refImageSize && (strategy !== 'fill-missing' || !previousContent.ref_image_size)) patch.ref_image_size = payload.refImageSize
+      const imagesAllowed = strategy !== 'fill-missing' || !((previousContent.images as unknown[] | undefined)?.length)
+      if (payload.images && imagesAllowed) {
         const stamp = Date.now()
         patch.images = payload.images.map((item, index) => ({
           id: `img-${stamp}-${index + 1}`,
