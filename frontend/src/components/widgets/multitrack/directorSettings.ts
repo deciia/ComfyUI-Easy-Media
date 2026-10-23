@@ -27,6 +27,10 @@ export interface DirectorSettings {
     includeManualSubjects: boolean
     includeManualResources: boolean
     includeBindings: boolean
+    /** 技能预设：h3 / action / arthouse / animation / custom */
+    skillPreset: string
+    /** 提示词写作规则（作为 system_extra 随对话发送） */
+    promptRules: string
   }
   api: { provider: string; model: string; base_url: string }
 }
@@ -60,9 +64,13 @@ export const DEFAULT_DIRECTOR_SETTINGS: DirectorSettings = {
     includeManualSubjects: true,
     includeManualResources: true,
     includeBindings: true,
+    skillPreset: 'h3',
+    promptRules: '',
   },
   api: { provider: '', model: '', base_url: '' },
 }
+
+export const DEFAULT_PROMPT_RULES = "当用户要求为分镜段写「用户提示词」时，输出 H3 官方提示词的简化版：\n- 用〔主体名〕占位引用主体与资源（不要自己编 <Subject n> 编号，编号由前端按绑定分配）\n- 六要素齐全：主体定义句（〔名〕是…，由〔图名〕定义）→ 场景与动作（时间顺序）→ 镜头语言 → 声音 → 台词（<d>…</d>）→ 禁止项（文字/字幕/水印）\n- 按段时长安排 [Shot N]，不虚构素材；台词前不加引导语\n- 每段结果用 ```userprompt 段N\n…\n``` 代码块包裹，段号从 1 起\n- 同时给出需要的主体与资源清单（名称/一句话定义/建议素材），供用户到「主体与资源」页完善"
 
 export function settingsKey(project: string): string {
   return `easy-media-director-settings:${project || 'default'}`

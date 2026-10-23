@@ -2,6 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import { readDirectorSettings } from './directorSettings'
+import { DEFAULT_PROMPT_RULES } from './directorSettings'
+
+/** 把 ```userprompt 段N``` 代码块写入分镜脚本段的 promptA */
+function fillPromptA(projectKey: string, segIndex: number, text: string): boolean {
+  const cache = readWorkspace(projectKey)
+  const plan = cache.plan as { segments?: Array<Record<string, unknown>> } | null
+  if (!plan?.segments || segIndex < 0 || segIndex >= plan.segments.length) return false
+  const segments = plan.segments.map((segment, index) => (
+    index === segIndex ? { ...segment, promptA: text } : segment
+  ))
+  writeWorkspace(projectKey, { plan: { ...(plan as Record<string, unknown>), segments } as never })
+  return true
+}
 import {
   ensureHydrated,
   patchWorkspaceMessages,
@@ -61,6 +74,7 @@ export function AgentRail({
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
+    const [fillArmed, setFillArmed] = useState<string | null>(null)
   const [inputHeight, setInputHeight] = useState(72)
   const [expanded, setExpanded] = useState(false)
   const prevHeightRef = useRef(72)
@@ -159,6 +173,7 @@ export function AgentRail({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
           messages: [
             ...(readWorkspace(projectKey).messages ?? []).map((message) => ({ role: message.role, text: message.text })),
             { role: 'user', text },
@@ -393,6 +408,34 @@ export function AgentRail({
                   </div>
                 ) : null}
                 {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
+                {(message.role === 'assistant' && message.text ? Array.from(message.text.matchAll(/```userprompt\s*段(\d+)[^\n]*\n([\s\S]*?)```/g)) : []).map((match, blockIndex) => {
+                  const segIndex = Number(match[1]) - 1
+                  const body = match[2].trim()
+                  const key = `${message.id}-${blockIndex}`
+                  const planNow = readWorkspace(projectKey).plan as { segments?: Array<Record<string, unknown>> } | null
+                  const target = planNow?.segments?.[segIndex]
+                  const hasExisting = Boolean(String(target?.promptA ?? '').trim())
+                  return (
+                    <div key={key} className="mt-1 flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-[10px]"
+                        style={{ border: `1px solid ${BORDER}` }}
+                        onClick={() => {
+                          if (hasExisting && fillArmed !== key) {
+                            setFillArmed(key)
+                            return
+                          }
+                          if (fillPromptA(projectKey, segIndex, body)) setFillArmed(null)
+                        }}
+                      >
+                        {hasExisting && fillArmed !== key
+                          ? `段${match[1]} 已有 A 稿，再点一次覆盖`
+                          : `⤓ 填入 片段提示词 A（段${match[1]}）`}
+                      </button>
+                    </div>
+                  )
+                })}
                 {message.planResult ? (
                   <div className="mt-1.5 flex items-center gap-2 rounded p-1.5" style={{ background: PANEL_BG, border: `1px solid ${BORDER}` }}>
                     <span className="text-[10px]">分镜 {message.planResult.segments} 段 · {message.planResult.seconds}s</span>

@@ -97,8 +97,10 @@ def _compact_context(context: dict | None) -> dict:
     }
 
 
-def build_decision_messages(messages: list[dict], context: dict | None) -> list[dict]:
+def build_decision_messages(messages: list[dict], context: dict | None, system_extra: str = "") -> list[dict]:
     system = AGENT_SYSTEM_PROMPT + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
+    if system_extra:
+        system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     history = []
     for message in (messages or [])[-12:]:
         role = str(message.get("role") or "user")
@@ -138,13 +140,13 @@ def parse_decision(raw: str) -> dict:
     return {"action": action, "params": params, "reply": reply}
 
 
-async def _decide(messages: list[dict], context: dict | None, config: dict | None) -> dict:
+async def _decide(messages: list[dict], context: dict | None, config: dict | None, system_extra: str = "") -> dict:
     from .prompt_enhancer import PromptEnhancerError, resolve_settings
 
     settings = resolve_settings(config)
     body = {
         "model": settings.model,
-        "messages": build_decision_messages(messages, context),
+        "messages": build_decision_messages(messages, context, system_extra),
         "temperature": 0.3,
         "stream": False,
     }
@@ -234,11 +236,12 @@ async def run_agent(
     messages: list[dict],
     context: dict | None = None,
     config: dict | None = None,
+    system_extra: str = "",
 ) -> AsyncIterator[str]:
     """产出 SSE 文本流：step / think / gen / text / plan / action / done / error。"""
     try:
         yield _sse({"type": "step", "label": "理解需求并选择动作"})
-        decision = await _decide(messages, context, config)
+        decision = await _decide(messages, context, config, system_extra)
         action = decision["action"]
         reply = decision["reply"]
         yield _sse({"type": "step", "label": f"选择动作：{action}"})

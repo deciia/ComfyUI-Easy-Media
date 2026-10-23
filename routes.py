@@ -1120,7 +1120,7 @@ async def handle_agent_chat(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
-        async for chunk in run_agent(messages, context):
+        async for chunk in run_agent(messages, context, None, str(payload.get("system_extra") or "")):
             await response.write(chunk.encode("utf-8"))
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { DEFAULT_DIRECTOR_SETTINGS, type DirectorSettings } from './directorSettings'
+import { DEFAULT_DIRECTOR_SETTINGS, DEFAULT_PROMPT_RULES, type DirectorSettings } from './directorSettings'
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -177,6 +177,26 @@ export function DirectorSettingsModal({
           {tab === 'agent' ? (
             <>
               <div className="text-[11px] text-muted-foreground">AI 助手上下文：关闭的项不会发送给模型</div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">技能预设（写分镜/提示词的风格）</span>
+                <select
+                  style={{ ...fieldStyle, width: '100%' }}
+                  value={draft.agent.skillPreset}
+                  onChange={(event) => patch((d) => ({ ...d, agent: { ...d.agent, skillPreset: event.target.value, promptRules: event.target.value === 'custom' ? d.agent.promptRules : '' } }))}
+                >
+                  <option value="h3">H3 通用（官方结构简化版）</option>
+                  <option value="action">动作片（快节奏/强运镜）</option>
+                  <option value="arthouse">文艺片（长镜头/氛围）</option>
+                  <option value="animation">动画（表演夸张/风格化）</option>
+                  <option value="custom">自定义</option>
+                </select>
+                <span className="text-[11px] text-muted-foreground">提示词写作规则（随每次对话发送给助手）</span>
+                <textarea
+                  style={{ ...fieldStyle, width: '100%', minHeight: 96, resize: 'vertical', fontSize: 11 }}
+                  value={draft.agent.promptRules || DEFAULT_PROMPT_RULES}
+                  onChange={(event) => patch((d) => ({ ...d, agent: { ...d.agent, promptRules: event.target.value } }))}
+                />
+              </div>
               <Toggle label="节点设置（分辨率/比例/像素/格式）" checked={draft.agent.includeNodeSettings}
                 onChange={(v) => patch((d) => ({ ...d, agent: { ...d.agent, includeNodeSettings: v } }))} />
               <Toggle label="轨道与片段时间线数据" checked={draft.agent.includeTrackData}
