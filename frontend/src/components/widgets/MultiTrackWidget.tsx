@@ -1317,6 +1317,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       durationFrames: number
       brief: string
       prompt?: string
+      taskMode?: string
+      continuityMode?: string
+      refImageSize?: string
     }>) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       if (!taskTrack || items.length === 0) return false
@@ -1333,7 +1336,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           color: taskTrack.color ?? 'var(--primary)',
           content: {
             media_type: 'none',
-            task_mode: 'default',
+            task_mode: (item.taskMode as never) ?? 'default',
+            continuity_mode: (item.continuityMode as never) || undefined,
+            ref_image_size: (item.refImageSize as never) || undefined,
             user_brief: item.brief,
             user_prompt: item.prompt ?? '',
           },
@@ -1364,6 +1369,52 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     }
   }, [data])
+
+  // 写入通道：把④产出的最终提示词与段设置写进指定任务轨片段（按 A/B variant）
+  useEffect(() => {
+    const updateSegment = (
+      segmentId: string,
+      payload: {
+        prompt?: string
+        variant?: 'a' | 'b'
+        taskMode?: string
+        continuityMode?: string
+        refImageSize?: string
+        images?: Array<{ name: string; subfolder?: string }>
+      },
+    ) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const segment = taskTrack?.segments.find((item) => item.id === segmentId)
+      if (!segment) return false
+      const patch: Record<string, unknown> = {}
+      if (typeof payload.prompt === 'string') {
+        if (payload.variant === 'b') patch.user_prompt_b = payload.prompt
+        else patch.user_prompt = payload.prompt
+      }
+      if (payload.variant) patch.user_prompt_variant = payload.variant
+      if (payload.taskMode) patch.task_mode = payload.taskMode
+      if (payload.continuityMode) patch.continuity_mode = payload.continuityMode
+      if (payload.refImageSize) patch.ref_image_size = payload.refImageSize
+      if (payload.images) {
+        const stamp = Date.now()
+        patch.images = payload.images.map((item, index) => ({
+          id: `img-${stamp}-${index + 1}`,
+          source_type: 'input',
+          file_name: item.name,
+          subfolder: item.subfolder ?? '',
+        }))
+      }
+      patchTaskSegmentContent(segmentId, patch)
+      return true
+    }
+    const registry = globalThis as unknown as { __easyMediaUpdateSegment?: typeof updateSegment }
+    registry.__easyMediaUpdateSegment = updateSegment
+    return () => {
+      if (registry.__easyMediaUpdateSegment === updateSegment) {
+        delete registry.__easyMediaUpdateSegment
+      }
+    }
+  })
 
   function patchTaskSegmentContent(segmentId: string, patch: Record<string, unknown>) {
     const taskTrack = data.tracks.find((track) => track.type === 'task')

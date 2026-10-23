@@ -1777,11 +1777,27 @@ export function PromptEnhancerModal({
               <Button
                 className="shrink-0"
                 onClick={() => {
-                  if (finalDraft || finalPrompt) onApply(finalDraft || finalPrompt, brief, globalDraft)
+                  const target = finalDraft || finalPrompt
+                  if (!target) return
+                  const registry = globalThis as unknown as {
+                    __easyMediaUpdateSegment?: (
+                      segmentId: string,
+                      payload: { prompt?: string; variant?: 'a' | 'b' },
+                    ) => boolean
+                  }
+                  let written = false
+                  if (segmentId && registry.__easyMediaUpdateSegment) {
+                    try {
+                      written = registry.__easyMediaUpdateSegment(segmentId, { prompt: target, variant: abTab })
+                    } catch (error) {
+                      console.error('[EasyMedia] update segment failed', error)
+                    }
+                  }
+                  if (!written) onApply(target, brief, globalDraft)
                 }}
                 disabled={!(finalDraft || finalPrompt) || failures.length > 0}
               >
-                {t('multitrack.enhancerApply')}
+                应用到任务轨（{abTab === 'a' ? 'A' : 'B'}）
               </Button>
             </div>
           </>
