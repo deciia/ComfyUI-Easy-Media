@@ -432,7 +432,6 @@ export function PromptEnhancerModal({
     }
     return map
   }
-  const bindingTokens = computeBindingTokens(boundIds)
   /** @ 选中未绑定资源：自动补绑定（子图绑父主体），按新编号返回替换资源 */
   /** 分镜段 user_prompt 物化：〔名〕→ 官方令牌；匹配到资源则自动补绑定，未匹配保留占位 */
   const materializePlanUserPrompt = (text: string): string => {
@@ -462,6 +461,7 @@ export function PromptEnhancerModal({
   const handleResourceChosen = (resource: PromptReferenceResource): PromptReferenceResource => {
     const target = resources.find((item) => `res-${item.id}` === resource.id)
     if (!target) return resource
+    const bindingTokens = computeBindingTokens(boundIds)
     if (bindingTokens.has(target.id)) return resource
     const parent = resources.find((item) => item.type === 'Subject' && (item.childResourceIds ?? []).includes(target.id))
     const bindId = parent ? parent.id : target.id
