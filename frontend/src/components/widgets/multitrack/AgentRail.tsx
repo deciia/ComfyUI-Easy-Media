@@ -955,13 +955,31 @@ export function AgentRail({
             duration: Number(args.duration ?? 5) || 5,
             ratio: String(args.ratio ?? ''),
             reference_images_json: String(args.reference_images_json ?? ''),
+            inputs: (() => {
+              const sizeMap: Record<string, [number, number]> = {
+                '1:1': [1024, 1024],
+                '4:3': [1360, 1024],
+                '3:4': [1024, 1360],
+                '16:9': [1824, 1024],
+                '9:16': [1024, 1824],
+                '2:3': [680, 1024],
+                '3:2': [1024, 680],
+              }
+              const ratioKey = String(args.ratio ?? '').trim()
+              const size = sizeMap[ratioKey]
+              if (!size) return args.inputs && typeof args.inputs === 'object' ? args.inputs : undefined
+              return {
+                '682.画布宽度': size[0],
+                '682.画布高度': size[1],
+                ...(args.inputs && typeof args.inputs === 'object' ? args.inputs : {}),
+              }
+            })(),
             negative: String(args.negative ?? ''),
             reference_file: String(args.reference_file ?? ''),
             reference_image: String(args.reference_file ?? ''),
             reference_audio: String(args.reference_file ?? ''),
             prompt_override: args.prompt_override ?? String(args.prompt ?? '') + (args.duration ? ` [0-${args.duration}s]` : ''),
             profile: typeof args.profile === 'string' ? args.profile : undefined,
-            inputs: args.inputs && typeof args.inputs === 'object' ? args.inputs : undefined,
             seed: Math.floor(Math.random() * 1_000_000),
           },
         }),
