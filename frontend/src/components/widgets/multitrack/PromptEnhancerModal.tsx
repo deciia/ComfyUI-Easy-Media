@@ -1805,7 +1805,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
             )}
             </div>
             {workspaceTab === 'assets' ? (
-              <div className="flex min-h-0 w-[380px] shrink-0 flex-col" style={{ borderLeft: `1px solid ${BORDER}` }}>
+              <div className="flex min-h-0 w-[460px] shrink-0 flex-col" style={{ borderLeft: `1px solid ${BORDER}` }}>
                 <div className="flex shrink-0 gap-1 p-2 pb-0 text-[11px]">
                   {([['shared', '共享资源'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
                     <button
@@ -1908,7 +1908,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) 380px', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) 460px', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 {PRESET_GROUPS.map((group) => (
