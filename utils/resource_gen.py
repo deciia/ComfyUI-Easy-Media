@@ -171,7 +171,10 @@ def build_prompt_payload(entry: dict, params: dict) -> tuple[dict, str]:
         node_inputs = node.setdefault("inputs", {})
         if isinstance(node_inputs, dict):
             resolved = _apply_template(value, params)
-            # 空值（未传的参考图/参考音频等）不覆盖原工作流默认，避免把空串塞进 LoadImage
+            # 空值或仍有未解析占位符 → 不覆盖工作流默认，避免把 "" 或 "{{seed}}" 写进节点
+            if isinstance(resolved, str) and "{{" in resolved:
+                print(f"[EasyMedia] resource input {dotted} 占位符未解析，保留工作流默认值", flush=True)
+                continue
             if isinstance(resolved, str) and resolved.strip() == "" and isinstance(value, str) and "{{" in value:
                 continue
             node_inputs[field] = resolved
@@ -231,6 +234,11 @@ async def generate_resource(resource_type: str, params: dict, timeout: float | N
     if resource_type not in _TYPES:
         raise ResourceGenError(f"不支持的资源类型：{resource_type}（可选 {', '.join(_TYPES)}）")
     config = load_config()
+    import random
+
+    params = dict(params or {})
+    if params.get("seed") in (None, ""):
+        params["seed"] = random.randint(1, 2_147_483_000)
     entry = (config.get("types") or {}).get(resource_type)
     if not isinstance(entry, dict):
         raise ResourceGenError(f"未配置 {resource_type} 的生成工作流，请先写 resource_workflows.json")
