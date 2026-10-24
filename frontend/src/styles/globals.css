@@ -327,3 +327,11 @@ body > .__CUSTOM_NODE_CLASS__ > * {
   background-clip: content-box;
 }
 
+
+
+/* 导演台：AI 助手字号缩放（只影响 .easy-agent-rail 内部文字） */
+.easy-media-scope .easy-agent-rail .text-\[9px\] { font-size: calc(9px * var(--easy-chat-scale, 1)); }
+.easy-media-scope .easy-agent-rail .text-\[10px\] { font-size: calc(10px * var(--easy-chat-scale, 1)); }
+.easy-media-scope .easy-agent-rail .text-\[11px\] { font-size: calc(11px * var(--easy-chat-scale, 1)); }
+.easy-media-scope .easy-agent-rail .text-\[12px\] { font-size: calc(12px * var(--easy-chat-scale, 1)); }
+.easy-media-scope .easy-agent-rail textarea { font-size: calc(12px * var(--easy-chat-scale, 1)); }

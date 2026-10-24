@@ -394,6 +394,25 @@ export function PromptEnhancerModal({
   const [finalB, setFinalB] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'track' | 'ai'>('preview')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [appearance, setAppearance] = useState(() => {
+    const ui = Number(globalThis.localStorage?.getItem('easy-media-ui-scale') || 0)
+    const chat = Number(globalThis.localStorage?.getItem('easy-media-chat-scale') || 0)
+    return {
+      uiScale: ui >= 70 && ui <= 200 ? ui : 100,
+      chatScale: chat >= 80 && chat <= 200 ? chat : 100,
+    }
+  })
+  useEffect(() => {
+    function onAppearance(event: Event) {
+      const detail = (event as CustomEvent<{ uiScale?: number; chatScale?: number }>).detail ?? {}
+      setAppearance((current) => ({
+        uiScale: typeof detail.uiScale === 'number' ? detail.uiScale : current.uiScale,
+        chatScale: typeof detail.chatScale === 'number' ? detail.chatScale : current.chatScale,
+      }))
+    }
+    globalThis.addEventListener?.('easy-media-appearance-change', onAppearance)
+    return () => globalThis.removeEventListener?.('easy-media-appearance-change', onAppearance)
+  }, [])
   const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
   const [abTab, setAbTab] = useState<'a' | 'b'>(() => readDirectorSettings((globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default').save.defaultVariant)
@@ -1339,7 +1358,10 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
       }}
     >
       <div
+        className="easy-media-scope"
         style={{
+          ['--easy-chat-scale' as never]: String(appearance.chatScale / 100),
+          zoom: appearance.uiScale / 100,
           display: 'flex',
           flexDirection: 'column',
           width: '100vw',

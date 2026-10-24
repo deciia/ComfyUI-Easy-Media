@@ -2205,7 +2205,7 @@ export function AgentRail({
   }, [active, railTab, messages.length, messages[messages.length - 1]?.text])
 
   return (
-    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden py-2 pl-2 pr-2" data-easy-rail="v2" style={{ width: width === 'fill' ? '100%' : (width ?? 380), minWidth: width === 'fill' ? 0 : (width ?? 380), maxWidth: width === 'fill' ? '100%' : (width ?? 380), borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="easy-agent-rail flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden py-2 pl-2 pr-2" data-easy-rail="v2" style={{ width: width === 'fill' ? '100%' : (width ?? 380), minWidth: width === 'fill' ? 0 : (width ?? 380), maxWidth: width === 'fill' ? '100%' : (width ?? 380), borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         <span className="text-[9px] text-muted-foreground" title="界面版本标记">v2</span>

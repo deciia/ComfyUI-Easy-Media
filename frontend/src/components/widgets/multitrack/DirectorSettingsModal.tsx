@@ -33,9 +33,28 @@ export function DirectorSettingsModal({
   onSave: (next: DirectorSettings) => void
 }) {
   const [draft, setDraft] = useState<DirectorSettings>(settings)
-  const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api' | 'resource'>('save')
+  const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api' | 'resource' | 'appearance'>('save')
   const [api, setApi] = useState({ provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', upload_images: true })
   const [apiSaving, setApiSaving] = useState(false)
+  const [uiScale, setUiScale] = useState<number>(() => {
+    const saved = Number(globalThis.localStorage?.getItem('easy-media-ui-scale') || 0)
+    return saved >= 70 && saved <= 200 ? saved : 100
+  })
+  const [chatScale, setChatScale] = useState<number>(() => {
+    const saved = Number(globalThis.localStorage?.getItem('easy-media-chat-scale') || 0)
+    return saved >= 80 && saved <= 200 ? saved : 100
+  })
+  const applyAppearance = (nextUi: number, nextChat: number) => {
+    setUiScale(nextUi)
+    setChatScale(nextChat)
+    try {
+      globalThis.localStorage?.setItem('easy-media-ui-scale', String(nextUi))
+      globalThis.localStorage?.setItem('easy-media-chat-scale', String(nextChat))
+    } catch { /* ignore */ }
+    try {
+      globalThis.dispatchEvent(new CustomEvent('easy-media-appearance-change', { detail: { uiScale: nextUi, chatScale: nextChat } }))
+    } catch { /* ignore */ }
+  }
   useEffect(() => {
     if (!open) return
     fetch('/easy-media/prompt-studio/config')
@@ -94,7 +113,7 @@ export function DirectorSettingsModal({
         </div>
 
         <div className="flex gap-1">
-          {([['save', '保存'], ['audio', '音频与字幕'], ['agent', 'AI 助手'], ['api', 'API'], ['resource', '资源生成']] as const).map(([key, label]) => (
+          {([['save', '保存'], ['audio', '音频与字幕'], ['agent', 'AI 助手'], ['api', 'API'], ['resource', '资源生成'], ['appearance', '外观']] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -216,6 +235,49 @@ export function DirectorSettingsModal({
 
           {tab === 'resource' ? (
             <ResourceGenSettings />
+          ) : null}
+
+          {tab === 'appearance' ? (
+            <>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">界面缩放</span>
+                <div className="flex flex-wrap gap-1">
+                  {[90, 100, 110, 125, 150, 175].map((value) => (
+                    <Button
+                      key={value}
+                      size="sm"
+                      variant={uiScale === value ? 'default' : 'secondary'}
+                      className="h-6 px-2 text-[11px]"
+                      onClick={() => applyAppearance(value, chatScale)}
+                    >
+                      {value}%
+                    </Button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-muted-foreground">缩放整个导演台（含三栏、设置、弹窗）；远程看不清时调到 125–150% 最实用</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted-foreground">AI 助手字号</span>
+                <div className="flex flex-wrap gap-1">
+                  {[90, 100, 110, 125, 150].map((value) => (
+                    <Button
+                      key={value}
+                      size="sm"
+                      variant={chatScale === value ? 'default' : 'secondary'}
+                      className="h-6 px-2 text-[11px]"
+                      onClick={() => applyAppearance(uiScale, value)}
+                    >
+                      {value}%
+                    </Button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-muted-foreground">只放大 AI 助手对话文字与输入框，不影响三栏布局</span>
+              </div>
+              <div className="rounded border p-2 text-[11px] text-muted-foreground" style={{ borderColor: BORDER }}>
+                当前：界面 {uiScale}% · 对话 {chatScale}%<br />
+                设置存于本机浏览器（localStorage），换设备需重设。
+              </div>
+            </>
           ) : null}
 
           {tab === 'api' ? (
