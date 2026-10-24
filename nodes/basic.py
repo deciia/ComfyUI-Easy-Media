@@ -1872,6 +1872,106 @@ class MultiImagesLoader(io.ComfyNode):
         return io.NodeOutput(output)
 
 
+def _unwrap_optional_value(value: object) -> object:
+    """is_input_list=True 时标量会以 list 形式到达，取第一个非 None 值。"""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if item is not None:
+                return item
+        return None
+    return value
+
+
+def _media_input_present(value: object) -> bool:
+    value = _unwrap_optional_value(value)
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(item is not None for item in value)
+    if isinstance(value, dict):
+        return bool(value)
+    return True
+
+
+def _infer_task_mode(kwargs: dict) -> str:
+    """无任何媒体输入=文生视频(default)，有图/音/视频任一=参考生视频(ref)。"""
+    for key in ("image", "audio", "video"):
+        if _media_input_present(kwargs.get(key)):
+            return "ref"
+    return "default"
+
+
+def _build_duration_override_data(
+    base: dict,
+    duration_seconds: float,
+    prompt_text: str,
+    task_mode: str,
+    format_name: str,
+) -> dict:
+    """duration/prompt_override 覆盖轨道：不追加，直接按时长重建单段任务。"""
+    data = deepcopy(base) if isinstance(base, dict) else {}
+    try:
+        fps = float(data.get("frame_rate") or 24.0)
+    except (TypeError, ValueError):
+        fps = 24.0
+    if not math.isfinite(fps) or fps <= 0:
+        fps = 24.0
+    max_seconds = 15.0 if format_name == "MiniMax" else 30.0
+    seconds = float(duration_seconds)
+    clamped = max(1.0, min(max_seconds, seconds))
+    if abs(clamped - seconds) > 1e-6:
+        print(
+            f"[EasyMedia] duration={seconds}s 超出允许范围 1-{max_seconds:g}s，已裁剪为 {clamped:g}s",
+            flush=True,
+        )
+    frames = max(1, int(round(clamped * fps)))
+
+    tracks = data.get("tracks") if isinstance(data.get("tracks"), list) else []
+    tracks = deepcopy(tracks)
+    task_track = next(
+        (track for track in tracks if isinstance(track, dict) and track.get("type") == "task"),
+        None,
+    )
+    if task_track is None:
+        task_track = {
+            "id": "task-auto-0",
+            "name": "Task 0",
+            "type": "task",
+            "color": "var(--primary)",
+            "muted": False,
+            "locked": False,
+            "segments": [],
+        }
+        tracks.insert(0, task_track)
+    task_track["segments"] = [{
+        "id": "task-auto-1",
+        "start_frame": 0,
+        "end_frame": frames,
+        "color": task_track.get("color") or "var(--primary)",
+        "content": {
+            "media_type": "none",
+            "task_mode": task_mode,
+            "continuity_mode": "shot",
+            "ref_image_size": "match",
+            "stable_key": "sk-1",
+            "user_prompt": prompt_text,
+            "user_prompt_variant": "a",
+            "images": [],
+            "muted": False,
+            "volume_db": 0,
+        },
+    }]
+    data["tracks"] = tracks
+    data["total_length"] = frames
+    data["frame_rate"] = fps
+    data["task_markers"] = []
+    print(
+        f"[EasyMedia] duration 覆盖：{clamped:g}s × {fps:g}fps = {frames} 帧，task_mode={task_mode}",
+        flush=True,
+    )
+    return data
+
+
 class MultiTrackEditor(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -1897,14 +1997,17 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Image.Input("image", optional=True, lazy=True, tooltip="Optional image media list for slot-based multitrack segments."),
                 io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
                 io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
-                # 2026-10-18：可选主体库输入。不接 = 无主体，行为与原来完全一致（零侵入）。
-                io.Custom("SUBJECT_CONFIG").Input(
-                    "subject_config",
+                io.Float.Input(
+                    "duration",
                     optional=True,
+                    default=0.0,
+                    min=0.0,
+                    max=60.0,
+                    step=0.1,
                     tooltip=(
-                        "可选：从「主体库 / Subject Library」导入命名主体。"
-                        "接上后段提示词里的 @名字 会被解析成 <Picture n>，"
-                        "并按需自动追加主体资源；不接则完全不影响原有功能。"
+                        "可选：本次生成时长（秒）。接上后忽略轨道里的任务段，按该时长重建单段；"
+                        "任务类型按接入的图片/音频/视频自动推断（无输入=文生视频，有任一输入=参考生视频）。"
+                        "prompt_override 带 [0-5s] 区间时以区间为准。"
                     ),
                 ),
             ],
@@ -1985,28 +2088,29 @@ class MultiTrackEditor(io.ComfyNode):
         if isinstance(prompt_override, list) and len(prompt_override) == 1:
             prompt_override = prompt_override[0]
 
+        duration_value = _unwrap_optional_value(kwargs.get("duration"))
+        try:
+            duration_seconds = float(duration_value) if duration_value not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        if not math.isfinite(duration_seconds):
+            duration_seconds = 0.0
+
         data = _parse_track_data(track_data)
-        # 主体库（可选）：不接 subject_config 时 subjects 为空，组装完全不执行 —— 零侵入。
-        subject_config = kwargs.get('subject_config')
-        if isinstance(subject_config, list) and len(subject_config) == 1:
-            subject_config = subject_config[0]
-        subjects = parse_subject_config_document(subject_config)["subjects"]
-        global_prompt = parse_subject_config_document(subject_config)["global_prompt"]
-        if subjects:
-            data, subject_reports = compose_timeline(
-                data,
-                subjects,
-                global_prompt=global_prompt,
-            )
-            for report in subject_reports:
-                if report.get("warnings"):
-                    print(
-                        f"[EasyMedia] 主体组装提示（段 {report.get('segment_id')}）: "
-                        f"{report['warnings']}",
-                        flush=True,
-                    )
-        if format == "MiniMax" and is_minimax_prompt_override(prompt_override):
+        is_minimax_override = format == "MiniMax" and is_minimax_prompt_override(prompt_override)
+        has_frame_ranges = (not is_minimax_override) and prompt_override_has_frame_ranges(prompt_override)
+        if is_minimax_override:
             data = build_minimax_multitrack_data_from_prompt_override(data, prompt_override)
+        elif duration_seconds > 0 and not has_frame_ranges:
+            # 覆盖语义：忽略轨道既有任务段，按 duration（+可选 prompt）重建单段
+            prompt_text = str(prompt_override).strip() if prompt_override_has_value(prompt_override) else ""
+            data = _build_duration_override_data(
+                data,
+                duration_seconds,
+                prompt_text,
+                _infer_task_mode(kwargs),
+                format,
+            )
         elif prompt_override_has_value(prompt_override):
             data = build_multitrack_data_from_prompt_override(data, prompt_override)
         materialize_media = multitrack_slot_media_types(data)
