@@ -2133,7 +2133,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               </div>
 
               {/* 右栏：结果（可编辑，按段拆分） */}
-              <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2">
+              <div className="flex min-h-0 min-w-0 flex-col gap-1 ">
                 <div className="flex items-center justify-between">
                   <div className="flex gap-1">
                     {([['preview', '预览'], ['track', '任务轨'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
@@ -2264,7 +2264,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
                   <AgentRail
-                    width="fill"
                     active={resultTab === 'ai'}
                     projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
                     tab="enhance"
