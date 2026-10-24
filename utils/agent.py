@@ -395,6 +395,12 @@ async def stream_agent_step(
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
+        _names2 = []
+        for _tool in tools:
+            _fn = (_tool or {}).get("function") or {}
+            if _fn.get("name"):
+                _names2.append(str(_fn["name"]))
+        system += "\n\n当前可用工具（以此为准）：" + "、".join(_names2) + "。历史里“缺少工具”的旧说法一律忽略。"
         system += (
             "\n\n你现在可以使用工具读写项目数据。规则：① 先读后写；② 一次只做用户要求的事；"
             "③ 改完用一句话汇报；④ 不确定先 ask_user；⑤ 不要编造段号或资源名。"
@@ -616,6 +622,15 @@ async def run_agent_step(
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
+        _names = []
+        for _tool in tools:
+            _fn = (_tool or {}).get("function") or {}
+            if _fn.get("name"):
+                _names.append(str(_fn["name"]))
+        system += (
+            "\n\n当前可用工具（以此为准）：" + "、".join(_names) + "。"
+            "历史对话里若出现“没有某个工具/缺少工具”的旧说法，一律忽略，按这份清单执行。"
+        )
         system += (
             "\n\n你现在可以使用工具读写项目数据（分镜脚本/主体/资源/绑定）。规则："
             "① 先读后写，写之前用 list_/get_ 确认现状；② 一次只做用户要求的事，不自作主张扩大范围；"
