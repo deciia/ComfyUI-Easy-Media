@@ -124,6 +124,7 @@ def build_decision_messages(messages: list[dict], context: dict | None, system_e
         text = str(message.get("text") or message.get("content") or "").strip()
         if text:
             history.append({"role": role, "content": text[:4000]})
+    history = _sanitize_tool_history(history)
     if not history:
         history = [{"role": "user", "content": "你好"}]
     return [{"role": "system", "content": system}, *history]
@@ -248,6 +249,48 @@ async def _stream_plan(payload: dict, config: dict | None) -> AsyncIterator[tupl
 
 
 
+def _sanitize_tool_history(items: list[dict]) -> list[dict]:
+    """把工具协议历史整理成合法序列。
+
+    - 开头孤立的 tool 消息丢弃（24 条裁切可能把 assistant 切掉）
+    - assistant 的 tool_calls 必须紧跟对应 id 的 tool 回复；缺一个就整条降级为文本
+    """
+    cleaned: list[dict] = []
+    index = 0
+    total = len(items)
+    while index < total:
+        item = items[index]
+        role = item.get("role")
+        if role == "tool":
+            index += 1
+            continue
+        calls = item.get("tool_calls") if role == "assistant" else None
+        if not calls:
+            cleaned.append(item)
+            index += 1
+            continue
+        wanted = [str(call.get("id")) for call in calls]
+        following: list[dict] = []
+        cursor = index + 1
+        while cursor < total and items[cursor].get("role") == "tool":
+            following.append(items[cursor])
+            cursor += 1
+        provided = {str(message.get("tool_call_id")) for message in following}
+        if all(call_id in provided for call_id in wanted):
+            cleaned.append(item)
+            cleaned.extend(message for message in following if str(message.get("tool_call_id")) in wanted)
+        else:
+            summary = "；".join(
+                f"{call['function']['name']}({str(call['function'].get('arguments'))[:100]})"
+                for call in calls
+                if call.get("function")
+            )
+            text = str(item.get("content") or "")
+            cleaned.append({"role": "assistant", "content": (text + "\n[调用工具：" + summary + "]").strip()})
+        index = cursor
+    return cleaned
+
+
 async def run_agent_step(
     messages: list[dict],
     context: dict | None = None,
@@ -287,7 +330,7 @@ async def run_agent_step(
             call_id = str(message.get("tool_call_id") or "")
             if not call_id:
                 continue
-            history.append({"role": "tool", "tool_call_id": call_id, "content": text or ""})
+            history.append({"role": "tool", "tool_call_id": call_id, "content": (text or "")[:6000]})
             continue
         item: dict[str, Any] = {"role": role}
         if isinstance(tool_calls, list) and tool_calls:
