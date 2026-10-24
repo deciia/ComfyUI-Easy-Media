@@ -276,20 +276,25 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                                 if saved is not None:
                                     break
                         if saved is not None:
-                            try:
-                                rel = saved.relative_to(Path(folder_paths.get_output_directory()))
-                                return {
-                                    "ok": True,
-                                    "prompt_id": prompt_id,
-                                    "file_name": saved.name,
-                                    "subfolder": str(rel.parent).replace("\\", "/").lstrip("."),
-                                    "root": "output",
-                                    "path": str(saved),
-                                    "kind": key,
-                                    "history_preview": filename,
-                                }
-                            except ValueError:
-                                pass
+                            root_text = str(Path(folder_paths.get_output_directory())).rstrip("\\/")
+                            saved_text = str(saved)
+                            sub = ""
+                            if saved_text.lower().startswith(root_text.lower()):
+                                sub = saved_text[len(root_text):].strip("\\/")
+                                sub = str(Path(sub).parent).replace("\\", "/")
+                                if sub == ".":
+                                    sub = ""
+                            print(f"[EasyMedia] resource saved: {saved_text} (subfolder={sub!r})", flush=True)
+                            return {
+                                "ok": True,
+                                "prompt_id": prompt_id,
+                                "file_name": saved.name,
+                                "subfolder": sub,
+                                "root": "output",
+                                "path": saved_text,
+                                "kind": key,
+                                "history_preview": filename,
+                            }
                         return {
                             "ok": True,
                             "prompt_id": prompt_id,
