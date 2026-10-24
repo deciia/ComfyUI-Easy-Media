@@ -1802,28 +1802,21 @@ export function PromptEnhancerModal({
               {/* 中栏：草稿 + @ 引用 */}
               <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-muted-foreground">导演台设置</span>
-                    <button
-                      type="button"
-                      className="rounded px-1.5 py-0.5 text-[11px]"
-                      style={{ border: '1px solid hsl(var(--border, 240 6% 25%))' }}
-                      onClick={() => setSettingsOpen(true)}
-                      title="保存默认项 / 音频字幕 / AI 上下文 / API"
-                    >
-                      ⚙ 设置
-                    </button>
-                  </div>
-                  <span className={labelClass}>全局提示词（整个项目）</span>
-                  <textarea
-                    style={{ ...fieldStyle, minHeight: 64, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
-                    value={globalDraft}
-                    onChange={(event) => {
-                      setGlobalDraft(event.target.value)
-                      onGlobalPromptChange?.(event.target.value)
-                    }}
-                    placeholder="约束整支视频中持久出现的角色/物体/场景（来自主体库的全局提示词）"
-                  />
+                  <details className="flex flex-col gap-1">
+                    <summary className="cursor-pointer select-none text-[11px] text-muted-foreground">
+                      全局提示词（整个项目）
+                      {globalDraft.trim() ? ` · 已填 ${globalDraft.trim().length} 字` : ' · 未填写（点击展开）'}
+                    </summary>
+                    <textarea
+                      style={{ ...fieldStyle, minHeight: 64, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
+                      value={globalDraft}
+                      onChange={(event) => {
+                        setGlobalDraft(event.target.value)
+                        onGlobalPromptChange?.(event.target.value)
+                      }}
+                      placeholder="约束整支视频中持久出现的角色/物体/场景（来自主体库的全局提示词）"
+                    />
+                  </details>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
