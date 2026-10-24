@@ -369,8 +369,18 @@ export function AssetsTab({
               <div className="flex flex-wrap items-start gap-2">
                 {children.map((child) => {
                   const isActive = selectedChildId === child.id
-                  const viewUrl = child.sharedPath
-                    ? `/view?filename=${encodeURIComponent(child.imageFile ?? child.name)}&type=${child.sharedRoot ?? 'input'}${child.subfolder ? `&subfolder=${encodeURIComponent(child.subfolder)}` : ''}`
+                  const childFileName = String(
+                    child.imageFile
+                    || (child.sharedPath ? child.sharedPath.split('/').pop() : '')
+                    || ''
+                  )
+                  const childSubfolder = String(
+                    child.imageFile
+                      ? (child.subfolder ?? '')
+                      : (child.sharedPath ? child.sharedPath.split('/').slice(0, -1).join('/') : (child.subfolder ?? ''))
+                  )
+                  const viewUrl = childFileName
+                    ? `/view?filename=${encodeURIComponent(childFileName)}&type=${child.sharedRoot ?? 'input'}${childSubfolder ? `&subfolder=${encodeURIComponent(childSubfolder)}` : ''}`
                     : ''
                   return (
                     <div key={child.id} className="relative">
