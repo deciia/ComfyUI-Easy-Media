@@ -1,4 +1,4 @@
-﻿import { addInlineStyles } from "@/lib/add-stylesheet";
+import { addInlineStyles } from "@/lib/add-stylesheet";
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveMultiImagesLoaderNodeSize } from '@/lib/multi-images-loader-node-size'
@@ -6,6 +6,7 @@ import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import { installTrackDataRealignment } from '@/lib/track-data-realign';
 import { installDynamicComboRuntimeRebuild } from '@/lib/dynamic-combo-runtime-rebuild';
+import { installDynamicListInputs } from '@/lib/dynamic-list-inputs';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
@@ -68,6 +69,7 @@ comfyApp.registerExtension({
     installProjectSamplingPreview(nodeType, nodeData, comfyApp)
     installTrackDataRealignment(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
     installDynamicComboRuntimeRebuild(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
+    installDynamicListInputs(nodeType, nodeData)
   },
 
   getNodeMenuItems(node) {
