@@ -59,6 +59,8 @@ export interface AgentRailProps {
   segments: Array<{ index: number; name: string; durationSeconds: number; images?: string[]; hasPrompt?: boolean }>
   subjects: Array<{ name: string; desc?: string }>
   audioTracks?: string[]
+  /** 右栏宽度（px）；不传时用 380 固定值 */
+  width?: number
   resources: Array<{ name: string }>
   frameRate: number
   ratio: string
@@ -76,6 +78,7 @@ export function AgentRail({
   ratio,
   onApplyPlan,
   audioTracks = [],
+  width,
 }: AgentRailProps) {
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
@@ -2170,7 +2173,7 @@ export function AgentRail({
 
 
   return (
-    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden p-2" data-easy-rail="v2" style={{ width: 380, minWidth: 380, maxWidth: 380, borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden p-2" data-easy-rail="v2" style={{ width: width ?? 380, minWidth: width ?? 380, maxWidth: width ?? 380, borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         <span className="text-[9px] text-muted-foreground" title="界面版本标记">v2</span>
