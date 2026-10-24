@@ -29,7 +29,10 @@ export interface PromptIssue {
 export function analyzePrompt(prompt: string, referenceMode: boolean) {
   const text = prompt ?? ''
   const sections = referenceMode ? SECTIONS_REF : SECTIONS_BASE
-  const present = sections.filter(([key]) => new RegExp(`(^|\\n)\\s*${key}\\s*[:：]`, 'i').test(text))
+  // 段名识别：行首 + 可选的 markdown 标记（#、**）+ 可选冒号（渲染成独立标题行时冒号会被拆掉）
+  const headerPattern = (key: string) =>
+    new RegExp(`(^|\\n)[ \\t]*(?:#{1,6}[ \\t]*)?(?:\\*\\*)?[ \\t]*${key}[ \\t]*(?:\\*\\*)?[ \\t]*[:：]?`, 'i')
+  const present = sections.filter(([key]) => headerPattern(key).test(text))
   const missing = sections.filter(([key]) => !present.includes(sections.find((s) => s[0] === key)!))
   const tagCounts: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
   for (const match of text.matchAll(/<(Subject|Picture|Audio|Video)\s+(\d+)>/g)) tagCounts[match[1]] += 1

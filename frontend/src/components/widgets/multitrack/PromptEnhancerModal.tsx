@@ -2154,7 +2154,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
                   <PromptQualityBar
-                    prompt={finalDraft || finalPrompt}
+                    prompt={finalDraft || finalPrompt || (sections.length ? joinSections(sections) : '')}
                     resources={resources}
                     referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
                     taskType={taskTypeOfCurrentSegment()}
