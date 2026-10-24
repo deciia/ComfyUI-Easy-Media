@@ -2366,7 +2366,11 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   const imagesList = directorSettings.save.writeImages
                     ? expanded
                         .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
-                        .map((item) => ({ name: item.imageFile ?? item.name, subfolder: item.subfolder }))
+                        .map((item) => ({
+                          name: item.imageFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                        }))
                     : undefined
                   const audioItems = directorSettings.save.targets.audio
                     ? expanded
@@ -2406,9 +2410,20 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     }
                     if (allRegistry.__easyMediaApplyAll) {
                       try {
+                        const segSettings = (activeScriptSegment as unknown as {
+                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
+                        } | undefined)?.settings
+                        const planSettingsNow = (readWorkspace(bindingProjectKey).plan as {
+                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
+                        } | null)?.settings
+                        const mappedTask = taskTemplateOf(taskTypeOfCurrentSegment())
                         written = allRegistry.__easyMediaApplyAll(targetSegmentId, {
                           prompt: target,
                           variant: previewVariant,
+                          // 任务模式/衔接/参考图：段级 > 脚本级（与分镜编排的优先级一致）
+                          taskMode: mappedTask.task_mode,
+                          continuityMode: segSettings?.contextMode || planSettingsNow?.contextMode || undefined,
+                          refImageSize: segSettings?.refImageSize || planSettingsNow?.refImageSize || undefined,
                           images: imagesList,
                           audio: audioItems,
                           video: videoItems,

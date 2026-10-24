@@ -1433,7 +1433,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         taskMode?: string
         continuityMode?: string
         refImageSize?: string
-        images?: Array<{ name: string; subfolder?: string }>
+        images?: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }>
       },
     ) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
@@ -1666,7 +1666,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         taskMode?: string
         continuityMode?: string
         refImageSize?: string
-        images?: Array<{ name: string; subfolder?: string }>
+        images?: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }>
       },
     ) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
@@ -1686,7 +1686,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       if (payload.images) {
         patch.images = payload.images.map((item, index) => ({
           id: `img-${stamp}-${index + 1}`,
-          source_type: 'input',
+          source_type: item.sourceType ?? 'input',
           file_name: item.name,
           subfolder: item.subfolder ?? '',
         }))
