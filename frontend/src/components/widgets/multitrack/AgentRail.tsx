@@ -115,6 +115,7 @@ export function AgentRail({
   const [model, setModel] = useState('')
   const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
+  const progressRef = useRef<((text: string) => void) | null>(null)
 
   useEffect(() => {
     ensureHydrated(projectKey)
@@ -943,10 +944,22 @@ export function AgentRail({
       const targetName = String(args.name ?? '').trim()
       if (!resourceType || !targetName) return { error: 'type 与 name 必填' }
       const mediaKind = resourceType === 'image' ? 'picture' : resourceType === 'voice' || resourceType === 'music' ? 'audio' : 'video'
+      const etaText = (() => {
+        const seconds = Number(args.duration ?? 5) || 5
+        if (resourceType === 'refvideo') {
+          if (seconds <= 5) return '约 5–10 分钟'
+          if (seconds <= 10) return '约 10–20 分钟'
+          return '约 15–30 分钟'
+        }
+        if (resourceType === 'voice' || resourceType === 'music') return '约 1–10 分钟'
+        return '约 1–2 分钟'
+      })()
+      progressRef.current?.(`⏳ 已提交「${targetName}」生成任务（${resourceType}，预计 ${etaText}），完成后会自动入库…`)
       const response = await fetch('/easy-media/resource-workflows/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          async: true,
           type: resourceType,
           params: {
             name: String(args.name ?? 'res'),
@@ -984,12 +997,42 @@ export function AgentRail({
           },
         }),
       })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !data?.ok) {
+      const startData = await response.json().catch(() => ({}))
+      if (!response.ok || !startData?.ok) {
         return {
-          error: String(data?.error || `生成失败（HTTP ${response.status}）`),
-          hint: '请检查 ComfyUI 的 user/DeciiaEasyMedia/resource_workflows.json 是否为该类型配置了 API 格式工作流',
+          error: String(startData?.error || `提交失败（HTTP ${response.status}）`),
+          hint: '请检查导演台设置 →「资源生成」是否为该类型配置了 API 格式工作流',
         }
+      }
+      const jobId = String(startData.job_id ?? '')
+      if (!jobId) return { error: '生成任务未返回 job_id' }
+      const startedAt = Date.now()
+      let data: Record<string, unknown> = {}
+      for (;;) {
+        if (abortRef.current?.signal.aborted) return { error: '已取消等待（后台生成可能仍在继续）' }
+        await new Promise((resolve) => window.setTimeout(resolve, 5000))
+        const statusResponse = await fetch(`/easy-media/resource-workflows/jobs/${jobId}`)
+        const statusData = await statusResponse.json().catch(() => ({}))
+        if (!statusResponse.ok || !statusData?.ok) {
+          return { error: String(statusData?.error || `查询任务失败（HTTP ${statusResponse.status}）`) }
+        }
+        if (statusData.status === 'done') {
+          data = (statusData.result ?? {}) as Record<string, unknown>
+          break
+        }
+        if (statusData.status === 'error') {
+          return { error: String(statusData.error || '生成失败'), elapsed: Math.round((Date.now() - startedAt) / 1000) }
+        }
+        const limit = Number(statusData.timeout ?? 3600) + 120
+        if (Number(statusData.elapsed ?? 0) > limit) {
+          return { error: `等待超时（${Math.round(limit)}s）`, job_id: jobId }
+        }
+        if (Number(statusData.elapsed ?? 0) % 60 < 6) {
+          progressRef.current?.(`…「${targetName}」已生成 ${Math.round(Number(statusData.elapsed ?? 0))}s / 预计 ${etaText}`)
+        }
+      }
+      if (!data.ok) {
+        return { error: String(data.error || '生成失败') }
       }
       const fileName = String(data.file_name || '')
       const subfolder = String(data.subfolder || '')
@@ -1022,6 +1065,7 @@ export function AgentRail({
         file: fileName,
         path: data.path,
         note: '资源已生成并挂到主体与资源页，可直接 bind_resources 绑定',
+        elapsed_seconds: Math.round((Date.now() - startedAt) / 1000),
       }
     }
     if (name === 'list_outputs') {
@@ -1672,6 +1716,7 @@ export function AgentRail({
         message.id === replyId ? { ...message, ...patch } : message
       )))
     }
+    progressRef.current = (line: string) => appendText(`\n${line}\n`)
     const appendText = (delta: string) => {
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === replyId ? { ...message, text: `${message.text}${delta}` } : message
@@ -1946,6 +1991,7 @@ export function AgentRail({
       })
     } finally {
       abortRef.current = null
+      progressRef.current = null
       writeWorkspace(projectKey, { agentBusy: false, pendingInject: '' } as never)
       setBusy(false)
     }

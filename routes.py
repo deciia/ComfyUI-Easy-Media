@@ -1224,20 +1224,54 @@ async def handle_put_resource_workflows(request: web.Request) -> web.Response:
 
 @PromptServer.instance.routes.post("/easy-media/resource-workflows/generate")
 async def handle_generate_resource(request: web.Request) -> web.Response:
-    """按类型生成资源（图片/配音/音乐/参考视频），阻塞到完成。"""
+    """按类型生成资源。``async=true`` 时立即返回 job_id，用 /jobs/{id} 轮询。"""
     try:
         payload = await request.json()
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         resource_type = str(payload.get("type") or "").strip()
         params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
-        from .utils.resource_gen import ResourceGenError, generate_resource
+        if payload.get("async"):
+            from .utils.resource_gen import start_resource_job
+
+            job_id = await start_resource_job(resource_type, params)
+            return web.json_response({"ok": True, "job_id": job_id, "status": "running"})
+        from .utils.resource_gen import generate_resource
 
         result = await generate_resource(resource_type, params)
         return web.json_response(result)
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
+@PromptServer.instance.routes.get("/easy-media/resource-workflows/jobs/{job_id}")
+async def handle_resource_job(request: web.Request) -> web.Response:
+    """查询异步生成任务状态。"""
+    try:
+        from .utils.resource_gen import get_resource_job
+
+        job = get_resource_job(str(request.match_info.get("job_id") or ""))
+        if not job:
+            return web.json_response({"ok": False, "error": "任务不存在"}, status=404)
+        import time as _time
+
+        payload = {
+            "ok": True,
+            "status": job.get("status"),
+            "type": job.get("type"),
+            "name": job.get("name"),
+            "elapsed": round(_time.time() - float(job.get("started") or _time.time()), 1),
+            "timeout": job.get("timeout"),
+        }
+        if job.get("status") == "done":
+            payload["result"] = job.get("result")
+        if job.get("status") == "error":
+            payload["error"] = job.get("error")
+        return web.json_response(payload)
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
 @PromptServer.instance.routes.get("/easy-media/assets/input")

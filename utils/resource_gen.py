@@ -178,7 +178,56 @@ def build_prompt_payload(entry: dict, params: dict) -> tuple[dict, str]:
     return workflow, injected_output_id
 
 
-async def generate_resource(resource_type: str, params: dict, timeout: float = 900.0) -> dict:
+# 进行中的生成任务：job_id -> {status, type, name, started, elapsed, result, error}
+_JOBS: dict[str, dict] = {}
+_DEFAULT_TIMEOUTS = {"image": 900.0, "voice": 1800.0, "music": 1800.0, "refvideo": 3000.0}
+
+
+def get_resource_job(job_id: str) -> dict | None:
+    return _JOBS.get(str(job_id))
+
+
+async def start_resource_job(resource_type: str, params: dict) -> str:
+    """异步启动资源生成，立即返回 job_id（5–30 分钟的大任务必须走这条路）。"""
+    import asyncio
+    import time as _time
+    import uuid as _uuid
+
+    job_id = _uuid.uuid4().hex
+    timeout = float(params.get("timeout_seconds") or 0) or _DEFAULT_TIMEOUTS.get(resource_type, 900.0)
+    _JOBS[job_id] = {
+        "status": "running",
+        "type": resource_type,
+        "name": str(params.get("name") or ""),
+        "started": _time.time(),
+        "timeout": timeout,
+        "result": None,
+        "error": "",
+    }
+    # 清理过旧任务，避免无限累积
+    for key, value in list(_JOBS.items()):
+        if _time.time() - float(value.get("started") or 0) > 24 * 3600:
+            _JOBS.pop(key, None)
+
+    async def runner() -> None:
+        record = _JOBS[job_id]
+        try:
+            result = await generate_resource(resource_type, params, timeout=timeout)
+            record["status"] = "done"
+            record["result"] = result
+        except Exception as error:  # noqa: BLE001
+            record["status"] = "error"
+            record["error"] = str(error)
+        finally:
+            record["elapsed"] = _time.time() - float(record.get("started") or _time.time())
+
+    asyncio.get_running_loop().create_task(runner())
+    return job_id
+
+
+async def generate_resource(resource_type: str, params: dict, timeout: float | None = None) -> dict:
+    if timeout is None:
+        timeout = _DEFAULT_TIMEOUTS.get(resource_type, 900.0)
     if resource_type not in _TYPES:
         raise ResourceGenError(f"不支持的资源类型：{resource_type}（可选 {', '.join(_TYPES)}）")
     config = load_config()
