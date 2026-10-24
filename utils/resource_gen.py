@@ -63,15 +63,31 @@ def save_config(data: dict) -> None:
 
 
 def _resolve_workflow_path(raw: str) -> Path:
-    path = Path(str(raw)).expanduser()
-    if not path.is_absolute():
-        # 相对路径按 ComfyUI 工作流目录解析
-        from folder_paths import get_user_directory
+    """解析工作流路径。
 
-        path = Path(get_user_directory()) / "default" / "workflows" / path
-    if not path.exists():
-        raise ResourceGenError(f"工作流文件不存在：{path}")
-    return path
+    相对路径的查找顺序：
+    1. ``user/DeciiaEasyMedia/workflows/<name>``（插件自有目录，推荐）
+    2. ``user/default/workflows/<name>``（ComfyUI 用户工作流目录）
+    """
+    path = Path(str(raw)).expanduser()
+    if path.is_absolute():
+        if not path.exists():
+            raise ResourceGenError(f"工作流文件不存在：{path}")
+        return path
+
+    from folder_paths import get_user_directory
+
+    user_root = Path(get_user_directory())
+    candidates = [
+        user_root / "DeciiaEasyMedia" / "workflows" / path,
+        user_root / "default" / "workflows" / path,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise ResourceGenError(
+        "工作流文件不存在，已查找：" + "；".join(str(item) for item in candidates)
+    )
 
 
 def _apply_template(value: Any, params: dict) -> Any:
