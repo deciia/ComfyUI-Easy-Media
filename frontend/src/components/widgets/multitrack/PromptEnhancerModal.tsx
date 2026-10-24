@@ -432,6 +432,36 @@ export function PromptEnhancerModal({
     }
     return map
   }
+  /** 当前段任务类型：段级覆盖 > 脚本级 plan.settings（决定六段式/三段式） */
+  const taskTypeOfCurrentSegment = (): string => {
+    const planNow = readWorkspace(bindingProjectKey).plan as
+      | { settings?: { taskType?: string }; segments?: Array<Record<string, unknown>> }
+      | null
+    const segSettings = (planNow?.segments?.[activeScriptIndex] as { settings?: { taskType?: string } } | undefined)?.settings
+    const segType = String(segSettings?.taskType ?? '').trim()
+    const planType = String(planNow?.settings?.taskType ?? '').trim()
+    return (segType || planType || '').toUpperCase()
+  }
+
+  /** 底部「已引用」：绑定清单令牌 + 草稿中出现但未绑定的令牌 */
+  const buildReferencedItems = () => {
+    const items: Array<{ key: string; token: string; name: string; type: string; unbound: boolean }> = []
+    const tokenMap = computeBindingTokens(boundIds)
+    for (const [id, token] of tokenMap.entries()) {
+      const resource = resources.find((item) => item.id === id)
+      if (!resource) continue
+      items.push({ key: `bound-${id}`, token, name: resource.name, type: resource.type, unbound: false })
+    }
+    const text = `${brief}\n${finalDraft || finalPrompt}`
+    for (const match of text.matchAll(/<(Subject|Picture|Audio|Video)\s+(\d+)>/g)) {
+      const token = `<${match[1]} ${Number(match[2])}>`
+      if (items.some((item) => item.token === token)) continue
+      const name = match[1] === 'Subject' ? (readSubjectLibraryNames()[Number(match[2]) - 1] ?? '') : ''
+      items.push({ key: `token-${token}`, token, name: name || '未绑定', type: match[1], unbound: true })
+    }
+    return items
+  }
+
   /** @ 选中未绑定资源：自动补绑定（子图绑父主体），按新编号返回替换资源 */
   /** 分镜段 user_prompt 物化：〔名〕→ 官方令牌；匹配到资源则自动补绑定，未匹配保留占位 */
   const materializePlanUserPrompt = (text: string): string => {
@@ -1948,6 +1978,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 prompt={brief}
                 resources={resources}
                 referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
+                taskType={taskTypeOfCurrentSegment()}
                 onChangePrompt={(next) => setBrief(next)}
               />
               <div className="text-[11px] text-neutral-500">点上方标签可引用主体/资源</div>
@@ -2028,16 +2059,25 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
-                  <span className={labelClass}>已引用主体：</span>
-                  {referenced.length === 0 ? (
-                    <span className="text-[11px] text-neutral-500">（无）</span>
-                  ) : (
-                    referenced.map((name) => (
-                      <span key={name} className="rounded border border-highlight/60 bg-highlight/10 px-1.5 py-0.5 text-[11px] text-primary">
-                        @{name}
-                      </span>
-                    ))
-                  )}
+                  <span className={labelClass}>已引用主体/资源：</span>
+                  {(() => {
+                    const items = buildReferencedItems()
+                    if (items.length === 0) return <span className="text-[11px] text-neutral-500">（无）</span>
+                    return items.map((item) => {
+                      const color = item.type === 'Subject' ? '#a78bfa' : item.type === 'Picture' ? '#f59e0b' : item.type === 'Audio' ? '#38bdf8' : '#34d399'
+                      return (
+                        <span
+                          key={item.key}
+                          className="rounded border px-1.5 py-0.5 text-[11px]"
+                          style={{ borderColor: color, color: item.unbound ? undefined : color }}
+                          title={`${item.token}${item.unbound ? '（未绑定，仅文本令牌）' : ''}`}
+                        >
+                          {item.unbound ? '⚠ ' : ''}{item.name}
+                          <span className="ml-1 text-[9px] uppercase opacity-70">{item.token}</span>
+                        </span>
+                      )
+                    })
+                  })()}
                 </div>
               </div>
 
@@ -2066,6 +2106,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     prompt={finalDraft || finalPrompt}
                     resources={resources}
                     referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
+                    taskType={taskTypeOfCurrentSegment()}
                     onChangePrompt={(next) => setFinalDraft(next)}
                   />
                                     <ReferenceBar

@@ -55,19 +55,27 @@ export function analyzePrompt(prompt: string, referenceMode: boolean) {
 }
 
 /** ④ 中栏上方：提示词质量检查 + 引用插入 */
+const SIX_SECTION_TASKS = new Set(['R2V', 'VI2V'])
+
 export function PromptQualityBar({
   prompt,
   resources,
   referenceMode,
+  taskType,
   onChangePrompt,
 }: {
   prompt: string
   resources: ProjectResource[]
   referenceMode: boolean
+  /** 段任务类型（R2V/FMLF2V/VI2V/L2V/Pass），决定六段式还是三段式 */
+  taskType?: string
   onChangePrompt: (next: string) => void
 }) {
   const [open, setOpen] = useState(false)
-  const analysis = useMemo(() => analyzePrompt(prompt, referenceMode), [prompt, referenceMode])
+  const normalizedTask = String(taskType ?? '').trim().toUpperCase()
+  const useReferenceSections = normalizedTask ? SIX_SECTION_TASKS.has(normalizedTask) : referenceMode
+  const modeLabel = useReferenceSections ? `六段式(${normalizedTask || 'R2V'})` : `三段式(${normalizedTask || 'T2V'})`
+  const analysis = useMemo(() => analyzePrompt(prompt, useReferenceSections), [prompt, useReferenceSections])
 
   const nextIndex = (type: string) => {
     const used = Array.from(prompt.matchAll(new RegExp(`<${type}\\s+(\\d+)>`, 'g'))).map((m) => Number(m[1]))
@@ -80,7 +88,7 @@ export function PromptQualityBar({
   }
 
   const insertSkeleton = () => {
-    const blocks = (referenceMode ? SECTIONS_REF : SECTIONS_BASE)
+    const blocks = (useReferenceSections ? SECTIONS_REF : SECTIONS_BASE)
       .filter(([key]) => analysis.missing.some(([missingKey]) => missingKey === key))
       .map(([key, label]) => `${key}: ${label}…`)
     insert(blocks.join('\n'))
@@ -114,7 +122,7 @@ export function PromptQualityBar({
   return (
     <div className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}` }}>
       <div className="flex flex-wrap items-center gap-1 text-[11px]">
-        <span className="text-muted-foreground">{referenceMode ? '六段式(R2V)' : '三段式(T2V)'}</span>
+        <span className="text-muted-foreground">{modeLabel}</span>
         {analysis.sections.map(([key, label]) => {
           const ok = !analysis.missing.some(([missingKey]) => missingKey === key)
           return (
