@@ -295,6 +295,15 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌原样保留，禁止新增、重命名或重定义；"
         "At 时间戳必须递增且不得超过目标时长；禁止出现文字、字幕、logo、水印。"
     )
+    lines.append(
+        "输出格式（硬性）：每个使用到的段名必须单独占一行、紧跟一个英文半角冒号，正文另起一行。"
+        "正确示例：\n"
+        "subject_definitions:\n<Subject 1> 云鲸：…\n<Picture 1> 云鲸四视图 定义。\n\n"
+        "summary:\n坠落之后的幽暗深海…\n\n"
+        "retention_analysis:\n- <Subject 1> …\n"
+        "禁止写成「## subject_definitions」「**subject_definitions**」「subject_definitions」后直接接正文，"
+        "也不要使用中文全角冒号。"
+    )
     lines.append("用户片段（可能不规范，请改写成规范版本）：\n" + brief)
     instruction = "\n".join(lines)
 
@@ -317,6 +326,31 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
 
 
 _AT_TOKEN_RE = re.compile(r"<@([^>]+)>|@([^\s@<>，,。.;；:：!?！？、()（）\[\]【】]+)")
+
+
+_SECTION_KEYS = (
+    "subject_definitions",
+    "summary",
+    "retention_analysis",
+    "detailed_description",
+    "overall_soundscape",
+    "non_diegetic_music",
+    "integrated_multimodal_description",
+)
+
+
+def normalize_section_headings(text: str) -> str:
+    """把段名行未带冒号/带全角冒号/markdown 标记的写法统一成 ``key:``。"""
+    if not text:
+        return text
+    result = text
+    for key in _SECTION_KEYS:
+        result = re.sub(
+            rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]*)?(?:\*\*)?[ \t]*{key}[ \t]*(?:\*\*)?[ \t]*[:：]?[ \t]*$",
+            f"{key}:",
+            result,
+        )
+    return result
 
 
 def localize_tokens(prompt: str, subjects: list[dict]) -> tuple[str, list[str]]:
@@ -399,7 +433,7 @@ async def generate_prompt(payload: dict, config: dict | None = None) -> dict:
         raise PromptEnhancerError("API 返回空提示词")
     localized, unresolved = localize_tokens(prompt, payload.get("subjects") or [])
     return {
-        "prompt": localized,
+        "prompt": normalize_section_headings(localized),
         "provider": settings.provider,
         "model": settings.model,
         "unresolved_subjects": unresolved,
