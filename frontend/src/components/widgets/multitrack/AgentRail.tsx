@@ -273,6 +273,53 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'list_projects',
+        description: '列出已存在的项目（可切换/参考）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'save_project',
+        description: '把当前任务轨保存到磁盘 timeline.json（等价 Ctrl+S 的项目保存）',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'link_subject_assets',
+        description: '给主体挂子资源（参考图/音色等），写入 childResourceIds',
+        parameters: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string', description: '主体名称' },
+            resources: { type: 'array', items: { type: 'string' }, description: '要挂的资源名称数组' },
+            replace: { type: 'boolean', description: 'true=覆盖原引用，默认追加' },
+          },
+          required: ['subject', 'resources'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'set_resource_brief',
+        description: '给资源写生成 brief（用于后续 generate_resource 的描述）',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '资源名称' },
+            brief: { type: 'string', description: '生成描述' },
+          },
+          required: ['name', 'brief'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_task_track',
         description: '读取任务轨当前片段（帧范围/任务类型/是否有提示词），用于确认「应用到任务轨」是否生效',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -949,7 +996,11 @@ export function AgentRail({
     if (name === 'generate_all_prompts') {
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
       const requested = Array.isArray(args.indices) ? args.indices.map((item) => Number(item)) : null
-      const targets = (requested ?? segments.map((_segment, i) => i + 1)).filter((index) => index >= 1 && index <= segments.length).slice(0, 12)
+      const planForAll = readPlan() as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
+      const scriptCount = planForAll?.segments?.length ?? segments.length
+      const targets = (requested ?? Array.from({ length: scriptCount }, (_item, i) => i + 1))
+        .filter((index) => index >= 1 && index <= scriptCount)
+        .slice(0, 20)
       const results: Array<Record<string, unknown>> = []
       for (const index of targets) {
         const single = await executeAgentTool('generate_prompt', { index, variant, language: args.language ?? '中文' })
@@ -993,6 +1044,62 @@ export function AgentRail({
         title: nextPlan.title,
         note: '分镜已写入项目，可在「分镜编排」页查看，或让我继续完善主体与资源、生成提示词',
       }
+    }
+    if (name === 'list_projects') {
+      const response = await fetch('/easy-media/project/timelines')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) return { error: String(data?.error || `读取项目列表失败（HTTP ${response.status}）`) }
+      const rows = Array.isArray(data) ? data : (data.projects ?? data.timelines ?? [])
+      return {
+        current: projectKey,
+        projects: (rows as Array<Record<string, unknown>>).slice(0, 60).map((row) => ({
+          name: row.project_name,
+          segments: row.segments,
+          prompt_segments: row.prompt_segments,
+          duration_seconds: row.duration_seconds,
+          updated_at: row.updated_at,
+        })),
+      }
+    }
+    if (name === 'save_project') {
+      const registry = (globalThis as unknown as { __easyMediaGetTrackData?: () => Record<string, unknown> | null }).__easyMediaGetTrackData
+      if (!registry) return { error: '拿不到任务轨数据（弹窗可能不是从节点打开）' }
+      const timeline = registry()
+      if (!timeline) return { error: '任务轨为空，没有可保存内容' }
+      const response = await fetch('/easy-media/project/timeline', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_name: projectKey, timeline }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) return { error: String(data?.error || `保存失败（HTTP ${response.status}）`) }
+      return { ok: true, saved: true, project: projectKey, updated_at: data?.updated_at ?? null }
+    }
+    if (name === 'link_subject_assets') {
+      const subjectName = String(args.subject ?? '').trim()
+      const wanted = Array.isArray(args.resources) ? args.resources.map(String) : []
+      if (!subjectName || !wanted.length) return { error: 'subject 与 resources 必填' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const subject = pool.find((item) => item.type === 'Subject' && item.name === subjectName)
+      if (!subject) return { error: `主体「${subjectName}」不存在，请先用 upsert_subject 创建` }
+      const matched = wanted.map((name) => pool.find((item) => item.name === name)).filter(Boolean) as ProjectResource[]
+      const missing = wanted.filter((name) => !pool.some((item) => item.name === name))
+      if (!matched.length) return { error: `没有匹配到资源：${wanted.join('、')}` }
+      const nextIds = args.replace === true
+        ? matched.map((item) => item.id)
+        : Array.from(new Set([...(subject.childResourceIds ?? []), ...matched.map((item) => item.id)]))
+      patchResource(projectKey, subject.id, { childResourceIds: nextIds } as never)
+      return { ok: true, subject: subjectName, linked: matched.map((item) => item.name), missing, total: nextIds.length }
+    }
+    if (name === 'set_resource_brief') {
+      const targetName = String(args.name ?? '').trim()
+      const brief = String(args.brief ?? '').trim()
+      if (!targetName || !brief) return { error: 'name 与 brief 必填' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const target = pool.find((item) => item.name === targetName)
+      if (!target) return { error: `资源「${targetName}」不存在` }
+      patchResource(projectKey, target.id, { brief, description: brief } as never)
+      return { ok: true, name: targetName, brief_chars: brief.length }
     }
     if (name === 'list_task_track') {
       const registry = (globalThis as unknown as {
@@ -1046,7 +1153,8 @@ export function AgentRail({
       if (typeof args.refImageSize === 'string') settingsPatch.refImageSize = args.refImageSize
       if (Object.keys(settingsPatch).length) {
         const index0 = Number(args.index ?? 0) - 1
-        patch.settings = { ...((segments[index0]?.settings ?? {}) as Record<string, unknown>), ...settingsPatch }
+        const planSeg = (readPlan() as { segments?: Array<Record<string, unknown>> } | null)?.segments?.[index0]
+        patch.settings = { ...((segments[index0]?.settings ?? {}) as Record<string, unknown>), ...(((planSeg?.settings ?? {}) as Record<string, unknown>)), ...settingsPatch }
       }
       return writePlanSegment(Number(args.index ?? 0), patch)
     }
@@ -1113,11 +1221,32 @@ export function AgentRail({
       const segment = segments[index1 - 1]
       if (!segment) return { error: `段 ${index1} 不存在` }
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
-      const sourcePrompt = String((variant === 'b' ? segment.promptB : segment.promptA) ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? '').trim()
-      if (!sourcePrompt) return { error: `段 ${index1} 的 ${variant.toUpperCase()} 稿为空，请先写片段提示词` }
-      const settings = (segment.settings ?? {}) as Record<string, unknown>
+      // 分镜脚本才是 A/B 稿的真源；任务轨只是落地结果
+      const planForPrompt = readPlan() as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
+      const scriptSegment = (planForPrompt?.segments?.[index1 - 1] ?? {}) as Record<string, unknown>
+      const scriptText = (key: string) => String(scriptSegment[key] ?? '').trim()
+      const shotLines = Array.isArray(scriptSegment.shots)
+        ? (scriptSegment.shots as Array<Record<string, unknown>>).map((shot, i) =>
+            `镜头${i + 1} ${String(shot.framing ?? '')}：${String(shot.action ?? '')}`.trim())
+        : []
+      const compositeBrief = [
+        String(scriptSegment.summary ?? '').trim(),
+        String(scriptSegment.beat ?? '').trim(),
+        ...shotLines,
+        String(scriptSegment.director_note ?? '').trim(),
+      ].filter(Boolean).join('\n')
+      const sourcePrompt = (
+        (variant === 'b' ? scriptText('promptB') : scriptText('promptA'))
+        || scriptText('promptA')
+        || scriptText('promptB')
+        || String(scriptSegment.user_prompt ?? '').trim()
+        || String((segment as Record<string, unknown>).user_prompt ?? '').trim()
+        || compositeBrief
+      ).trim()
+      if (!sourcePrompt) return { error: `段 ${index1} 没有可用的 A/B 稿，也没有 summary/beat/镜头表，无法生成提示词` }
+      const settings = { ...((segment.settings ?? {}) as Record<string, unknown>), ...((scriptSegment.settings ?? {}) as Record<string, unknown>) }
       const mapped = taskTemplate(String(settings.taskType ?? ''))
-      const duration = Number(segment.duration_seconds ?? 0) || 6
+      const duration = Number(scriptSegment.duration_seconds ?? segment.duration_seconds ?? 0) || 6
       // 令牌契约与④界面同源：按本段绑定顺序编号（主体展开子图，图片/音频/视频各自从 1 编号）
       const pool = readResources(projectKey) as ProjectResource[]
       const boundIds = readBindings(projectKey, `script-${index1}:${variant}`)

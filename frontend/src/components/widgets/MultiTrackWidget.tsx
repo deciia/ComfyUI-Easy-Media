@@ -1280,7 +1280,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     openWorkspaceRef.current = openWorkspace
     const registry = globalThis as unknown as {
       __easyMediaOpenWorkspace?: () => void
-      __easyMediaTimelineSummary?: () => {
+      __easyMediaGetTrackData?: () => Record<string, unknown> | null
+  __easyMediaTimelineSummary?: () => {
     ratio: string
     audio: string[]
     video: string[]
@@ -1288,6 +1289,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
     }
     registry.__easyMediaOpenWorkspace = openWorkspace
+    registry.__easyMediaGetTrackData = () => {
+      try {
+        return JSON.parse(JSON.stringify(data)) as Record<string, unknown>
+      } catch {
+        return null
+      }
+    }
     registry.__easyMediaTimelineSummary = () => ({
       tasks: (data.tracks.find((track) => track.type === 'task')?.segments ?? []).map((segment, index) => {
         const content = (segment.content ?? {}) as unknown as Record<string, unknown>
