@@ -322,6 +322,27 @@ function repairSpacing(value: string): string {
     .replace(/\n{3,}/g, '\n\n')
 }
 
+const SECTION_KEYS = [
+  'subject_definitions',
+  'summary',
+  'retention_analysis',
+  'detailed_description',
+  'overall_soundscape',
+  'non_diegetic_music',
+  'integrated_multimodal_description',
+] as const
+
+/** 段名单独成行但缺冒号时补上（兼容模型输出 "summary" 换行再接正文的写法） */
+function normalizeSectionHeadings(value: string): string {
+  if (!value) return value
+  let next = value
+  for (const key of SECTION_KEYS) {
+    const pattern = new RegExp(`(^|\\n)[ \\t]*(${key})[ \\t]*(?:\\*\\*)?(?=\\n|$)`, 'gi')
+    next = next.replace(pattern, (_match, lead: string, name: string) => `${lead}${name.toLowerCase()}:`)
+  }
+  return next
+}
+
 /** 把规范提示词按六段标题拆分（识别不到就返回空） */
 function splitSections(text: string): Section[] {
   if (!text.trim()) return []
@@ -922,12 +943,12 @@ export function PromptEnhancerModal({
     }
     setBrief(repairSpacing(promptA))
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
-    setFinalA(String(seg?.finalA ?? ''))
+    setFinalA(normalizeSectionHeadings(String(seg?.finalA ?? '')))
     setFinalB(String(seg?.finalB ?? ''))
     const fixedResult = repairSpacing(initialResult)
     setResult(fixedResult)
     setSections(splitSections(fixedResult))
-    setLastGenerated(repairSpacing(initialResult))
+    setLastGenerated(normalizeSectionHeadings(repairSpacing(initialResult)))
     setFailures([])
     setError('')
     const timer = window.setTimeout(() => {
@@ -1245,7 +1266,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
       }
       const generated = String(data?.prompt || '')
       setResultText(generated)
-      setLastGenerated(generated)
+      setLastGenerated(normalizeSectionHeadings(generated))
       setFailures(Array.isArray(data?.failures) ? data.failures : [])
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t('multitrack.enhancerFailed'))
@@ -1289,7 +1310,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
     }
   }
 
-  const finalPrompt = sections.length ? joinSections(sections) : (result || lastGenerated)
+  const finalPrompt = normalizeSectionHeadings(sections.length ? joinSections(sections) : (result || lastGenerated))
   const filteredMentions = mention
     ? candidates
         .filter((item) => mentionTab === 'all' || (item.type ?? 'picture') === mentionTab)
@@ -1926,7 +1947,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       className="h-6 whitespace-nowrap px-2 text-[11px]"
                       title="把 A 栏的片段提示词直接作为最终提示词"
                       disabled={!activePrompt.trim()}
-                      onClick={() => setFinalDraft(activePrompt)}
+                      onClick={() => setFinalDraft(normalizeSectionHeadings(activePrompt))}
                     >
                       直接导入➡️
                     </Button>
