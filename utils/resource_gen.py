@@ -101,7 +101,7 @@ def resolve_entry(entry: dict, params: dict) -> dict:
     return entry
 
 
-def build_prompt_payload(entry: dict, params: dict) -> dict:
+def build_prompt_payload(entry: dict, params: dict) -> tuple[dict, str]:
     workflow_raw = entry.get("workflow")
     if not workflow_raw:
         raise ResourceGenError("该类型未配置 workflow")
@@ -159,7 +159,7 @@ def build_prompt_payload(entry: dict, params: dict) -> dict:
             if isinstance(resolved, str) and resolved.strip() == "" and isinstance(value, str) and "{{" in value:
                 continue
             node_inputs[field] = resolved
-    return workflow
+    return workflow, injected_output_id
 
 
 async def generate_resource(resource_type: str, params: dict, timeout: float = 900.0) -> dict:
@@ -171,7 +171,7 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
         raise ResourceGenError(f"未配置 {resource_type} 的生成工作流，请先写 resource_workflows.json")
     entry = resolve_entry(entry, params or {})
 
-    workflow = build_prompt_payload(entry, params or {})
+    workflow, injected_output_id = build_prompt_payload(entry, params or {})
     client_id = uuid.uuid4().hex
 
     import aiohttp
