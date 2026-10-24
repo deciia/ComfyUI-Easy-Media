@@ -327,3 +327,26 @@ body > .__CUSTOM_NODE_CLASS__ > * {
   background-color: hsl(var(--muted-foreground, 240 5% 64%));
   background-clip: content-box;
 }
+
+
+/* AI 助手：隐藏原生滚动条，改用自绘滚动条 */
+.easy-agent-scroll-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.easy-agent-scroll-hidden::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.easy-agent-scrollbar-track {
+  pointer-events: none;
+}
+.easy-agent-scrollbar-thumb {
+  background-color: hsl(var(--border, 240 6% 25%));
+  border-radius: 999px;
+  transition: background-color 120ms ease;
+}
+.easy-agent-scrollbar:hover .easy-agent-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground, 240 5% 64%));
+}
