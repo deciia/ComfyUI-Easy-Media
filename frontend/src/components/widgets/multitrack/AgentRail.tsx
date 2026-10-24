@@ -2240,7 +2240,7 @@ export function AgentRail({
         ))}
       </div>
 
-      <div ref={chatListRef} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden" style={{ scrollbarGutter: "stable", paddingRight: 10, scrollbarWidth: "thin" }}>
+      <div ref={chatListRef} className="easy-agent-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden" style={{ scrollbarGutter: "stable", paddingRight: 6 }}>
         {railTab === 'chat' ? (
           <>
             <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
