@@ -141,7 +141,7 @@ export function PlanPreview({
               {label}
               <select
                 style={{ background: FIELD_BG, border: '1px solid ' + BORDER, borderRadius: 4, color: '#e5e5e5', fontSize: 10, padding: '1px 3px' }}
-                value={settings[key] ?? options[0][0]}
+                value={settings[key] ?? (key === 'taskType' ? '' : options[0][0])}
                 onChange={(event) => onPatchPlan({ ...settings, [key]: event.target.value })}
               >
                 {options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
@@ -152,7 +152,7 @@ export function PlanPreview({
             <div className="flex flex-wrap items-center gap-2">
               {field('ratio', '比例', [['9:16', '9:16'], ['16:9', '16:9'], ['1:1', '1:1'], ['4:3', '4:3']])}
               {field('refImageSize', '参考图', [['match', 'match'], ['max', 'max']])}
-              {field('taskType', '任务', [['r2v', 'R2V'], ['fmlf2v', 'FMLF2V'], ['vi2v', 'VI2V'], ['l2v', 'L2V'], ['passthrough', 'Pass']])}
+              {field('taskType', '任务', [['', '未设置（按素材推断）'], ['r2v', 'R2V'], ['fmlf2v', 'FMLF2V'], ['vi2v', 'VI2V'], ['l2v', 'L2V'], ['passthrough', 'Pass']])}
             </div>
           )
         })() : null}

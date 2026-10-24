@@ -448,6 +448,10 @@ export function PromptEnhancerModal({
     if (taskMode === 'l2v') return 'L2V'
     if (taskMode === 'passthrough') return 'PASS'
     if (taskMode === 'default') return 'T2V'
+    // 缺省推断（与助手 generate_prompt 一致）：本段有绑定素材或稿内令牌 → R2V，否则 T2V
+    const draftText = `${brief}\n${abTab === 'b' ? draftPrompt : ''}\n${finalDraft || finalPrompt}`
+    const hasTokens = /<(Subject|Picture|Audio|Video)\s+\d+>/i.test(draftText)
+    if (boundIds.length > 0 || hasTokens) return 'R2V'
     return ''
   }
 
