@@ -2179,7 +2179,7 @@ export function AgentRail({
 
 
   return (
-    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden p-2" data-easy-rail="v2" style={{ width: width ?? 380, minWidth: width ?? 380, maxWidth: width ?? 380, borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden py-2 pl-2 pr-1.5" data-easy-rail="v2" style={{ width: width ?? 380, minWidth: width ?? 380, maxWidth: width ?? 380, borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         <span className="text-[9px] text-muted-foreground" title="界面版本标记">v2</span>
@@ -2216,7 +2216,7 @@ export function AgentRail({
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-2" style={{ scrollbarGutter: "stable" }}>
         {railTab === 'chat' ? (
           <>
             <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
