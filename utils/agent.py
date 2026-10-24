@@ -142,6 +142,15 @@ def _compact_context(context: dict | None) -> dict:
             str(key)[:60]: str(value)[:400]
             for key, value in list((context.get("notes") or {}).items())[:20]
         },
+        "mentions": [
+            {
+                "name": str(item.get("name") or "")[:60],
+                "type": str(item.get("type") or ""),
+                "found": bool(item.get("found")),
+            }
+            for item in (context.get("mentions") or [])
+            if isinstance(item, dict)
+        ][:20],
     }
 
 

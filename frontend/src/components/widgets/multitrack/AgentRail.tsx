@@ -1726,6 +1726,14 @@ export function AgentRail({
       if (noteEntries.length) {
         context.notes = Object.fromEntries(noteEntries)
       }
+      const mentionNames = Array.from(new Set(Array.from(text.matchAll(/〔([^〔〕]{1,40})〕/g)).map((match) => match[1])))
+      if (mentionNames.length) {
+        const pool = readResources(projectKey) as ProjectResource[]
+        context.mentions = mentionNames.map((name) => {
+          const found = pool.find((item) => item.name === name)
+          return { name, type: found?.type ?? '', found: Boolean(found), status: found?.status ?? '' }
+        })
+      }
       return context
     }
 
@@ -1778,10 +1786,11 @@ export function AgentRail({
           tools: AGENT_TOOLS,
           system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
         })
-        // 优先流式（逐字出现）：失败自动回退非流式
+        // 优先流式（逐字出现）：失败自动回退非流式；回退时只补未显示的后缀，避免重复
         let data: { ok?: boolean; text?: string; tool_calls?: unknown[]; error?: string } | null = null
+        let stepStreamed = ''
         try {
-          const streamed = await (async () => {
+          data = await (async () => {
             const streamResponse = await fetch('/easy-media/agent/step/stream', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1814,6 +1823,7 @@ export function AgentRail({
                     continue
                   }
                   if (event.type === 'text' && typeof event.delta === 'string') {
+                    stepStreamed += event.delta
                     appendText(event.delta)
                   } else if (event.type === 'final') {
                     gotFinal = true
@@ -1829,7 +1839,6 @@ export function AgentRail({
             if (!gotFinal) throw new Error('流式未返回最终结果')
             return { ok: true, text: finalText, tool_calls: finalCalls }
           })()
-          data = streamed
         } catch {
           if (controller.signal.aborted) break
           let response = await fetch('/easy-media/agent/step', {
@@ -1854,8 +1863,13 @@ export function AgentRail({
         }
         if (!data) break
         const replyText = String(data.text || '')
-        if (replyText && !readWorkspace(projectKey).messages?.some((message) => message.id === replyId && message.text.includes(replyText.slice(0, 8)))) {
-          appendText(replyText)
+        if (replyText) {
+          if (stepStreamed && replyText.startsWith(stepStreamed)) {
+            const suffix = replyText.slice(stepStreamed.length)
+            if (suffix) appendText(suffix)
+          } else if (!stepStreamed) {
+            appendText(replyText)
+          }
         }
         const calls = Array.isArray(data.tool_calls) ? data.tool_calls : []
         if (!calls.length) break
