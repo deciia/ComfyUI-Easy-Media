@@ -432,32 +432,78 @@ export function PromptEnhancerModal({
     }
     return map
   }
-  /** 当前段任务类型：段级覆盖 > 脚本级 plan.settings（决定六段式/三段式） */
+  /** 当前段任务类型：段级 settings > 脚本级 plan.settings > 任务轨 task_mode > 默认 */
   const taskTypeOfCurrentSegment = (): string => {
     const planNow = readWorkspace(bindingProjectKey).plan as
       | { settings?: { taskType?: string }; segments?: Array<Record<string, unknown>> }
       | null
     const segSettings = (planNow?.segments?.[activeScriptIndex] as { settings?: { taskType?: string } } | undefined)?.settings
     const segType = String(segSettings?.taskType ?? '').trim()
+    if (segType) return segType.toUpperCase()
     const planType = String(planNow?.settings?.taskType ?? '').trim()
-    return (segType || planType || '').toUpperCase()
+    if (planType) return planType.toUpperCase()
+    // 兜底：任务轨上该段的 task_mode（default/ref/edit/l2v/passthrough）
+    const taskMode = String((matchedTaskSegment?.content as unknown as { task_mode?: string })?.task_mode ?? '').trim().toLowerCase()
+    if (taskMode === 'ref' || taskMode === 'edit') return 'R2V'
+    if (taskMode === 'l2v') return 'L2V'
+    if (taskMode === 'passthrough') return 'PASS'
+    if (taskMode === 'default') return 'T2V'
+    return ''
   }
 
-  /** 底部「已引用」：绑定清单令牌 + 草稿中出现但未绑定的令牌 */
+  /** 令牌 → 名称：优先脚本段上缓存的 tokenLabels，其次按需求清单顺序，最后按主体库 */
+  const buildTokenNameMap = (): Map<string, string> => {
+    const map = new Map<string, string>()
+    const labels = (activeScriptSegment as unknown as { tokenLabels?: Record<string, string> } | undefined)?.tokenLabels
+    if (labels && typeof labels === 'object') {
+      for (const [token, name] of Object.entries(labels)) {
+        if (typeof name === 'string' && name.trim()) map.set(token, name.trim())
+      }
+      return map
+    }
+    const counters: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
+    const push = (kind: string, name: string) => {
+      counters[kind] = (counters[kind] ?? 0) + 1
+      map.set(`<${kind} ${counters[kind]}>`, name)
+    }
+    const seg = activeScriptSegment as unknown as {
+      needs?: Array<{ kind?: string; name?: string }>
+      needResources?: Array<{ kind?: string; name?: string }>
+      resources?: Array<{ kind?: string; name?: string }>
+    } | undefined
+    const needs = seg?.needs ?? seg?.needResources ?? seg?.resources ?? []
+    for (const item of needs) {
+      const name = String(item?.name ?? '').trim()
+      if (!name) continue
+      const kindRaw = String(item?.kind ?? 'Subject').toLowerCase()
+      const kind = kindRaw.startsWith('sub') ? 'Subject' : kindRaw.startsWith('aud') ? 'Audio' : kindRaw.startsWith('vid') ? 'Video' : 'Picture'
+      push(kind, name)
+    }
+    if (map.size === 0) {
+      const names = readSubjectLibraryNames()
+      names.forEach((name, index) => map.set(`<Subject ${index + 1}>`, name))
+    }
+    return map
+  }
+
+  /** 底部「本段引用」：以草稿里实际出现的令牌为准，名称尽力解析，未绑定则标注 */
   const buildReferencedItems = () => {
     const items: Array<{ key: string; token: string; name: string; type: string; unbound: boolean }> = []
-    const tokenMap = computeBindingTokens(boundIds)
-    for (const [id, token] of tokenMap.entries()) {
-      const resource = resources.find((item) => item.id === id)
-      if (!resource) continue
-      items.push({ key: `bound-${id}`, token, name: resource.name, type: resource.type, unbound: false })
-    }
-    const text = `${brief}\n${finalDraft || finalPrompt}`
+    const boundTokenValues = new Set(computeBindingTokens(boundIds).values())
+    const nameMap = buildTokenNameMap()
+    const text = `${brief}\n${abTab === 'b' ? draftPrompt : ''}\n${finalDraft || finalPrompt}`
+    const seen = new Set<string>()
     for (const match of text.matchAll(/<(Subject|Picture|Audio|Video)\s+(\d+)>/g)) {
       const token = `<${match[1]} ${Number(match[2])}>`
-      if (items.some((item) => item.token === token)) continue
-      const name = match[1] === 'Subject' ? (readSubjectLibraryNames()[Number(match[2]) - 1] ?? '') : ''
-      items.push({ key: `token-${token}`, token, name: name || '未绑定', type: match[1], unbound: true })
+      if (seen.has(token)) continue
+      seen.add(token)
+      items.push({
+        key: `token-${token}`,
+        token,
+        name: nameMap.get(token) ?? '',
+        type: match[1],
+        unbound: !boundTokenValues.has(token),
+      })
     }
     return items
   }
@@ -2059,7 +2105,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
-                  <span className={labelClass}>已引用主体/资源：</span>
+                  <span className={labelClass}>本段引用：</span>
                   {(() => {
                     const items = buildReferencedItems()
                     if (items.length === 0) return <span className="text-[11px] text-neutral-500">（无）</span>
@@ -2072,8 +2118,9 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                           style={{ borderColor: color, color: item.unbound ? undefined : color }}
                           title={`${item.token}${item.unbound ? '（未绑定，仅文本令牌）' : ''}`}
                         >
-                          {item.unbound ? '⚠ ' : ''}{item.name}
-                          <span className="ml-1 text-[9px] uppercase opacity-70">{item.token}</span>
+                          {item.unbound ? '⚠ ' : ''}{item.name || item.token}
+                          {item.name ? <span className="ml-1 text-[9px] uppercase opacity-70">{item.token}</span> : null}
+                          {item.unbound ? <span className="ml-1 text-[9px] opacity-70">未绑定</span> : null}
                         </span>
                       )
                     })
