@@ -93,6 +93,67 @@ def user_config_path() -> Path:
     return base / "user" / CONFIG_DIR_NAME / CONFIG_FILE_NAME
 
 
+def _new_profile_id(existing: list[str]) -> str:
+    index = 1
+    while f"p{index}" in existing:
+        index += 1
+    return f"p{index}"
+
+
+def normalize_profiles(config: dict) -> tuple[list[dict], str]:
+    """返回 (profiles, active_profile)，并把旧的扁平配置自动迁移成单档。"""
+    raw = config.get("profiles")
+    profiles: list[dict] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider") or "").strip()
+            if not provider:
+                continue
+            defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS[DEFAULT_PROVIDER])
+            profiles.append({
+                "id": str(item.get("id") or "").strip() or _new_profile_id([p["id"] for p in profiles]),
+                "name": str(item.get("name") or "").strip() or f"{provider}",
+                "provider": provider,
+                "model": str(item.get("model") or defaults["model"]),
+                "base_url": str(item.get("base_url") or defaults["base_url"]),
+                "api_key": str(item.get("api_key") or ""),
+                "supports_image": bool(item.get("supports_image", defaults["supports_image"])),
+                "upload_images": bool(item.get("upload_images", config.get("upload_images", True))),
+            })
+    if not profiles:
+        provider = str(config.get("provider") or "").strip()
+        if provider:
+            profiles.append({
+                "id": "p1",
+                "name": str(config.get("name") or provider),
+                "provider": provider,
+                "model": str(config.get("model") or PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS[DEFAULT_PROVIDER])["model"]),
+                "base_url": str(config.get("base_url") or PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS[DEFAULT_PROVIDER])["base_url"]),
+                "api_key": str(config.get("api_key") or ""),
+                "supports_image": bool(config.get("supports_image", PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS[DEFAULT_PROVIDER])["supports_image"])),
+                "upload_images": bool(config.get("upload_images", True)),
+            })
+    active = str(config.get("active_profile") or "").strip()
+    ids = [item["id"] for item in profiles]
+    if active not in ids:
+        active = ids[0] if ids else ""
+    return profiles, active
+
+
+def active_profile(config: dict | None = None) -> dict:
+    """取当前生效的配置档（没有 profiles 时返回旧扁平结构）。"""
+    data = config if config is not None else load_config()
+    profiles, active = normalize_profiles(data)
+    for item in profiles:
+        if item["id"] == active:
+            return item
+    if profiles:
+        return profiles[0]
+    return dict(data)
+
+
 def load_config(path: Path | None = None) -> dict:
     target = path or user_config_path()
     if not target.is_file():
@@ -111,18 +172,40 @@ def save_config(config: dict, path: Path | None = None) -> Path:
     return target
 
 
+def _mask_key(key: str) -> dict:
+    return {
+        "api_key": "",
+        "api_key_set": bool(key),
+        "api_key_tail": key[-4:] if len(key) >= 8 else "",
+    }
+
+
 def masked_config(config: dict) -> dict:
-    """返回给前端的配置：api_key 只给是否存在与后四位。"""
-    result = dict(config)
-    key = str(result.get("api_key") or "")
-    result["api_key"] = ""
-    result["api_key_set"] = bool(key)
-    result["api_key_tail"] = key[-4:] if len(key) >= 8 else ""
+    """返回给前端的配置：每个配置档的 api_key 只给是否存在与后四位。"""
+    profiles, active = normalize_profiles(config)
+    masked_profiles = []
+    for item in profiles:
+        masked = {k: v for k, v in item.items() if k != "api_key"}
+        masked.update(_mask_key(str(item.get("api_key") or "")))
+        masked_profiles.append(masked)
+    chosen = next((item for item in profiles if item["id"] == active), profiles[0] if profiles else {})
+    result = {
+        "profiles": masked_profiles,
+        "active_profile": active,
+        # 兼容旧前端：顶层继续给出当前档的扁平字段
+        "provider": chosen.get("provider", ""),
+        "model": chosen.get("model", ""),
+        "base_url": chosen.get("base_url", ""),
+        "supports_image": chosen.get("supports_image", False),
+        "upload_images": chosen.get("upload_images", True),
+        "timeout": config.get("timeout") or 120.0,
+    }
+    result.update(_mask_key(str(chosen.get("api_key") or "")))
     return result
 
 
 def resolve_settings(config: dict | None = None) -> ProviderSettings:
-    data = config if config is not None else load_config()
+    data = active_profile(config)
     raw_provider = str(data.get("provider") or "").strip()
     if not raw_provider:
         # 配置文件里 provider 被显式清空时不要静默回落到 deepseek，

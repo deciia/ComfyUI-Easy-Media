@@ -34,7 +34,18 @@ export function DirectorSettingsModal({
 }) {
   const [draft, setDraft] = useState<DirectorSettings>(settings)
   const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api' | 'resource' | 'appearance'>('save')
-  const [api, setApi] = useState({ provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', upload_images: true })
+  type ApiProfile = {
+    id: string
+    name: string
+    provider: string
+    model: string
+    base_url: string
+    api_key: string
+    api_key_masked: string
+    upload_images: boolean
+  }
+  const [profiles, setProfiles] = useState<ApiProfile[]>([])
+  const [activeProfile, setActiveProfile] = useState('')
   const [apiSaving, setApiSaving] = useState(false)
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = Number(globalThis.localStorage?.getItem('easy-media-ui-scale') || 0)
@@ -61,14 +72,18 @@ export function DirectorSettingsModal({
       .then((response) => response.json())
       .then((data) => {
         if (!data?.ok) return
-        setApi({
-          provider: String(data.provider ?? ''),
-          model: String(data.model ?? ''),
-          base_url: String(data.base_url ?? ''),
+        const list = Array.isArray(data.profiles) ? data.profiles : []
+        setProfiles(list.map((item: Record<string, unknown>) => ({
+          id: String(item.id ?? ''),
+          name: String(item.name ?? item.provider ?? ''),
+          provider: String(item.provider ?? ''),
+          model: String(item.model ?? ''),
+          base_url: String(item.base_url ?? ''),
           api_key: '',
-          api_key_masked: String(data.api_key_masked ?? (data.api_key ? '已保存' : '')),
-          upload_images: data.upload_images !== false,
-        })
+          api_key_masked: String(item.api_key_tail ? `…${item.api_key_tail}` : (item.api_key_set ? '已保存' : '')),
+          upload_images: item.upload_images !== false,
+        })))
+        setActiveProfile(String(data.active_profile ?? list[0]?.id ?? ''))
       })
       .catch(() => { /* ignore */ })
   }, [open])
@@ -80,11 +95,16 @@ export function DirectorSettingsModal({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: api.provider,
-          model: api.model,
-          base_url: api.base_url,
-          api_key: api.api_key || undefined,
-          upload_images: api.upload_images,
+          profiles: profiles.map((item) => ({
+            id: item.id,
+            name: item.name || item.provider,
+            provider: item.provider,
+            model: item.model,
+            base_url: item.base_url,
+            api_key: item.api_key || undefined,
+            upload_images: item.upload_images,
+          })),
+          active_profile: activeProfile,
         }),
       })
     } catch {
@@ -283,34 +303,109 @@ export function DirectorSettingsModal({
           {tab === 'api' ? (
             <>
               <div className="text-[11px] text-muted-foreground">
-                提示词增强与 AI 助手使用的模型配置；凭据保存在 ComfyUI/user/DeciiaEasyMedia/prompt_studio.json
+                可保存多套模型配置（如 GLM / DeepSeek / MiniMax / 火山），点「使用」切换当前生效的一套；凭据保存在 ComfyUI/user/DeciiaEasyMedia/prompt_studio.json
               </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-muted-foreground">Provider</span>
-                <input style={{ ...fieldStyle, width: 220 }} value={api.provider}
-                  onChange={(e) => setApi({ ...api, provider: e.target.value })} />
+              <div className="flex flex-col gap-1">
+                {profiles.length === 0 ? (
+                  <div className="rounded border p-2 text-[11px] text-muted-foreground" style={{ borderColor: BORDER }}>
+                    还没有配置，点下方「＋ 新增配置」添加。
+                  </div>
+                ) : profiles.map((item) => {
+                  const active = item.id === activeProfile
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-2 rounded border px-2 py-1 text-[11px]"
+                      style={{ borderColor: active ? PRIMARY : BORDER, background: active ? 'hsl(var(--primary, 199 89% 48%) / 0.10)' : 'transparent' }}
+                    >
+                      <button
+                        type="button"
+                        className="rounded px-2 py-0.5"
+                        style={{ border: `1px solid ${active ? PRIMARY : BORDER}`, color: active ? PRIMARY : undefined }}
+                        onClick={() => setActiveProfile(item.id)}
+                        title="切换为当前生效配置"
+                      >
+                        {active ? '使用中' : '使用'}
+                      </button>
+                      <span className="min-w-0 flex-1 truncate">
+                        {item.name || item.provider}
+                        <span className="ml-2 text-muted-foreground">{item.provider} · {item.model}</span>
+                        {item.api_key_masked ? <span className="ml-2 text-muted-foreground">key {item.api_key_masked}</span> : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded px-1.5 text-[10px]"
+                        style={{ border: `1px solid ${BORDER}` }}
+                        onClick={() => {
+                          setProfiles((current) => current.filter((entry) => entry.id !== item.id))
+                          setActiveProfile((current) => (current === item.id ? (profiles.find((entry) => entry.id !== item.id)?.id ?? '') : current))
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  )
+                })}
+                <div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => {
+                      const id = `p${Date.now().toString(36)}`
+                      setProfiles((current) => [...current, {
+                        id,
+                        name: `配置 ${current.length + 1}`,
+                        provider: 'glm',
+                        model: 'glm-5.3-flash',
+                        base_url: 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions',
+                        api_key: '',
+                        api_key_masked: '',
+                        upload_images: true,
+                      }])
+                      setActiveProfile(id)
+                    }}
+                  >
+                    ＋ 新增配置
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-muted-foreground">Model</span>
-                <input style={{ ...fieldStyle, width: 220 }} value={api.model}
-                  onChange={(e) => setApi({ ...api, model: e.target.value })} />
-              </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-muted-foreground">Base URL</span>
-                <input style={{ ...fieldStyle, width: 420 }} value={api.base_url}
-                  onChange={(e) => setApi({ ...api, base_url: e.target.value })} />
-              </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="w-20 text-muted-foreground">API key</span>
-                <input
-                  style={{ ...fieldStyle, width: 300 }}
-                  placeholder={api.api_key_masked ? `已保存 ${api.api_key_masked}（留空不改）` : '填写 API key'}
-                  value={api.api_key}
-                  onChange={(e) => setApi({ ...api, api_key: e.target.value })}
-                />
-              </div>
-              <Toggle label="上传参考图给模型" checked={api.upload_images}
-                onChange={(v) => setApi({ ...api, upload_images: v })} />
+              {(() => {
+                const current = profiles.find((item) => item.id === activeProfile)
+                if (!current) return null
+                const patch = (next: Partial<ApiProfile>) => setProfiles((list) => list.map((item) => (item.id === current.id ? { ...item, ...next } : item)))
+                return (
+                  <>
+                    <div className="border-t pt-1 text-[11px] text-muted-foreground" style={{ borderColor: BORDER }}>编辑当前配置：{current.name}</div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="w-20 text-muted-foreground">名称</span>
+                      <input style={{ ...fieldStyle, width: 220 }} value={current.name} onChange={(e) => patch({ name: e.target.value })} />
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="w-20 text-muted-foreground">Provider</span>
+                      <input style={{ ...fieldStyle, width: 220 }} value={current.provider} placeholder="glm / deepseek / minimax-cn / ark" onChange={(e) => patch({ provider: e.target.value })} />
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="w-20 text-muted-foreground">Model</span>
+                      <input style={{ ...fieldStyle, width: 220 }} value={current.model} onChange={(e) => patch({ model: e.target.value })} />
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="w-20 text-muted-foreground">Base URL</span>
+                      <input style={{ ...fieldStyle, width: 420 }} value={current.base_url} onChange={(e) => patch({ base_url: e.target.value })} />
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="w-20 text-muted-foreground">API key</span>
+                      <input
+                        style={{ ...fieldStyle, width: 300 }}
+                        placeholder={current.api_key_masked ? `已保存 ${current.api_key_masked}（留空不改）` : '填写 API key'}
+                        value={current.api_key}
+                        onChange={(e) => patch({ api_key: e.target.value })}
+                      />
+                    </div>
+                    <Toggle label="上传参考图给模型" checked={current.upload_images} onChange={(v) => patch({ upload_images: v })} />
+                  </>
+                )
+              })()}
               <div className="text-[10px] text-muted-foreground">配置路径：ComfyUI/user/DeciiaEasyMedia/prompt_studio.json</div>
             </>
           ) : null}

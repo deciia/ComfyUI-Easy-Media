@@ -983,15 +983,43 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
         payload = await request.json()
         if not isinstance(payload, dict):
             return web.json_response({"error": "config must be an object"}, status=400)
+        from .utils.prompt_enhancer import normalize_profiles
+
         current = load_prompt_enhancer_config()
         merged = dict(current)
+        # 兼容旧的扁平字段
         for key, value in payload.items():
-            if key == "api_key":
+            if key in ("api_key", "profiles", "active_profile"):
                 continue
             merged[key] = value
-        api_key = str(payload.get("api_key") or "").strip()
-        if api_key:
-            merged["api_key"] = api_key
+        legacy_key = str(payload.get("api_key") or "").strip()
+
+        incoming_profiles = payload.get("profiles")
+        if isinstance(incoming_profiles, list):
+            current_profiles, _ = normalize_profiles(current)
+            existing_keys = {item["id"]: item.get("api_key", "") for item in current_profiles}
+            cleaned: list[dict] = []
+            for item in incoming_profiles:
+                if not isinstance(item, dict):
+                    continue
+                provider = str(item.get("provider") or "").strip()
+                if not provider:
+                    continue
+                entry = dict(item)
+                entry["provider"] = provider
+                new_key = str(entry.pop("api_key", "") or "").strip()
+                entry["api_key"] = new_key or existing_keys.get(str(entry.get("id") or ""), "")
+                cleaned.append(entry)
+            merged["profiles"] = cleaned
+            merged["active_profile"] = str(payload.get("active_profile") or "")
+            # 顶层同步当前档，保证旧代码仍可读
+            chosen = next((item for item in cleaned if item.get("id") == merged["active_profile"]), cleaned[0] if cleaned else None)
+            if chosen:
+                merged["provider"] = chosen.get("provider", "")
+                merged["model"] = chosen.get("model", "")
+                merged["base_url"] = chosen.get("base_url", "")
+        if legacy_key:
+            merged["api_key"] = legacy_key
         path = save_prompt_enhancer_config(merged)
         return web.json_response({
             "ok": True,
