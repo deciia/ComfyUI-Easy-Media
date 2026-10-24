@@ -1216,6 +1216,52 @@ async def handle_list_project_outputs(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/agent/step/stream")
+async def handle_agent_step_stream(request: web.Request) -> web.StreamResponse:
+    """流式单步：SSE 输出 text 增量，最后给出 tool_calls。"""
+    payload = await request.json()
+    messages = payload.get("messages") or []
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else None
+    tools = payload.get("tools") if isinstance(payload.get("tools"), list) else None
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+    system_extra = str(payload.get("system_extra") or "")
+
+    from .utils.agent import stream_agent_step
+
+    response = web.StreamResponse(
+        headers={
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+    await response.prepare(request)
+    try:
+        async for chunk in stream_agent_step(messages, context, tools, config, system_extra):
+            await response.write(chunk.encode("utf-8"))
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        await response.write(
+            f"data: {json.dumps({'type': 'error', 'error': str(error)}, ensure_ascii=False)}\n\n".encode("utf-8")
+        )
+    await response.write_eof()
+    return response
+
+
+@PromptServer.instance.routes.get("/easy-media/agent/skills")
+async def handle_agent_skills(request: web.Request) -> web.Response:
+    """技能库：列表与读取（?name=xxx 返回全文）。"""
+    try:
+        from .utils.agent import list_skills, read_skill
+
+        name = str(request.rel_url.query.get("name") or "").strip()
+        if name:
+            return web.json_response({"ok": True, "name": name, "content": read_skill(name)})
+        return web.json_response({"ok": True, "skills": list_skills()})
+    except Exception as error:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
 @PromptServer.instance.routes.post("/easy-media/agent/compact")
 async def handle_agent_compact(request: web.Request) -> web.Response:
     """压缩长对话为要点备忘。"""

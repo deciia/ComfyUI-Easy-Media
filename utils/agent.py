@@ -317,6 +317,162 @@ def _sanitize_tool_history(items: list[dict]) -> list[dict]:
     return cleaned
 
 
+def skills_dir() -> Path:
+    """技能目录：<ComfyUI>/user/DeciiaEasyMedia/skills/*.md"""
+    import folder_paths
+
+    base = Path(folder_paths.get_user_directory()) / "DeciiaEasyMedia" / "skills"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def list_skills() -> list[dict]:
+    items = []
+    for path in sorted(skills_dir().glob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        title = path.stem
+        for line in text.split("\n"):
+            if line.strip().startswith("#"):
+                title = line.strip("# ").strip() or title
+                break
+        items.append({"name": path.stem, "title": title, "chars": len(text)})
+    return items
+
+
+def read_skill(name: str) -> str:
+    safe = "".join(ch for ch in str(name) if ch.isalnum() or ch in "-_ ")
+    path = skills_dir() / f"{safe.strip()}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"技能不存在：{name}")
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+async def stream_agent_step(
+    messages: list[dict],
+    context: dict | None,
+    tools: list[dict] | None,
+    config: dict | None,
+    system_extra: str = "",
+):
+    """流式单步：逐段 yield SSE 文本；结束时给出组装好的 tool_calls。"""
+    import aiohttp
+
+    from .prompt_enhancer import PromptEnhancerError, resolve_settings
+
+    settings = resolve_settings(config)
+    base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
+    system = base_prompt + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
+    if system_extra:
+        system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
+    if tools:
+        system += (
+            "\n\n你现在可以使用工具读写项目数据。规则：① 先读后写；② 一次只做用户要求的事；"
+            "③ 改完用一句话汇报；④ 不确定先 ask_user；⑤ 不要编造段号或资源名。"
+        )
+
+    history: list[dict] = []
+    for message in (messages or [])[-24:]:
+        role = str(message.get("role") or "user")
+        if role not in ("user", "assistant", "tool"):
+            continue
+        text = str(message.get("text") or message.get("content") or "")
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or "")
+            if call_id:
+                history.append({"role": "tool", "tool_call_id": call_id, "content": text[:6000]})
+            continue
+        calls = message.get("tool_calls")
+        if role == "assistant" and isinstance(calls, list) and calls:
+            normalized = []
+            for index, call in enumerate(calls):
+                fn = (call or {}).get("function") or {}
+                if not fn.get("name"):
+                    continue
+                normalized.append({
+                    "id": str(call.get("id") or f"call_{index}"),
+                    "type": "function",
+                    "function": {"name": str(fn.get("name")), "arguments": str(fn.get("arguments") or "{}")},
+                })
+            item: dict = {"role": "assistant", "tool_calls": normalized}
+            if text:
+                item["content"] = text
+            history.append(item)
+            continue
+        history.append({"role": role, "content": text})
+    history = _sanitize_tool_history(history)
+    if not history:
+        history = [{"role": "user", "content": "你好"}]
+
+    body: dict = {
+        "model": settings.model,
+        "messages": [{"role": "system", "content": system}, *history],
+        "temperature": 0.3,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+
+    collected_text: list[str] = []
+    tool_buffer: dict[int, dict] = {}
+    usage: dict = {}
+    timeout = aiohttp.ClientTimeout(total=180)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(settings.base_url, json=body, headers=headers) as response:
+            if response.status >= 400:
+                raw = await response.text()
+                yield f"data: {json.dumps({'type': 'error', 'error': f'流式请求失败（{response.status}）：{raw[:200]}'}, ensure_ascii=False)}\n\n"
+                return
+            buffer = ""
+            async for raw_chunk in response.content.iter_any():
+                buffer += raw_chunk.decode("utf-8", errors="ignore")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(chunk.get("usage"), dict) and chunk["usage"]:
+                        usage = chunk["usage"]
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    piece = delta.get("content")
+                    if piece:
+                        collected_text.append(str(piece))
+                        yield f"data: {json.dumps({'type': 'text', 'delta': str(piece)}, ensure_ascii=False)}\n\n"
+                    for call in delta.get("tool_calls") or []:
+                        index = int(call.get("index") or 0)
+                        slot = tool_buffer.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                        if call.get("id"):
+                            slot["id"] = str(call["id"])
+                        fn = call.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = str(fn["name"])
+                        if fn.get("arguments"):
+                            slot["arguments"] += str(fn["arguments"])
+
+    calls = []
+    for index in sorted(tool_buffer):
+        slot = tool_buffer[index]
+        if not slot.get("name"):
+            continue
+        calls.append({"id": slot.get("id") or f"call_{index}", "name": slot["name"], "arguments": slot.get("arguments") or "{}"})
+    yield f"data: {json.dumps({'type': 'final', 'text': ''.join(collected_text), 'tool_calls': calls, 'usage': usage, 'model': settings.model}, ensure_ascii=False)}\n\n"
+
+
 async def compact_messages(messages: list[dict], config: dict | None = None) -> str:
     """把较早的对话压成要点备忘（Toonflow 式 compaction）。"""
     from .prompt_enhancer import PromptEnhancerError, resolve_settings

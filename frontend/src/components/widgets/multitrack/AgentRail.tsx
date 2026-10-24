@@ -80,6 +80,16 @@ export function AgentRail({
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const mentionOptions = useMemo(() => {
+    if (mentionQuery === null) return []
+    const pool = readResources(projectKey) as Array<{ name?: string; type?: string }>
+    const query = mentionQuery.toLowerCase()
+    return pool
+      .filter((item) => item?.name && (!query || String(item.name).toLowerCase().includes(query)))
+      .slice(0, 8)
+      .map((item) => ({ name: String(item.name), type: String(item.type ?? '') }))
+  }, [mentionQuery, projectKey])
     const [fillArmed, setFillArmed] = useState<string | null>(null)
   const [inputHeight, setInputHeight] = useState(72)
   const [expanded, setExpanded] = useState(false)
@@ -267,6 +277,26 @@ export function AgentRail({
             refImageSize: { type: 'string', enum: ['match', 'max'] },
           },
           required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_skills',
+        description: '列出可用技能包（H3 规范/题材预设等），写提示词前先查',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_skill',
+        description: '读取某个技能包全文（按需加载，避免一次性塞进上下文）',
+        parameters: {
+          type: 'object',
+          properties: { name: { type: 'string', description: '技能名（list_skills 返回的 name）' } },
+          required: ['name'],
         },
       },
     },
@@ -1106,6 +1136,20 @@ export function AgentRail({
         note: '分镜已写入项目，可在「分镜编排」页查看，或让我继续完善主体与资源、生成提示词',
       }
     }
+    if (name === 'list_skills') {
+      const response = await fetch('/easy-media/agent/skills')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `读取技能失败（HTTP ${response.status}）`) }
+      return { skills: data.skills ?? [] }
+    }
+    if (name === 'read_skill') {
+      const skillName = String(args.name ?? '').trim()
+      if (!skillName) return { error: 'name 必填' }
+      const response = await fetch(`/easy-media/agent/skills?name=${encodeURIComponent(skillName)}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `技能不存在：${skillName}`) }
+      return { name: skillName, content: String(data.content ?? '').slice(0, 12000) }
+    }
     if (name === 'update_todos') {
       const rawItems = Array.isArray(args.items) ? args.items : []
       const items = rawItems
@@ -1719,33 +1763,91 @@ export function AgentRail({
           tools: AGENT_TOOLS,
           system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
         })
-        let response = await fetch('/easy-media/agent/step', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: stepBody,
-        }).catch(() => null as unknown as Response)
-        if (!response || response.status === 429 || response.status >= 500) {
-          // 瞬时错误自愈：等 1.2s 重试一次
-          await new Promise((resolve) => window.setTimeout(resolve, 1200))
+        // 优先流式（逐字出现）：失败自动回退非流式
+        let data: { ok?: boolean; text?: string; tool_calls?: unknown[]; error?: string } | null = null
+        try {
+          const streamed = await (async () => {
+            const streamResponse = await fetch('/easy-media/agent/step/stream', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+              body: stepBody,
+            })
+            if (!streamResponse.ok || !streamResponse.body) throw new Error(`流式不可用（HTTP ${streamResponse.status}）`)
+            const reader = streamResponse.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+            let finalText = ''
+            let finalCalls: unknown[] = []
+            let gotFinal = false
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+              let boundary = buffer.indexOf('\n\n')
+              while (boundary >= 0) {
+                const raw = buffer.slice(0, boundary)
+                buffer = buffer.slice(boundary + 2)
+                for (const line of raw.split('\n')) {
+                  if (!line.startsWith('data:')) continue
+                  const payload = line.slice(5).trim()
+                  if (!payload) continue
+                  let event: Record<string, unknown>
+                  try {
+                    event = JSON.parse(payload)
+                  } catch {
+                    continue
+                  }
+                  if (event.type === 'text' && typeof event.delta === 'string') {
+                    appendText(event.delta)
+                  } else if (event.type === 'final') {
+                    gotFinal = true
+                    finalText = String(event.text ?? '')
+                    finalCalls = Array.isArray(event.tool_calls) ? event.tool_calls : []
+                  } else if (event.type === 'error') {
+                    throw new Error(String(event.error ?? '流式错误'))
+                  }
+                }
+                boundary = buffer.indexOf('\n\n')
+              }
+            }
+            if (!gotFinal) throw new Error('流式未返回最终结果')
+            return { ok: true, text: finalText, tool_calls: finalCalls }
+          })()
+          data = streamed
+        } catch {
           if (controller.signal.aborted) break
-          response = await fetch('/easy-media/agent/step', {
+          let response = await fetch('/easy-media/agent/step', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
             body: stepBody,
-          })
+          }).catch(() => null as unknown as Response)
+          if (!response || response.status === 429 || response.status >= 500) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1200))
+            if (controller.signal.aborted) break
+            response = await fetch('/easy-media/agent/step', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+              body: stepBody,
+            })
+          }
+          const fallback = await response.json().catch(() => ({}))
+          if (!response.ok || !fallback?.ok) throw new Error(String(fallback?.error || `请求失败（HTTP ${response.status}）`))
+          data = fallback
         }
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok || !data?.ok) throw new Error(String(data?.error || `请求失败（HTTP ${response.status}）`))
+        if (!data) break
         const replyText = String(data.text || '')
-        if (replyText) appendText(replyText)
+        if (replyText && !readWorkspace(projectKey).messages?.some((message) => message.id === replyId && message.text.includes(replyText.slice(0, 8)))) {
+          appendText(replyText)
+        }
         const calls = Array.isArray(data.tool_calls) ? data.tool_calls : []
         if (!calls.length) break
         chatMessages.push({
           role: 'assistant',
           text: replyText,
-          tool_calls: calls.map((call: { id: string; name: string; arguments: string }) => ({
+          tool_calls: (calls as Array<{ id: string; name: string; arguments: string }>).map((call) => ({
             id: call.id,
             type: 'function',
             function: { name: call.name, arguments: call.arguments },
@@ -2224,7 +2326,10 @@ export function AgentRail({
           placeholder={plan ? '继续提要求，例如：第 2 段拆两段 / 应用' : '例：写一个天空鲸落掉深海回家的故事。'}
           value={input}
           onChange={(event) => {
-            setInput(event.target.value)
+            const value = event.target.value
+            setInput(value)
+            const match = /@([^\s@〔〕]*)$/.exec(value)
+            setMentionQuery(match ? match[1] : null)
             const el = event.currentTarget
             if (!expanded) {
               el.style.height = 'auto'
@@ -2238,6 +2343,51 @@ export function AgentRail({
             }
           }}
         />
+        {mentionQuery !== null && mentionOptions.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 8,
+              right: 8,
+              bottom: inputHeight + 12,
+              zIndex: 40,
+              maxHeight: 180,
+              overflowY: 'auto',
+              border: '1px solid hsl(var(--border, 240 6% 25%))',
+              borderRadius: 6,
+              background: 'hsl(var(--background, 240 10% 8%))',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            }}
+          >
+            {mentionOptions.map((option) => (
+              <button
+                key={`${option.type}-${option.name}`}
+                type="button"
+                style={{
+                  display: 'flex',
+                  width: '100%',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: '5px 8px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'hsl(var(--foreground, 240 10% 92%))',
+                  fontSize: 12,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  setInput((current) => current.replace(/@([^\s@〔〕]*)$/, `〔${option.name}〕`))
+                  setMentionQuery(null)
+                }}
+              >
+                <span style={{ opacity: 0.6 }}>{option.type === 'Subject' ? '主体' : '资源'}</span>
+                <span>{option.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           title={expanded ? '还原高度' : '放大输入框'}
