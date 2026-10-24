@@ -83,6 +83,7 @@ export function AssetsTab({
       return 560
     }
   })
+  const [showBrowser, setShowBrowser] = useState(true)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   useEffect(() => {
     try {
@@ -771,7 +772,20 @@ export function AssetsTab({
 
       {/* 列2：详情（弹性：宽度 = 总宽 − 左列 − 共享资源列） */}
       <div className="flex min-w-[240px] flex-1 flex-col gap-2 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
-        <div className="text-[11px] text-muted-foreground">详情</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">详情</span>
+          {!showBrowser ? (
+            <button
+              type="button"
+              className="ml-auto rounded px-1.5 text-[10px]"
+              style={{ border: `1px solid ${BORDER}` }}
+              title="展开共享资源列"
+              onClick={() => setShowBrowser(true)}
+            >
+              展开共享资源
+            </button>
+          ) : null}
+        </div>
         {detail}
       </div>
 
@@ -788,9 +802,22 @@ export function AssetsTab({
         <span className="h-16 w-[4px] rounded-full opacity-50 transition-opacity group-hover:opacity-100" style={{ background: PRIMARY }} />
       </div>
 
-      {/* 列3：共享资源浏览器 */}
-      <div className="flex shrink-0 flex-col gap-1.5 p-2" style={{ width: browserWidth }}>
+      {/* 列3：共享资源浏览器（可收缩、可折叠：高缩放时优先保详情列） */}
+      {showBrowser ? (
+      <div
+        className="flex min-w-[200px] max-w-[46%] flex-1 flex-col gap-1.5 p-2"
+        style={{ flexBasis: browserWidth, borderLeft: `1px solid ${BORDER}` }}
+      >
         <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className="rounded px-1 text-[10px]"
+            style={{ border: `1px solid ${BORDER}` }}
+            title="收起共享资源（详情列变宽）"
+            onClick={() => setShowBrowser(false)}
+          >
+            收起
+          </button>
           <select
             style={{ ...fieldStyle, width: 92, padding: '2px 4px' }}
             value={root}
@@ -1006,6 +1033,7 @@ export function AssetsTab({
           )}
         </div>
       </div>
+      ) : null}
     </div>
   )
 }
