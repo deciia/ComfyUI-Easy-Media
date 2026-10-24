@@ -2037,6 +2037,7 @@ class MultiTrackEditor(io.ComfyNode):
         image: object = None,
         audio: object = None,
         video: object = None,
+        duration: object = None,
     ) -> list[str]:
         del resolution
         raw_format = format[0] if isinstance(format, list) and format else format
@@ -2046,6 +2047,26 @@ class MultiTrackEditor(io.ComfyNode):
             if isinstance(prompt_override, list) and len(prompt_override) == 1
             else prompt_override
         )
+        duration_value = _unwrap_optional_value(duration)
+        try:
+            duration_seconds = float(duration_value) if duration_value not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        if duration_seconds > 0 and not prompt_override_has_frame_ranges(raw_override):
+            # duration 覆盖模式：按连线推断任务类型，需要惰性求值已接入的媒体输入
+            def _unevaluated(value: object) -> bool:
+                return (
+                    isinstance(value, (list, tuple))
+                    and len(value) > 0
+                    and all(item is None for item in value)
+                )
+
+            requested = [
+                media_type
+                for media_type, value in (("image", image), ("audio", audio), ("video", video))
+                if _unevaluated(value)
+            ]
+            return requested
         if raw_format == "MiniMax" and is_minimax_prompt_override(raw_override):
             slot_types = minimax_prompt_override_media_types(raw_override)
         else:
