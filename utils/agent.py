@@ -317,6 +317,17 @@ def _sanitize_tool_history(items: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _skills_hint() -> str:
+    try:
+        items = list_skills()
+    except Exception:
+        return ""
+    if not items:
+        return ""
+    names = "、".join(f"{item['name']}（{item['title']}）" for item in items[:12])
+    return "\n\n可用技能包（写提示词/分镜前用 read_skill 按需读取，不要凭记忆编规范）：" + names
+
+
 def skills_dir() -> Path:
     """技能目录：<ComfyUI>/user/DeciiaEasyMedia/skills/*.md"""
     import folder_paths
@@ -364,7 +375,7 @@ async def stream_agent_step(
 
     settings = resolve_settings(config)
     base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
-    system = base_prompt + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
+    system = base_prompt + _skills_hint() + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
@@ -534,6 +545,7 @@ async def run_agent_step(
     base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = (
         base_prompt
+        + _skills_hint()
         + "\n当前项目上下文（JSON）：\n"
         + json.dumps(_compact_context(context), ensure_ascii=False)
     )
