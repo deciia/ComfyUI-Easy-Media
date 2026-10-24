@@ -100,6 +100,12 @@ export function AgentRail({
   const inputAreaRef = useRef<HTMLDivElement | null>(null)
   const heightDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   useEffect(() => {
+    const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
+    registry.__easyMediaAgentAsk = (text: string) => { void sendStepLoop(text) }
+    return () => { delete registry.__easyMediaAgentAsk }
+  })
+
+  useEffect(() => {
     function onMove(event: MouseEvent) {
       const drag = heightDragRef.current
       if (!drag) return
@@ -1686,8 +1692,8 @@ export function AgentRail({
   const activeReplyRef = useRef<string>('')
 
   /** D-P1：前端驱动的工具循环（最多 40 步） */
-  async function sendStepLoop() {
-    const text = input.trim()
+  async function sendStepLoop(textOverride?: string) {
+    const text = String(textOverride ?? input).trim()
     if (!text) return
     if (busy) {
       // Toonflow 式 steer：运行中允许插话，循环会在下一步之间插入

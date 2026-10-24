@@ -1131,7 +1131,26 @@ export function PromptEnhancerModal({
     setSections(splitSections(text))
   }
 
-  async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: string) {
+  /** 把「生成标准提示词」这件事交给 AI 助手执行（进度显示在右栏对话里） */
+function askAgentGenerate(language: '中文' | 'English') {
+  const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
+  const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
+  const variant = abTab === 'a' ? 'finalA' : 'finalB'
+  const directive = [
+    `请把当前第 ${activeScriptIndex + 1} 段「${segmentName}」的最终提示词，生成成符合 H3 标准结构的 ${language} 提示词。`,
+    '要求：',
+    '1) 先 get_segment 读取该段现状（A/B 稿、绑定的主体与资源、时长、任务类型），必要时 read_skill h3-prompt-spec；',
+    '2) 保留已绑定的 <Subject n> / <Picture n> / <Audio n> / <Video n> 令牌与参考资源关系，时长按该段实际帧数换算；',
+    '3) 只输出一份可直接用的终稿（不要多版），结构完整、无占位符、无多余解释；',
+    `4) 生成后用 patch_segment 写回该段 ${variant}，并把终稿贴在对话里，用一句话说明改动。`,
+  ].join('\n')
+  if (!registry.__easyMediaAgentAsk) return false
+  setResultTab('ai')
+  registry.__easyMediaAgentAsk(directive)
+  return true
+}
+
+async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: string) {
     const outputLanguage = language ?? options.output_language
     setBusy(true)
     setError('')
@@ -1834,16 +1853,16 @@ export function PromptEnhancerModal({
                     <Button
                       variant="secondary"
                       className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating || !activePrompt.trim()}
-                      onClick={() => void handleGenerate('English', activePrompt)}
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
                     >
                       生成英文➡️
                     </Button>
                     <Button
                       variant="secondary"
                       className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating || !activePrompt.trim()}
-                      onClick={() => void handleGenerate('中文', activePrompt)}
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
                     >
                       生成中文➡️
                     </Button>
