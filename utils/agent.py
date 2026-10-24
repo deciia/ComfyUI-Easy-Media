@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from .plan_segments import PlanError, build_plan_messages, plan_from_response
