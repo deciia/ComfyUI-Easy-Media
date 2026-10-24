@@ -1361,11 +1361,13 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
         className="easy-media-scope"
         style={{
           ['--easy-chat-scale' as never]: String(appearance.chatScale / 100),
-          zoom: appearance.uiScale / 100,
           display: 'flex',
           flexDirection: 'column',
-          width: '100vw',
-          height: '100vh',
+          // 缩放：布局盒先按 1/scale 缩小，再用 transform 放大，保证放大后贴合窗口不出屏
+          width: `${100 / (appearance.uiScale / 100)}vw`,
+          height: `${100 / (appearance.uiScale / 100)}vh`,
+          transform: `scale(${appearance.uiScale / 100})`,
+          transformOrigin: 'center center',
           background: PANEL_BG,
           border: 'none',
           borderRadius: 0,
