@@ -2170,7 +2170,7 @@ export function AgentRail({
 
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-[320px] flex-col gap-2 overflow-hidden p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="flex h-full min-h-0 w-full max-w-[520px] min-w-[320px] shrink-0 flex-col gap-2 overflow-hidden p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         {model ? (
