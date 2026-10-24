@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { DEFAULT_DIRECTOR_SETTINGS, DEFAULT_PROMPT_RULES, PROMPT_RULES_PRESETS, type DirectorSettings } from './directorSettings'
+import { ResourceGenSettings } from './ResourceGenSettings'
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -32,7 +33,7 @@ export function DirectorSettingsModal({
   onSave: (next: DirectorSettings) => void
 }) {
   const [draft, setDraft] = useState<DirectorSettings>(settings)
-  const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api'>('save')
+  const [tab, setTab] = useState<'save' | 'audio' | 'agent' | 'api' | 'resource'>('save')
   const [api, setApi] = useState({ provider: '', model: '', base_url: '', api_key: '', api_key_masked: '', upload_images: true })
   const [apiSaving, setApiSaving] = useState(false)
   useEffect(() => {
@@ -93,7 +94,7 @@ export function DirectorSettingsModal({
         </div>
 
         <div className="flex gap-1">
-          {([['save', '保存'], ['audio', '音频与字幕'], ['agent', 'AI 助手'], ['api', 'API']] as const).map(([key, label]) => (
+          {([['save', '保存'], ['audio', '音频与字幕'], ['agent', 'AI 助手'], ['api', 'API'], ['resource', '资源生成']] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -211,6 +212,10 @@ export function DirectorSettingsModal({
               <Toggle label="④ 的引用绑定关系" checked={draft.agent.includeBindings}
                 onChange={(v) => patch((d) => ({ ...d, agent: { ...d.agent, includeBindings: v } }))} />
             </>
+          ) : null}
+
+          {tab === 'resource' ? (
+            <ResourceGenSettings />
           ) : null}
 
           {tab === 'api' ? (

@@ -1097,6 +1097,106 @@ async def handle_agent_info(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
+@PromptServer.instance.routes.get("/easy-media/resource-workflows/candidates")
+async def handle_resource_workflow_candidates(request: web.Request) -> web.Response:
+    """列出可用的 API 格式工作流（插件 workflows 目录 + 用户默认 workflows）。"""
+    try:
+        import folder_paths as _fp
+
+        user_root = Path(_fp.get_user_directory())
+        roots = [
+            ("plugin", user_root / "DeciiaEasyMedia" / "workflows"),
+            ("user", user_root / "default" / "workflows"),
+        ]
+        items = []
+        for label, base in roots:
+            if not base.exists():
+                continue
+            for file in sorted(base.rglob("*.json")):
+                if len(items) >= 400:
+                    break
+                try:
+                    head = file.read_text(encoding="utf-8", errors="ignore")[:20000]
+                except OSError:
+                    continue
+                if '"class_type"' not in head and '"nodes"' not in head:
+                    continue
+                rel = file.relative_to(base).as_posix()
+                items.append({
+                    "root": label,
+                    "name": rel,
+                    "display": f"{'插件' if label == 'plugin' else '用户'}/{rel}",
+                    "size": file.stat().st_size,
+                    "mtime": file.stat().st_mtime,
+                })
+        return web.json_response({"ok": True, "items": items, "dirs": [str(base) for _, base in roots]})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/resource-workflows/inspect")
+async def handle_resource_workflow_inspect(request: web.Request) -> web.Response:
+    """检查一个 API 工作流：列出提示词候选口与输出节点，并给出配置建议。"""
+    try:
+        payload = await request.json()
+        workflow_raw = str((payload or {}).get("workflow") or "").strip()
+        if not workflow_raw:
+            raise ValueError("workflow 不能为空")
+        from .utils.resource_gen import _resolve_workflow_path
+
+        path = _resolve_workflow_path(workflow_raw)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or "nodes" in data:
+            raise ValueError("这不是 API 格式工作流（请用「导出（API）」再导出一次）")
+
+        prompt_candidates = []
+        outputs = []
+        for node_id, node in data.items():
+            if not isinstance(node, dict):
+                continue
+            class_type = str(node.get("class_type") or "")
+            inputs = node.get("inputs") or {}
+            lowered = class_type.lower()
+            if any(token in lowered for token in ("text", "prompt", "string")):
+                for key, value in inputs.items():
+                    if isinstance(value, str) and len(value) > 0:
+                        prompt_candidates.append({
+                            "id": str(node_id),
+                            "class_type": class_type,
+                            "key": str(key),
+                            "value_preview": value[:80],
+                        })
+                        break
+            if any(token in lowered for token in ("save", "combine", "preview")):
+                priority = 0
+                if "save" in lowered:
+                    priority = 3 if "video" in lowered else 2
+                elif "combine" in lowered:
+                    priority = 1
+                outputs.append({"id": str(node_id), "class_type": class_type, "priority": priority})
+
+        suggestion: dict = {}
+        if prompt_candidates:
+            first = prompt_candidates[0]
+            suggestion["inputs"] = {f"{first['id']}.{first['key']}": "{{prompt}}"}
+        outputs.sort(key=lambda item: item.get("priority", 0), reverse=True)
+        preferred = outputs[0] if outputs else None
+        if preferred or outputs:
+            suggestion["output"] = (preferred or outputs[0])["id"]
+        return web.json_response({
+            "ok": True,
+            "path": str(path),
+            "nodes": len(data),
+            "prompt_candidates": prompt_candidates[:20],
+            "outputs": outputs[:20],
+            "suggestion": suggestion,
+        })
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
 @PromptServer.instance.routes.get("/easy-media/resource-workflows")
 async def handle_get_resource_workflows(request: web.Request) -> web.Response:
     """读取资源生成工作流配置。"""
