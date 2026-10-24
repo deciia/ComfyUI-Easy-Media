@@ -1872,6 +1872,67 @@ class MultiImagesLoader(io.ComfyNode):
         return io.NodeOutput(output)
 
 
+class ClipTiming(io.ComfyNode):
+    """把帧率 + 时长（秒）换算成帧数，供多轨编辑器的时长覆盖入口使用。"""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy clipTiming",
+            display_name="Clip Timing (fps + duration)",
+            category=CATEGORY_TIMELINE,
+            description=(
+                "把帧率与时长（秒）换算成帧数。接到「多轨编辑器」的 duration_frames 入口，"
+                "即可用上游的帧率/时长覆盖任务轨的默认片段。"
+            ),
+            inputs=[
+                io.Float.Input(
+                    "frame_rate",
+                    default=24.0,
+                    min=1.0,
+                    max=240.0,
+                    step=0.01,
+                    tooltip="帧率（与项目/模型一致，常用 24）。",
+                ),
+                io.Float.Input(
+                    "duration_seconds",
+                    default=5.0,
+                    min=0.1,
+                    max=60.0,
+                    step=0.1,
+                    tooltip="片段时长（秒）。",
+                ),
+            ],
+            outputs=[
+                io.Int.Output("FRAMES", tooltip="帧数 = round(时长 × 帧率)"),
+                io.Float.Output("FPS", tooltip="帧率（透传）"),
+                io.Float.Output("SECONDS", tooltip="实际生效的时长（秒，已裁剪）"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, frame_rate: float = 24.0, duration_seconds: float = 5.0) -> io.NodeOutput:
+        try:
+            fps = float(frame_rate)
+        except (TypeError, ValueError):
+            fps = 24.0
+        if not math.isfinite(fps) or fps <= 0:
+            fps = 24.0
+        try:
+            seconds = float(duration_seconds)
+        except (TypeError, ValueError):
+            seconds = 5.0
+        if not math.isfinite(seconds) or seconds <= 0:
+            seconds = 5.0
+        seconds = max(0.1, min(60.0, seconds))
+        frames = max(1, int(round(seconds * fps)))
+        print(
+            f"[EasyMedia] ClipTiming: {seconds:g}s × {fps:g}fps = {frames} 帧",
+            flush=True,
+        )
+        return io.NodeOutput(frames, fps, seconds)
+
+
 def _unwrap_optional_value(value: object) -> object:
     """is_input_list=True 时标量会以 list 形式到达，取第一个非 None 值。"""
     if isinstance(value, (list, tuple)):
@@ -1903,12 +1964,12 @@ def _infer_task_mode(kwargs: dict) -> str:
 
 def _build_duration_override_data(
     base: dict,
-    duration_seconds: float,
+    duration_frames: int,
     prompt_text: str,
     task_mode: str,
     format_name: str,
 ) -> dict:
-    """duration/prompt_override 覆盖轨道：不追加，直接按时长重建单段任务。"""
+    """duration_frames/prompt_override 覆盖轨道：不追加，直接按帧数重建单段任务。"""
     data = deepcopy(base) if isinstance(base, dict) else {}
     try:
         fps = float(data.get("frame_rate") or 24.0)
@@ -1917,14 +1978,16 @@ def _build_duration_override_data(
     if not math.isfinite(fps) or fps <= 0:
         fps = 24.0
     max_seconds = 15.0 if format_name == "MiniMax" else 30.0
-    seconds = float(duration_seconds)
-    clamped = max(1.0, min(max_seconds, seconds))
-    if abs(clamped - seconds) > 1e-6:
+    max_frames = max(1, int(round(max_seconds * fps)))
+    requested = int(duration_frames)
+    clamped = max(1, min(max_frames, requested))
+    if clamped != requested:
         print(
-            f"[EasyMedia] duration={seconds}s 超出允许范围 1-{max_seconds:g}s，已裁剪为 {clamped:g}s",
+            f"[EasyMedia] duration_frames={requested} 超出允许范围 1-{max_frames} 帧"
+            f"（{max_seconds:g}s × {fps:g}fps），已裁剪为 {clamped} 帧",
             flush=True,
         )
-    frames = max(1, int(round(clamped * fps)))
+    frames = clamped
 
     tracks = data.get("tracks") if isinstance(data.get("tracks"), list) else []
     tracks = deepcopy(tracks)
@@ -1966,7 +2029,7 @@ def _build_duration_override_data(
     data["frame_rate"] = fps
     data["task_markers"] = []
     print(
-        f"[EasyMedia] duration 覆盖：{clamped:g}s × {fps:g}fps = {frames} 帧，task_mode={task_mode}",
+        f"[EasyMedia] duration_frames 覆盖：{frames} 帧 = {frames / fps:g}s × {fps:g}fps，task_mode={task_mode}",
         flush=True,
     )
     return data
@@ -1998,12 +2061,14 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
                 io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
                 # 仅作为上游覆盖接口：不设 widget，只在连线上生效；时长本身仍在任务轨上设置。
+                # 单位为帧数，建议由 easy clipTiming 节点（fps + 秒 → 帧）提供。
                 io.AnyType.Input(
-                    "duration",
+                    "duration_frames",
                     optional=True,
                     tooltip=(
-                        "可选（仅连线）：上游传入本次生成时长（秒），可传 6、6.5 或 6s。"
-                        "接上后忽略轨道任务段，按该时长重建单段；"
+                        "可选（仅连线）：上游传入本次生成时长（帧数，如 120）。"
+                        "可用「Clip Timing」节点把帧率+秒换算成帧。"
+                        "接上后忽略轨道任务段，按该帧数重建单段；"
                         "任务类型按接入的图片/音频/视频自动推断（无输入=文生视频，有任一输入=参考生视频）。"
                         "prompt_override 带 [0-5s] 区间时以区间为准。"
                     ),
@@ -2037,7 +2102,7 @@ class MultiTrackEditor(io.ComfyNode):
         image: object = None,
         audio: object = None,
         video: object = None,
-        duration: object = None,
+        duration_frames: object = None,
     ) -> list[str]:
         del resolution
         raw_format = format[0] if isinstance(format, list) and format else format
@@ -2047,12 +2112,12 @@ class MultiTrackEditor(io.ComfyNode):
             if isinstance(prompt_override, list) and len(prompt_override) == 1
             else prompt_override
         )
-        duration_value = _unwrap_optional_value(duration)
+        duration_value = _unwrap_optional_value(duration_frames)
         try:
-            duration_seconds = float(duration_value) if duration_value not in (None, "") else 0.0
+            duration_count = int(round(float(duration_value))) if duration_value not in (None, "") else 0
         except (TypeError, ValueError):
-            duration_seconds = 0.0
-        if duration_seconds > 0 and not prompt_override_has_frame_ranges(raw_override):
+            duration_count = 0
+        if duration_count > 0 and not prompt_override_has_frame_ranges(raw_override):
             # duration 覆盖模式：按连线推断任务类型，需要惰性求值已接入的媒体输入
             def _unevaluated(value: object) -> bool:
                 return (
@@ -2107,25 +2172,25 @@ class MultiTrackEditor(io.ComfyNode):
         if isinstance(prompt_override, list) and len(prompt_override) == 1:
             prompt_override = prompt_override[0]
 
-        duration_value = _unwrap_optional_value(kwargs.get("duration"))
+        duration_value = _unwrap_optional_value(kwargs.get("duration_frames"))
         try:
-            duration_seconds = float(duration_value) if duration_value not in (None, "") else 0.0
+            duration_frames = int(round(float(duration_value))) if duration_value not in (None, "") else 0
         except (TypeError, ValueError):
-            duration_seconds = 0.0
-        if not math.isfinite(duration_seconds):
-            duration_seconds = 0.0
+            duration_frames = 0
+        if duration_frames < 0:
+            duration_frames = 0
 
         data = _parse_track_data(track_data)
         is_minimax_override = format == "MiniMax" and is_minimax_prompt_override(prompt_override)
         has_frame_ranges = (not is_minimax_override) and prompt_override_has_frame_ranges(prompt_override)
         if is_minimax_override:
             data = build_minimax_multitrack_data_from_prompt_override(data, prompt_override)
-        elif duration_seconds > 0 and not has_frame_ranges:
-            # 覆盖语义：忽略轨道既有任务段，按 duration（+可选 prompt）重建单段
+        elif duration_frames > 0 and not has_frame_ranges:
+            # 覆盖语义：忽略轨道既有任务段，按帧数（+可选 prompt）重建单段
             prompt_text = str(prompt_override).strip() if prompt_override_has_value(prompt_override) else ""
             data = _build_duration_override_data(
                 data,
-                duration_seconds,
+                duration_frames,
                 prompt_text,
                 _infer_task_mode(kwargs),
                 format,

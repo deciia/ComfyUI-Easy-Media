@@ -103,6 +103,7 @@ class EasyMediaExtension(ComfyExtension):
             MakeAudioList,
             MakeVideoList,
             # Common
+            ClipTiming,
             EasyModelLoaderPack,
             MatchLine,
             APIWorkflowGate,
