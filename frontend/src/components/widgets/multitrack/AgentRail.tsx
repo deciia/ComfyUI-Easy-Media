@@ -1620,7 +1620,7 @@ export function AgentRail({
     }
     if (name === 'apply_storyboard') {
       const planCurrent = readWorkspace(projectKey).plan as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
-      if (!planCurrent || !onApplyPlan) return { error: '当前没有可应用的分镜脚本' }
+      if (!planCurrent || !(planCurrent.segments ?? []).length) return { error: '当前没有可应用的分镜脚本' }
       const applyTracks = (globalThis as unknown as { __easyMediaApplyStoryboard?: (items: unknown) => boolean }).__easyMediaApplyStoryboard
       const fps = frameRate || 24
       // 注册表需要的是映射后的数组（name / durationFrames / brief / prompt / taskMode…）
@@ -1649,16 +1649,18 @@ export function AgentRail({
           return { error: `应用失败：${error instanceof Error ? error.message : String(error)}` }
         }
       }
-      // 兜底：走组件传入的 onApplyPlan（部分页签直接接收 plan 或 items）
-      try {
-        if (onApplyPlan(planCurrent)) return { ok: true, applied: true, segments: mappedItems.length, via: 'plan' }
-      } catch {
-        /* 继续尝试数组形状 */
-      }
-      try {
-        if (onApplyPlan(mappedItems as never)) return { ok: true, applied: true, segments: mappedItems.length, via: 'items' }
-      } catch {
-        /* 落到错误分支 */
+      // 兜底：走组件传入的 onApplyPlan（④ 页签不传，跳过）
+      if (onApplyPlan) {
+        try {
+          if (onApplyPlan(planCurrent)) return { ok: true, applied: true, segments: mappedItems.length, via: 'plan' }
+        } catch {
+          /* 继续尝试数组形状 */
+        }
+        try {
+          if (onApplyPlan(mappedItems as never)) return { ok: true, applied: true, segments: mappedItems.length, via: 'items' }
+        } catch {
+          /* 落到错误分支 */
+        }
       }
       return {
         error: '应用失败：任务轨编辑器未就绪（请确认导演台弹窗是从多轨编辑器节点打开、且未处于只读预览）',
