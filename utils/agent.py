@@ -69,6 +69,12 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
 7. 生成分镜用 plan_storyboard；改分镜用 revise_storyboard 或段级工具；提示词用 generate_prompt / generate_all_prompts；落任务轨用 apply_storyboard；正式生成用 run_generation；生成后可用 list_outputs 查产物。
 8. 应用任务轨/正式生成属于重动作：执行前先用一句话说明将发生什么（除非用户已明确要求）。
 
+交付纪律（必须遵守）：
+9. 任何一轮"改脚本/改资源/生成提示词/落轨"结束后，必须调用 verify_project 自检，并把剩余问题一句话汇报。
+10. 长任务先报预期：generate_all_prompts 每段约 60–120 秒；generate_resource 单张图约 50–70 秒；apply_storyboard 后任务轨会整体重建。开始前用一句话告诉用户预计耗时。
+11. 修改任务轨（apply_storyboard）后必须调用 save_project，否则刷新会丢失。
+12. 生成提示词前，若结论涉及 H3 写法规范，先 read_skill 读取 h3-prompt-spec，不要凭记忆写规范。
+
 直接开始干活，不要解释你有哪些工具。"""
 
 
