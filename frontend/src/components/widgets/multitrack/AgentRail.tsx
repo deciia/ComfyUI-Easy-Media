@@ -1087,21 +1087,72 @@ export function AgentRail({
       const segment = segments[index1 - 1]
       if (!segment) return { error: `段 ${index1} 不存在` }
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
-      const sourcePrompt = String((variant === 'b' ? segment.promptB : segment.promptA) ?? segment.promptA ?? segment.user_prompt ?? '').trim()
+      const sourcePrompt = String((variant === 'b' ? segment.promptB : segment.promptA) ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? '').trim()
       if (!sourcePrompt) return { error: `段 ${index1} 的 ${variant.toUpperCase()} 稿为空，请先写片段提示词` }
       const settings = (segment.settings ?? {}) as Record<string, unknown>
       const mapped = taskTemplate(String(settings.taskType ?? ''))
       const duration = Number(segment.duration_seconds ?? 0) || 6
+      // 令牌契约与④界面同源：按本段绑定顺序编号（主体展开子图，图片/音频/视频各自从 1 编号）
+      const pool = readResources(projectKey) as ProjectResource[]
+      const boundIds = readBindings(projectKey, `script-${index1}:${variant}`)
+      const subjectList: Array<Record<string, unknown>> = []
+      const pictures: Array<{ token: string; name: string }> = []
+      const audios: Array<{ token: string; name: string }> = []
+      const videos: Array<{ token: string; name: string }> = []
+      const images: string[] = []
+      let subjectNo = 0
+      let pictureNo = 0
+      let audioNo = 0
+      let videoNo = 0
+      for (const id of boundIds) {
+        const resource = pool.find((item) => item.id === id)
+        if (!resource) continue
+        const type = String(resource.type || '').toLowerCase()
+        if (type === 'subject') {
+          subjectNo += 1
+          subjectList.push({
+            token: `<Subject ${subjectNo}>`,
+            name: resource.name,
+            description: resource.description ?? '',
+            retention: resource.retention ?? [],
+          })
+          for (const childId of resource.childResourceIds ?? []) {
+            const child = pool.find((item) => item.id === childId)
+            if (!child) continue
+            pictureNo += 1
+            pictures.push({ token: `<Picture ${pictureNo}>`, name: child.name })
+            const file = child.imageFile || child.sharedPath || ''
+            if (file) images.push(file)
+          }
+        } else if (type === 'picture' || type === 'image') {
+          pictureNo += 1
+          pictures.push({ token: `<Picture ${pictureNo}>`, name: resource.name })
+          const file = resource.imageFile || resource.sharedPath || ''
+          if (file) images.push(file)
+        } else if (type === 'audio') {
+          audioNo += 1
+          audios.push({ token: `<Audio ${audioNo}>`, name: resource.name })
+        } else if (type === 'video') {
+          videoNo += 1
+          videos.push({ token: `<Video ${videoNo}>`, name: resource.name })
+        }
+      }
       const response = await fetch('/easy-media/prompt-studio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brief: sourcePrompt,
-          options: { ...mapped, duration_seconds: duration, output_language: String(args.language ?? '中文') },
+          options: { ...mapped, duration_seconds: duration, output_language: String(args.language ?? '中文'), task_label: String(settings.taskType ?? '') },
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,
           duration_seconds: duration,
           language: String(args.language ?? '中文'),
+          subjects: subjectList,
+          bindings: { pictures, audio: audios, video: videos },
+          images,
+          picture_count: pictureNo || null,
+          audio_count: audioNo || null,
+          video_count: videoNo || null,
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -1112,10 +1163,50 @@ export function AgentRail({
       return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
     }
     if (name === 'apply_storyboard') {
-      const planCurrent = readWorkspace(projectKey).plan
+      const planCurrent = readWorkspace(projectKey).plan as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
       if (!planCurrent || !onApplyPlan) return { error: '当前没有可应用的分镜脚本' }
-      const ok = onApplyPlan(planCurrent)
-      return ok ? { ok: true, applied: true } : { error: '应用失败：编辑器可能不可用' }
+      const applyTracks = (globalThis as unknown as { __easyMediaApplyStoryboard?: (items: unknown) => boolean }).__easyMediaApplyStoryboard
+      const fps = frameRate || 24
+      // 注册表需要的是映射后的数组（name / durationFrames / brief / prompt / taskMode…）
+      const mappedItems = (planCurrent.segments ?? []).map((segment, i) => {
+        const settings = (segment.settings ?? {}) as Record<string, unknown>
+        const duration = Number(segment.duration_seconds ?? 0) || 4
+        return {
+          name: String(segment.name ?? `段 ${i + 1}`),
+          durationFrames: Number(segment.duration_frames ?? Math.round(duration * fps)) || Math.round(duration * fps),
+          brief: formatPlanSegmentBrief(segment as never),
+          prompt: String(segment.finalA ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? ''),
+          taskMode: (settings.taskType as string | undefined) || undefined,
+          continuityMode: (settings.contextMode as string | undefined) || undefined,
+          refImageSize: (settings.refImageSize as string | undefined) || undefined,
+          stableKey: String((segment as Record<string, unknown>).stable_key ?? `sk-${i + 1}`),
+        }
+      })
+      if (!mappedItems.length) return { error: '分镜脚本没有段可应用' }
+      // 优先走注册表（编辑器层，真正写任务轨）
+      if (applyTracks) {
+        try {
+          if (applyTracks(mappedItems)) {
+            return { ok: true, applied: true, segments: mappedItems.length, via: 'registry' }
+          }
+        } catch (error) {
+          return { error: `应用失败：${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
+      // 兜底：走组件传入的 onApplyPlan（部分页签直接接收 plan 或 items）
+      try {
+        if (onApplyPlan(planCurrent)) return { ok: true, applied: true, segments: mappedItems.length, via: 'plan' }
+      } catch {
+        /* 继续尝试数组形状 */
+      }
+      try {
+        if (onApplyPlan(mappedItems as never)) return { ok: true, applied: true, segments: mappedItems.length, via: 'items' }
+      } catch {
+        /* 落到错误分支 */
+      }
+      return {
+        error: '应用失败：任务轨编辑器未就绪（请确认导演台弹窗是从多轨编辑器节点打开、且未处于只读预览）',
+      }
     }
     if (name === 'ask_user') {
       const answer = await askUser(String(args.question ?? ''), Array.isArray(args.options) ? args.options.map(String) : ['好的', '算了'])
