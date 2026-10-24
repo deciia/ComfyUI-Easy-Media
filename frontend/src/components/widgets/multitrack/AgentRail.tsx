@@ -1127,7 +1127,15 @@ export function AgentRail({
       if (!response.ok || !data?.ok) return { error: String(data?.error || `规划失败（HTTP ${response.status}）`) }
       const nextPlan = data.plan
       if (!nextPlan?.segments?.length) return { error: '规划结果为空' }
-      writeWorkspace(projectKey, { plan: nextPlan })
+      const planDefaults = {
+        ratio: String(args.ratio ?? ratio ?? '9:16'),
+        frame_rate: frameRate || 24,
+        taskType: String(args.task_type ?? args.taskType ?? 'R2V'),
+        contextMode: 'shot',
+        refImageSize: 'match',
+        ...((nextPlan as { settings?: Record<string, unknown> }).settings ?? {}),
+      }
+      writeWorkspace(projectKey, { plan: { ...nextPlan, settings: planDefaults } as never })
       return {
         ok: true,
         segments: nextPlan.segments.length,
@@ -1263,7 +1271,7 @@ export function AgentRail({
       const response = await fetch('/easy-media/project/timeline', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_name: projectKey, timeline }),
+        body: JSON.stringify({ project_name: projectKey, timeline: { version: 1, track_data: timeline } }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) return { error: String(data?.error || `保存失败（HTTP ${response.status}）`) }
@@ -1439,7 +1447,9 @@ export function AgentRail({
       ).trim()
       if (!sourcePrompt) return { error: `段 ${index1} 没有可用的 A/B 稿，也没有 summary/beat/镜头表，无法生成提示词` }
       const settings = { ...((segment.settings ?? {}) as Record<string, unknown>), ...((scriptSegment.settings ?? {}) as Record<string, unknown>) }
-      const mapped = taskTemplate(String(settings.taskType ?? ''))
+      const planSettings = ((readPlan() as { settings?: Record<string, unknown> } | null)?.settings ?? {}) as Record<string, unknown>
+      let rawTaskLabel = String(settings.taskType ?? planSettings.taskType ?? '').trim()
+      let mapped = taskTemplate(rawTaskLabel)
       const duration = Number(scriptSegment.duration_seconds ?? segment.duration_seconds ?? 0) || 6
       // 令牌契约与④界面同源：按本段绑定顺序编号（主体展开子图，图片/音频/视频各自从 1 编号）
       const pool = readResources(projectKey) as ProjectResource[]
@@ -1499,6 +1509,11 @@ export function AgentRail({
         if (!name.trim() || !token) continue
         materializedBrief = materializedBrief.split(`〔${name}〕`).join(token)
         materializedBrief = materializedBrief.split(name).join(token)
+      }
+      if (!rawTaskLabel) {
+        // 有参考素材 → 默认参考生视频（六段式），否则才走纯文生视频
+        rawTaskLabel = subjectList.length || pictures.length || audios.length || videos.length ? 'R2V' : ''
+        mapped = taskTemplate(rawTaskLabel)
       }
       const response = await fetch('/easy-media/prompt-studio/generate', {
         method: 'POST',
