@@ -2170,9 +2170,10 @@ export function AgentRail({
 
 
   return (
-    <div className="flex h-full min-h-0 w-[380px] shrink-0 flex-col gap-2 overflow-hidden p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="flex h-full min-h-0 shrink-0 flex-col gap-2 overflow-hidden p-2" data-easy-rail="v2" style={{ width: 380, minWidth: 380, maxWidth: 380, borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
+        <span className="text-[9px] text-muted-foreground" title="界面版本标记">v2</span>
         {model ? (
           <span className="rounded-full px-1.5 text-[10px] text-muted-foreground" style={{ border: `1px solid ${BORDER}` }}>
             {model}
