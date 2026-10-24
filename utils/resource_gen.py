@@ -270,7 +270,8 @@ async def generate_resource(resource_type: str, params: dict, timeout: float | N
             if not entry_data:
                 continue
             status = entry_data.get("status") or {}
-            if status.get("status_str") == "error":
+            status_str = str(status.get("status_str") or "")
+            if status_str == "error":
                 messages = json.dumps(status.get("messages") or [], ensure_ascii=False)[:400]
                 raise ResourceGenError(f"生成失败：{messages}")
             outputs = entry_data.get("outputs") or {}
@@ -370,4 +371,14 @@ async def generate_resource(resource_type: str, params: dict, timeout: float | N
                             "path": str(abs_path),
                             "kind": key,
                         }
+            if status_str in ("success", "completed") and not outputs:
+                raise ResourceGenError(
+                    "工作流执行完成但没有产物：请检查输出节点 id 是否正确、保存节点是否启用"
+                    f"（当前配置 outputs={entry.get('outputs') or entry.get('output')}）"
+                )
+            if status_str in ("success", "completed"):
+                raise ResourceGenError(
+                    "工作流执行完成，但在输出节点里没找到图片/音频/视频"
+                    f"（配置 outputs={entry.get('outputs') or entry.get('output')}，实际输出节点={list(outputs.keys())}）"
+                )
         raise ResourceGenError(f"生成超时（{int(timeout)}s 未完成）")

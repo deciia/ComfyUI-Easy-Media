@@ -41,6 +41,7 @@ const SAMPLE: Record<string, Record<string, unknown>> = {
     prompt: '竖屏，一间汽修车间空镜，卷帘门半开，午后阳光斜射，地面有油污与工具箱，写实摄影',
     ratio: '9:16',
     reference_images_json: '[]',
+    inputs: { '682.画布宽度': 1024, '682.画布高度': 1824 },
   },
   refvideo: {
     name: '试跑_参考视频',
