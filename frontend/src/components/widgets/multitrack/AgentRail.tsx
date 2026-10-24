@@ -1560,7 +1560,17 @@ export function AgentRail({
   /** D-P1：前端驱动的工具循环（最多 40 步） */
   async function sendStepLoop() {
     const text = input.trim()
-    if (!text || busy) return
+    if (!text) return
+    if (busy) {
+      // Toonflow 式 steer：运行中允许插话，循环会在下一步之间插入
+      writeWorkspace(projectKey, { pendingInject: text } as never)
+      setInput('')
+      patchWorkspaceMessages(projectKey, (current) => [
+        ...current,
+        { id: `u-inject-${Date.now()}`, role: 'user', text: `（排队插话）${text}` },
+      ])
+      return
+    }
     setInput('')
     const stamp = Date.now()
     const replyId = `a-${stamp}`
@@ -1660,26 +1670,72 @@ export function AgentRail({
       return context
     }
 
-    const history = (readWorkspace(projectKey).messages ?? [])
+    const previousRun = (readWorkspace(projectKey).agentRun ?? []) as Array<Record<string, unknown>>
+    const resumedRun = previousRun.slice(-16).filter((entry) => entry && typeof entry === 'object')
+    while (resumedRun.length && String(resumedRun[0]?.role ?? '') === 'tool') {
+      resumedRun.shift()
+    }
+    const fallbackHistory = (readWorkspace(projectKey).messages ?? [])
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .map((message) => ({ role: message.role, text: message.text }))
-    const chatMessages: Array<Record<string, unknown>> = [...history]
+    const chatMessages: Array<Record<string, unknown>> = resumedRun.length
+      ? [...resumedRun, { role: 'user', text }]
+      : [...fallbackHistory]
     let stepCount = 0
     try {
       for (let step = 0; step < 40; step += 1) {
         if (controller.signal.aborted) break
         stepCount = step + 1
-        const response = await fetch('/easy-media/agent/step', {
+        update({ steps: [{ label: `第 ${stepCount} 步`, status: 'running' }] })
+        // 插话注入：把排队中的用户消息塞进本轮对话
+        const pendingInject = String((readWorkspace(projectKey) as { pendingInject?: string }).pendingInject ?? '').trim()
+        if (pendingInject) {
+          chatMessages.push({ role: 'user', text: pendingInject })
+          appendText(`\n[收到插话] ${pendingInject}\n`)
+          writeWorkspace(projectKey, { pendingInject: '' } as never)
+        }
+        // 上下文压缩：过长时把旧段压成备忘
+        if (chatMessages.length > 34) {
+          try {
+            const compactResponse = await fetch('/easy-media/agent/compact', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messages: chatMessages.slice(0, chatMessages.length - 8) }),
+            })
+            const compactData = await compactResponse.json().catch(() => ({}))
+            const memo = String(compactData?.text || '').trim()
+            if (compactResponse.ok && memo) {
+              const tail = chatMessages.slice(-8)
+              chatMessages.length = 0
+              chatMessages.push({ role: 'assistant', text: `【前情提要】${memo}` }, ...tail)
+            }
+          } catch {
+            /* 压缩失败不影响主流程 */
+          }
+        }
+        const stepBody = JSON.stringify({
+          messages: chatMessages,
+          context: buildContext(),
+          tools: AGENT_TOOLS,
+          system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
+        })
+        let response = await fetch('/easy-media/agent/step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
-          body: JSON.stringify({
-            messages: chatMessages,
-            context: buildContext(),
-            tools: AGENT_TOOLS,
-            system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
-          }),
-        })
+          body: stepBody,
+        }).catch(() => null as unknown as Response)
+        if (!response || response.status === 429 || response.status >= 500) {
+          // 瞬时错误自愈：等 1.2s 重试一次
+          await new Promise((resolve) => window.setTimeout(resolve, 1200))
+          if (controller.signal.aborted) break
+          response = await fetch('/easy-media/agent/step', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: stepBody,
+          })
+        }
         const data = await response.json().catch(() => ({}))
         if (!response.ok || !data?.ok) throw new Error(String(data?.error || `请求失败（HTTP ${response.status}）`))
         const replyText = String(data.text || '')
@@ -1695,6 +1751,7 @@ export function AgentRail({
             function: { name: call.name, arguments: call.arguments },
           })),
         })
+        writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
         for (const call of calls as Array<{ id: string; name: string; arguments: string }>) {
           upsertToolCall({ id: call.id, name: call.name, args: call.arguments, status: 'running' })
           let parsedArgs: Record<string, unknown> = {}
@@ -1713,6 +1770,7 @@ export function AgentRail({
               result: JSON.stringify(result).slice(0, 2000),
             })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 6000) })
+            writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
           } catch (toolError) {
             const message = toolError instanceof Error ? toolError.message : String(toolError)
             upsertToolCall({ id: call.id, name: call.name, args: parsedArgs, status: 'error', result: message })
@@ -1735,7 +1793,7 @@ export function AgentRail({
       })
     } finally {
       abortRef.current = null
-      writeWorkspace(projectKey, { agentBusy: false })
+      writeWorkspace(projectKey, { agentBusy: false, pendingInject: '' } as never)
       setBusy(false)
     }
   }

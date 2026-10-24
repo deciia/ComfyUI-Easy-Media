@@ -138,6 +138,10 @@ export interface WorkspaceCache {
   todos?: Array<{ text: string; status: string }>
   /** 项目长期记忆（key → value），注入助手上下文 */
   notes?: Record<string, string>
+  /** 断点续跑：上一轮工具循环的完整消息（含 tool_calls/tool 结果） */
+  agentRun?: Array<Record<string, unknown>>
+  /** 运行中插话：排队等待注入的用户消息 */
+  pendingInject?: string
 }
 
 const cache = new Map<string, WorkspaceCache>()

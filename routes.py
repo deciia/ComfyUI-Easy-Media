@@ -1216,6 +1216,22 @@ async def handle_list_project_outputs(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(error)}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/agent/compact")
+async def handle_agent_compact(request: web.Request) -> web.Response:
+    """压缩长对话为要点备忘。"""
+    try:
+        from .utils.agent import compact_messages
+
+        payload = await request.json()
+        messages = payload.get("messages") if isinstance(payload, dict) else None
+        config = payload.get("config") if isinstance(payload, dict) else None
+        text = await compact_messages(messages or [], config if isinstance(config, dict) else None)
+        return web.json_response({"ok": True, "text": text})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
+
 @PromptServer.instance.routes.post("/easy-media/agent/step")
 async def handle_agent_step(request: web.Request) -> web.Response:
     """单步工具调用：返回 {text, tool_calls}；工具在前端执行。"""

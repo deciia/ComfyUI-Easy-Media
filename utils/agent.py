@@ -317,6 +317,50 @@ def _sanitize_tool_history(items: list[dict]) -> list[dict]:
     return cleaned
 
 
+async def compact_messages(messages: list[dict], config: dict | None = None) -> str:
+    """把较早的对话压成要点备忘（Toonflow 式 compaction）。"""
+    from .prompt_enhancer import PromptEnhancerError, resolve_settings
+    import aiohttp
+
+    settings = resolve_settings(config)
+    lines = []
+    for message in (messages or [])[-40:]:
+        role = str(message.get("role") or "")
+        if role not in ("user", "assistant", "tool"):
+            continue
+        text = str(message.get("text") or message.get("content") or "").strip()
+        if not text:
+            continue
+        lines.append(f"[{role}] {text[:1200]}")
+    if not lines:
+        return ""
+    system = (
+        "你是对话压缩器。把下面这段导演台助手与用户的对话压缩成不超过 400 字的要点备忘。"
+        "必须保留：用户目标、已完成动作与关键参数、未完成事项、用户偏好与禁忌。不要复述细节，不要编造。"
+    )
+    body = {
+        "model": settings.model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": "\n".join(lines)[:24000]},
+        ],
+        "temperature": 0.2,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+    timeout = aiohttp.ClientTimeout(total=120)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(settings.base_url, json=body, headers=headers) as response:
+            raw = await response.text()
+            if response.status >= 400:
+                raise PromptEnhancerError(f"压缩失败（{response.status}）：{raw[:200]}")
+            data = json.loads(raw)
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    return str((choices[0].get("message") or {}).get("content") or "").strip()
+
+
 async def run_agent_step(
     messages: list[dict],
     context: dict | None = None,
