@@ -663,6 +663,14 @@ async def run_agent_step(
         else:
             item["content"] = text
         history.append(item)
+    history = _sanitize_tool_history(history)
+    if history and history[0].get("role") != "user":
+        last_user = ""
+        for entry in reversed(history):
+            if entry.get("role") == "user":
+                last_user = str(entry.get("content") or "")
+                break
+        history.insert(0, {"role": "user", "content": last_user or "继续"})
     if not history:
         history = [{"role": "user", "content": "你好"}]
 
