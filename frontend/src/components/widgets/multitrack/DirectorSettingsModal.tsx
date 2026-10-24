@@ -46,6 +46,7 @@ export function DirectorSettingsModal({
   }
   const [profiles, setProfiles] = useState<ApiProfile[]>([])
   const [activeProfile, setActiveProfile] = useState('')
+  const [keyEditingId, setKeyEditingId] = useState('')
   const [apiSaving, setApiSaving] = useState(false)
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = Number(globalThis.localStorage?.getItem('easy-media-ui-scale') || 0)
@@ -91,7 +92,7 @@ export function DirectorSettingsModal({
   async function persistApi() {
     setApiSaving(true)
     try {
-      await fetch('/easy-media/prompt-studio/config', {
+      const response = await fetch('/easy-media/prompt-studio/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -107,6 +108,22 @@ export function DirectorSettingsModal({
           active_profile: activeProfile,
         }),
       })
+      const data = await response.json().catch(() => ({}))
+      const list = Array.isArray(data?.config?.profiles) ? data.config.profiles : []
+      if (response.ok && list.length) {
+        setProfiles(list.map((item: Record<string, unknown>) => ({
+          id: String(item.id ?? ''),
+          name: String(item.name ?? item.provider ?? ''),
+          provider: String(item.provider ?? ''),
+          model: String(item.model ?? ''),
+          base_url: String(item.base_url ?? ''),
+          api_key: '',
+          api_key_masked: String(item.api_key_tail ? `…${item.api_key_tail}` : (item.api_key_set ? '已保存' : '')),
+          upload_images: item.upload_images !== false,
+        })))
+        setActiveProfile(String(data?.config?.active_profile ?? activeProfile))
+        setKeyEditingId('')
+      }
     } catch {
       /* ignore */
     } finally {
@@ -395,12 +412,31 @@ export function DirectorSettingsModal({
                     </div>
                     <div className="flex items-center gap-2 text-[11px]">
                       <span className="w-20 text-muted-foreground">API key</span>
-                      <input
-                        style={{ ...fieldStyle, width: 300 }}
-                        placeholder={current.api_key_masked ? `已保存 ${current.api_key_masked}（留空不改）` : '填写 API key'}
-                        value={current.api_key}
-                        onChange={(e) => patch({ api_key: e.target.value })}
-                      />
+                      {keyEditingId === current.id || !current.api_key_masked ? (
+                        <input
+                          style={{ ...fieldStyle, width: 300 }}
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={current.api_key_masked ? '输入新的 key（留空则不修改）' : '填写 API key'}
+                          value={current.api_key}
+                          onChange={(e) => patch({ api_key: e.target.value })}
+                        />
+                      ) : (
+                        <span className="rounded border px-2 py-0.5 text-muted-foreground" style={{ borderColor: BORDER }}>
+                          已保存 {current.api_key_masked}（不显示明文）
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => {
+                          setKeyEditingId((value) => (value === current.id ? '' : current.id))
+                          if (keyEditingId === current.id) patch({ api_key: '' })
+                        }}
+                      >
+                        {keyEditingId === current.id ? '取消' : '更换'}
+                      </Button>
                     </div>
                     <Toggle label="上传参考图给模型" checked={current.upload_images} onChange={(v) => patch({ upload_images: v })} />
                   </>
