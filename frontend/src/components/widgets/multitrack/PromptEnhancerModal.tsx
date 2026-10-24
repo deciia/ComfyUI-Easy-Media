@@ -2144,7 +2144,7 @@ export function PromptEnhancerModal({
                     </>
                   )}
                 </div>
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
+                <div className="ml-auto flex min-h-0 w-full max-w-[420px] flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
                   <AgentRail
                     projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
                     tab="enhance"

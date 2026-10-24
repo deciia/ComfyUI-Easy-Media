@@ -2170,7 +2170,7 @@ export function AgentRail({
 
 
   return (
-    <div className="flex w-[360px] shrink-0 flex-col gap-2 p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
+    <div className="flex h-full min-h-0 w-full min-w-[320px] flex-col gap-2 overflow-hidden p-2" style={{ borderLeft: `1px solid ${BORDER}`, background: PANEL_BG }}>
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         {model ? (
@@ -2206,7 +2206,7 @@ export function AgentRail({
         ))}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-1">
         {railTab === 'chat' ? (
           <>
             <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
