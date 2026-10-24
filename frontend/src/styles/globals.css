@@ -327,19 +327,3 @@ body > .__CUSTOM_NODE_CLASS__ > * {
   background-clip: content-box;
 }
 
-.easy-agent-scroll-hidden::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
-}
-.easy-agent-scrollbar-track {
-  pointer-events: none;
-}
-.easy-agent-scrollbar-thumb {
-  background-color: hsl(var(--border, 240 6% 25%));
-  border-radius: 999px;
-  transition: background-color 120ms ease;
-}
-.easy-agent-scrollbar:hover .easy-agent-scrollbar-thumb {
-  background-color: hsl(var(--muted-foreground, 240 5% 64%));
-}
