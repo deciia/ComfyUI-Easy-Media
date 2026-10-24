@@ -7,6 +7,7 @@ import { PromptContentEditor, type PromptReferenceResource } from './PromptConte
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { type WorkspaceSubject } from './WorkspacePanels'
 import { AssetsTab } from './AssetsTab'
+import { AssetsSharedBrowser } from './AssetsSharedBrowser'
 import { PromptQualityBar } from './PromptQualityBar'
 import { ReferenceBar } from './ReferenceBar'
 import { DirectorSettingsModal } from './DirectorSettingsModal'
@@ -625,6 +626,7 @@ export function PromptEnhancerModal({
   const [error, setError] = useState('')
   const [failures, setFailures] = useState<string[]>([])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('storyboard')
+  const [assetsRailTab, setAssetsRailTab] = useState<'shared' | 'ai'>('shared')
   const [projectName, setProjectName] = useState(() => {
     try {
       return (globalThis as unknown as { __easyMediaWorkspaceProject?: { name: string } })
@@ -1802,44 +1804,107 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               />
             )}
             </div>
-            <AgentRail
-              projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
-              tab={workspaceTab}
-              frameRate={workspaceFrameRate}
-              ratio={(() => {
-                const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
-                try { return summary?.().ratio || '16:9' } catch { return '16:9' }
-              })()}
-              segments={workspaceSegments.map((segment, index) => {
-                const content = segment.content as unknown as { user_prompt?: string; images?: Array<{ file_name?: string; name?: string }> }
-                const promptText = String(content?.user_prompt ?? '')
-                const label = promptText.split('\n').find((line) => line.trim())?.replace(/<[^>]+>/g, '').trim().slice(0, 18) || `镜头 ${index + 1}`
-                return {
-                  index: index + 1,
-                  name: label,
-                  durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
-                  images: (content?.images ?? []).map((item) => String(item?.file_name ?? item?.name ?? '')).filter(Boolean),
-                  hasPrompt: promptText.trim().length > 0,
-                }
-              })}
-              subjects={workspaceSubjects.map((subject) => ({ name: subject.name, desc: String(subject.description ?? '').slice(0, 120) }))}
-              audioTracks={(() => {
-                const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { audio: string[] } }).__easyMediaTimelineSummary
-                try { return summary?.().audio ?? [] } catch { return [] }
-              })()}
-              resources={plannedResources.map((resource) => ({ name: resource.name }))}
-              onApplyPlan={(next) => {
-                const registry = (globalThis as unknown as {
-                  __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
-                }).__easyMediaApplyStoryboard
-                if (!registry) return false
-                return registry(next.segments.map((segment) => ({
-                  name: segment.name,
-                  durationFrames: segment.duration_frames,
-                  brief: formatPlanSegmentBrief(segment as never),
-                })))
-              }}
-            />
+            {workspaceTab === 'assets' ? (
+              <div className="flex min-h-0 w-[380px] shrink-0 flex-col" style={{ borderLeft: `1px solid ${BORDER}` }}>
+                <div className="flex shrink-0 gap-1 p-2 pb-0 text-[11px]">
+                  {([['shared', '共享资源'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="rounded px-2 py-0.5"
+                      style={{ border: `1px solid ${assetsRailTab === key ? 'hsl(var(--primary, 199 89% 48%))' : BORDER}`, color: assetsRailTab === key ? 'hsl(var(--primary, 199 89% 48%))' : undefined }}
+                      onClick={() => setAssetsRailTab(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: assetsRailTab === 'shared' ? undefined : 'none' }}>
+                  <AssetsSharedBrowser onAdd={(item) => onAddSharedResource?.(item as never)} />
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: assetsRailTab === 'ai' ? undefined : 'none' }}>
+              <AgentRail
+    width="fill"
+    active={assetsRailTab === 'ai'}
+                projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
+                tab={workspaceTab}
+                frameRate={workspaceFrameRate}
+                ratio={(() => {
+                  const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
+                  try { return summary?.().ratio || '16:9' } catch { return '16:9' }
+                })()}
+                segments={workspaceSegments.map((segment, index) => {
+                  const content = segment.content as unknown as { user_prompt?: string; images?: Array<{ file_name?: string; name?: string }> }
+                  const promptText = String(content?.user_prompt ?? '')
+                  const label = promptText.split('\n').find((line) => line.trim())?.replace(/<[^>]+>/g, '').trim().slice(0, 18) || `镜头 ${index + 1}`
+                  return {
+                    index: index + 1,
+                    name: label,
+                    durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
+                    images: (content?.images ?? []).map((item) => String(item?.file_name ?? item?.name ?? '')).filter(Boolean),
+                    hasPrompt: promptText.trim().length > 0,
+                  }
+                })}
+                subjects={workspaceSubjects.map((subject) => ({ name: subject.name, desc: String(subject.description ?? '').slice(0, 120) }))}
+                audioTracks={(() => {
+                  const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { audio: string[] } }).__easyMediaTimelineSummary
+                  try { return summary?.().audio ?? [] } catch { return [] }
+                })()}
+                resources={plannedResources.map((resource) => ({ name: resource.name }))}
+                onApplyPlan={(next) => {
+                  const registry = (globalThis as unknown as {
+                    __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
+                  }).__easyMediaApplyStoryboard
+                  if (!registry) return false
+                  return registry(next.segments.map((segment) => ({
+                    name: segment.name,
+                    durationFrames: segment.duration_frames,
+                    brief: formatPlanSegmentBrief(segment as never),
+                  })))
+                }}
+              />
+                </div>
+              </div>
+            ) : (
+              <AgentRail
+                projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
+                tab={workspaceTab}
+                frameRate={workspaceFrameRate}
+                ratio={(() => {
+                  const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
+                  try { return summary?.().ratio || '16:9' } catch { return '16:9' }
+                })()}
+                segments={workspaceSegments.map((segment, index) => {
+                  const content = segment.content as unknown as { user_prompt?: string; images?: Array<{ file_name?: string; name?: string }> }
+                  const promptText = String(content?.user_prompt ?? '')
+                  const label = promptText.split('\n').find((line) => line.trim())?.replace(/<[^>]+>/g, '').trim().slice(0, 18) || `镜头 ${index + 1}`
+                  return {
+                    index: index + 1,
+                    name: label,
+                    durationSeconds: Math.max(0, segment.end_frame - segment.start_frame) / Math.max(1, workspaceFrameRate),
+                    images: (content?.images ?? []).map((item) => String(item?.file_name ?? item?.name ?? '')).filter(Boolean),
+                    hasPrompt: promptText.trim().length > 0,
+                  }
+                })}
+                subjects={workspaceSubjects.map((subject) => ({ name: subject.name, desc: String(subject.description ?? '').slice(0, 120) }))}
+                audioTracks={(() => {
+                  const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { audio: string[] } }).__easyMediaTimelineSummary
+                  try { return summary?.().audio ?? [] } catch { return [] }
+                })()}
+                resources={plannedResources.map((resource) => ({ name: resource.name }))}
+                onApplyPlan={(next) => {
+                  const registry = (globalThis as unknown as {
+                    __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
+                  }).__easyMediaApplyStoryboard
+                  if (!registry) return false
+                  return registry(next.segments.map((segment) => ({
+                    name: segment.name,
+                    durationFrames: segment.duration_frames,
+                    brief: formatPlanSegmentBrief(segment as never),
+                  })))
+                }}
+              />
+            )}
           </div>
         ) : (
           <>
