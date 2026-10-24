@@ -85,6 +85,22 @@ def _compact_context(context: dict | None) -> dict:
             }
         )
     plan = context.get("plan") or {}
+    plan_segments = []
+    for index, segment in enumerate((plan.get("segments") or [])[:40]):
+        if not isinstance(segment, dict):
+            continue
+        plan_segments.append(
+            {
+                "index": segment.get("index") or index + 1,
+                "name": str(segment.get("name") or ""),
+                "duration": segment.get("duration_seconds"),
+                "beat": str(segment.get("beat") or "")[:40],
+                "shots": segment.get("shots"),
+                "has_prompt_a": segment.get("has_prompt_a"),
+                "final_a_len": segment.get("final_a_len"),
+                "task_mode": segment.get("task_mode"),
+            }
+        )
     return {
         "project": context.get("project") or "",
         "frame_rate": context.get("frame_rate"),
@@ -94,6 +110,7 @@ def _compact_context(context: dict | None) -> dict:
             "title": plan.get("title"),
             "total_seconds": plan.get("total_seconds"),
             "count": len(plan.get("segments") or []),
+            "segments": plan_segments,
         }
         if plan
         else None,

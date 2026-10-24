@@ -490,6 +490,49 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'get_generation_status',
+        description: '查询 ComfyUI 队列与最近生成结果（运行中/排队数/最近记录），用于判断生成是否完成',
+        parameters: {
+          type: 'object',
+          properties: { limit: { type: 'number', description: '最近记录条数，默认 3' } },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_resources_batch',
+        description: '批量生成资源（最多 6 项，串行执行）。每项独立失败，不会中断其余项',
+        parameters: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              description: '每项：{type,name,prompt,text,duration,reference_file,profile}',
+              items: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  type: { type: 'string', enum: ['image', 'voice', 'music', 'refvideo'] },
+                  name: { type: 'string' },
+                  prompt: { type: 'string' },
+                  text: { type: 'string' },
+                  duration: { type: 'number' },
+                  reference_file: { type: 'string' },
+                  profile: { type: 'string' },
+                },
+                required: ['type', 'name'],
+              },
+            },
+          },
+          required: ['items'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'ask_user',
         description: '向用户提问并给出选项（当需要用户拍板时使用）',
         parameters: {
@@ -830,6 +873,71 @@ export function AgentRail({
         return { error: `提交失败：${error instanceof Error ? error.message : String(error)}` }
       }
     }
+    if (name === 'get_generation_status') {
+      const limit = Math.max(1, Math.min(10, Number(args.limit ?? 3) || 3))
+      const [queueResponse, historyResponse] = await Promise.all([
+        fetch('/queue').catch(() => null),
+        fetch(`/history?max_items=${limit}`).catch(() => null),
+      ])
+      const queue = queueResponse ? await queueResponse.json().catch(() => ({})) : {}
+      const historyData = historyResponse ? await historyResponse.json().catch(() => ({})) : {}
+      const running = (queue.queue_running ?? []).length
+      const pending = (queue.queue_pending ?? []).length
+      const recent = Object.entries(historyData).map(([promptId, entry]) => {
+        const record = entry as Record<string, unknown>
+        const status = (record.status ?? {}) as Record<string, unknown>
+        const outputs = (record.outputs ?? {}) as Record<string, unknown>
+        const files: string[] = []
+        for (const nodeOutput of Object.values(outputs)) {
+          const payload = nodeOutput as Record<string, unknown>
+          for (const key of ['images', 'videos', 'gifs', 'audio']) {
+            for (const item of (payload[key] ?? []) as Array<Record<string, unknown>>) {
+              if (item?.filename) files.push(String(item.filename))
+            }
+          }
+        }
+        return {
+          prompt_id: promptId,
+          status: status.status_str ?? 'unknown',
+          completed: Boolean(status.completed),
+          files: files.slice(0, 6),
+        }
+      })
+      return {
+        running,
+        pending,
+        queue_empty: running === 0 && pending === 0,
+        recent,
+        hint: running === 0 && pending === 0 ? '队列空闲，可以开始新的生成' : '队列忙，等待或稍后查询',
+      }
+    }
+    if (name === 'generate_resources_batch') {
+      const rawItems = Array.isArray(args.items) ? args.items : []
+      const items = rawItems.filter((item) => item && typeof item === 'object').slice(0, 6) as Array<Record<string, unknown>>
+      if (!items.length) return { error: 'items 不能为空' }
+      const results: Array<Record<string, unknown>> = []
+      for (const item of items) {
+        if (abortRef.current?.signal.aborted) {
+          results.push({ name: item.name, error: '已取消' })
+          break
+        }
+        const single = await executeAgentTool('generate_resource', item)
+        results.push({
+          name: String(item.name ?? ''),
+          type: String(item.type ?? ''),
+          ...single,
+        })
+      }
+      const generated = results.filter((item) => !item.error).length
+      return {
+        ok: generated > 0,
+        generated,
+        failed: results.length - generated,
+        total: items.length,
+        results,
+        note: generated > 0 ? '已生成并挂到资源池，可继续 bind_resources 绑定' : '全部失败，检查 resource_workflows.json 配置',
+      }
+    }
     if (name === 'generate_all_prompts') {
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
       const requested = Array.isArray(args.indices) ? args.indices.map((item) => Number(item)) : null
@@ -1039,7 +1147,7 @@ export function AgentRail({
   }
   const activeReplyRef = useRef<string>('')
 
-  /** D-P1：前端驱动的工具循环（最多 24 步） */
+  /** D-P1：前端驱动的工具循环（最多 40 步） */
   async function sendStepLoop() {
     const text = input.trim()
     if (!text || busy) return
@@ -1087,7 +1195,23 @@ export function AgentRail({
         context.frame_rate = frameRate
         context.ratio = ratio
       }
-      if (agent.includePlan) context.plan = plan
+      if (agent.includePlan && plan) {
+        const planLike = plan as unknown as { title?: string; total_seconds?: number; segments?: Array<Record<string, unknown>> }
+        context.plan = {
+          title: planLike.title ?? '',
+          total_seconds: planLike.total_seconds ?? 0,
+          segments: (planLike.segments ?? []).slice(0, 40).map((segment, i) => ({
+            index: i + 1,
+            name: String(segment.name ?? ''),
+            duration_seconds: Number(segment.duration_seconds ?? 0),
+            beat: String(segment.beat ?? '').slice(0, 40),
+            shots: Array.isArray(segment.shots) ? segment.shots.length : 0,
+            has_prompt_a: Boolean(String(segment.promptA ?? '').trim()),
+            final_a_len: String(segment.finalA ?? '').length,
+            task_mode: String((segment.settings as Record<string, unknown> | undefined)?.taskType ?? ''),
+          })),
+        }
+      }
       if (agent.includeTrackData) {
         context.segments = segments.map((segment) => ({
           index: segment.index,
@@ -1122,7 +1246,7 @@ export function AgentRail({
     const chatMessages: Array<Record<string, unknown>> = [...history]
     let stepCount = 0
     try {
-      for (let step = 0; step < 24; step += 1) {
+      for (let step = 0; step < 40; step += 1) {
         if (controller.signal.aborted) break
         stepCount = step + 1
         const response = await fetch('/easy-media/agent/step', {
@@ -1168,7 +1292,7 @@ export function AgentRail({
               status: result.error ? 'error' : 'success',
               result: JSON.stringify(result).slice(0, 2000),
             })
-            chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 4000) })
+            chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 6000) })
           } catch (toolError) {
             const message = toolError instanceof Error ? toolError.message : String(toolError)
             upsertToolCall({ id: call.id, name: call.name, args: parsedArgs, status: 'error', result: message })
