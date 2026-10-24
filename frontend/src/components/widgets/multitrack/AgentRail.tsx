@@ -758,9 +758,10 @@ export function AgentRail({
         body: JSON.stringify({
           type: resourceType,
           params: {
+            name: String(args.name ?? 'res'),
             prompt: String(args.prompt ?? ''),
             text: String(args.text ?? ''),
-            duration: args.duration ?? '',
+            duration: Number(args.duration ?? 5) || 5,
             negative: String(args.negative ?? ''),
             reference_file: String(args.reference_file ?? ''),
             reference_image: String(args.reference_file ?? ''),

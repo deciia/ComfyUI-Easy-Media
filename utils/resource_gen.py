@@ -125,7 +125,11 @@ def build_prompt_payload(entry: dict, params: dict) -> dict:
             raise ResourceGenError(f"工作流里没有节点 {node_id}")
         node_inputs = node.setdefault("inputs", {})
         if isinstance(node_inputs, dict):
-            node_inputs[field] = _apply_template(value, params)
+            resolved = _apply_template(value, params)
+            # 空值（未传的参考图/参考音频等）不覆盖原工作流默认，避免把空串塞进 LoadImage
+            if isinstance(resolved, str) and resolved.strip() == "" and isinstance(value, str) and "{{" in value:
+                continue
+            node_inputs[field] = resolved
     return workflow
 
 
