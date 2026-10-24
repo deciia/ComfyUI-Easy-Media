@@ -116,6 +116,35 @@ def build_prompt_payload(entry: dict, params: dict) -> dict:
     if not isinstance(inputs_map, dict):
         raise ResourceGenError("inputs 必须是对象")
 
+    # 可选：注入标准保存节点（绕开第三方保存节点的 temp 预览/异步落盘问题）
+    save_node = entry.get("save_node")
+    injected_output_id = ""
+    if isinstance(save_node, dict):
+        source = save_node.get("source")
+        if not (isinstance(source, (list, tuple)) and len(source) == 2):
+            raise ResourceGenError("save_node.source 必须是 [节点id, 输出槽位]")
+        injected_output_id = str(save_node.get("id") or "9001")
+        while injected_output_id in workflow:
+            injected_output_id = str(int(injected_output_id) + 1)
+        prefix = _apply_template(str(save_node.get("prefix") or "easy_media/generated/res"), params)
+        node_class = str(save_node.get("class_type") or "SaveImage")
+        input_key = "filename_prefix"
+        inputs_payload: dict = {}
+        if node_class == "SaveImage":
+            inputs_payload = {"images": [str(source[0]), int(source[1])], input_key: prefix}
+        elif node_class == "SaveVideo":
+            inputs_payload = {
+                "video": [str(source[0]), int(source[1])],
+                input_key: prefix,
+                "format": "auto",
+                "codec": "auto",
+            }
+        elif node_class == "SaveAudio":
+            inputs_payload = {"audio": [str(source[0]), int(source[1])], input_key: prefix}
+        else:
+            inputs_payload = {"images": [str(source[0]), int(source[1])], input_key: prefix}
+        workflow[injected_output_id] = {"class_type": node_class, "inputs": inputs_payload}
+
     for dotted, value in inputs_map.items():
         node_id, _, field = str(dotted).partition(".")
         if not node_id or not field:
@@ -184,6 +213,7 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
             if not isinstance(preferred_nodes, list):
                 single = str(entry.get("output") or "").strip()
                 preferred_nodes = [single] if single else []
+            preferred_nodes = ([injected_output_id] if injected_output_id else []) + list(preferred_nodes)
             ordered = [str(node_id) for node_id in preferred_nodes if str(node_id) in outputs]
             ordered += [key for key in outputs if key not in ordered]
             def _root_dir(kind: str) -> Path:
