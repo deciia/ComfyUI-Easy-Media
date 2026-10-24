@@ -372,27 +372,6 @@ export function PromptEnhancerModal({
   const [finalA, setFinalA] = useState('')
   const [finalB, setFinalB] = useState('')
   const [resultTab, setResultTab] = useState<'preview' | 'track' | 'ai'>('preview')
-  const [railWidth, setRailWidth] = useState<number>(() => {
-    const saved = Number(globalThis.localStorage?.getItem('easy-media-enhance-rail-width') || 0)
-    return saved >= 320 && saved <= 720 ? saved : 440
-  })
-  const railDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
-  useEffect(() => {
-    function onMove(event: MouseEvent) {
-      const drag = railDragRef.current
-      if (!drag) return
-      const next = Math.max(320, Math.min(720, drag.startWidth + (drag.startX - event.clientX)))
-      setRailWidth(next)
-      try { globalThis.localStorage?.setItem('easy-media-enhance-rail-width', String(Math.round(next))) } catch { /* ignore */ }
-    }
-    function onUp() { railDragRef.current = null }
-    globalThis.addEventListener?.('mousemove', onMove)
-    globalThis.addEventListener?.('mouseup', onUp)
-    return () => {
-      globalThis.removeEventListener?.('mousemove', onMove)
-      globalThis.removeEventListener?.('mouseup', onUp)
-    }
-  }, [])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsProject = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
@@ -1720,7 +1699,7 @@ export function PromptEnhancerModal({
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: `270px minmax(0, 1fr) 6px ${railWidth}px`, flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) 380px', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 {PRESET_GROUPS.map((group) => (
@@ -1849,6 +1828,33 @@ export function PromptEnhancerModal({
 
                 <div className="flex items-center justify-between gap-2">
                   <span className={labelClass}>片段提示词（A/B 原稿，可粗）</span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      title="把 A 栏的片段提示词直接作为最终提示词"
+                      disabled={!activePrompt.trim()}
+                      onClick={() => setFinalDraft(activePrompt)}
+                    >
+                      直接导入➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating || !activePrompt.trim()}
+                      onClick={() => void handleGenerate('English', activePrompt)}
+                    >
+                      生成英文➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating || !activePrompt.trim()}
+                      onClick={() => void handleGenerate('中文', activePrompt)}
+                    >
+                      生成中文➡️
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1">
                   <span className="text-[11px] text-muted-foreground">分镜脚本段</span>
@@ -2023,19 +2029,6 @@ export function PromptEnhancerModal({
                 </div>
               </div>
 
-              <div
-                title="拖动调整右栏宽度（双击复位 440）"
-                style={{ cursor: 'col-resize', background: BORDER, opacity: 0.55 }}
-                onMouseDown={(event) => {
-                  railDragRef.current = { startX: event.clientX, startWidth: railWidth }
-                  event.preventDefault()
-                }}
-                onDoubleClick={() => {
-                  setRailWidth(440)
-                  try { globalThis.localStorage?.setItem('easy-media-enhance-rail-width', '440') } catch { /* ignore */ }
-                }}
-              />
-
               {/* 右栏：结果（可编辑，按段拆分） */}
               <div className="flex min-h-0 min-w-0 flex-col gap-1 p-2">
                 <div className="flex items-center justify-between">
@@ -2054,19 +2047,6 @@ export function PromptEnhancerModal({
                         {label}
                       </button>
                     ))}
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="secondary"
-                      className="h-6 px-2 text-[11px]"
-                      title="把 A 栏的片段提示词直接作为最终提示词"
-                      disabled={!activePrompt.trim()}
-                      onClick={() => setFinalDraft(activePrompt)}
-                    >
-                      <span className="hidden xl:inline">从片段提示词导入</span><span className="xl:hidden">导入</span>
-                    </Button>
-                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !activePrompt.trim()} onClick={() => void handleGenerate('English', activePrompt)}>生成英文</Button>
-                    <Button variant="secondary" className="h-6 px-2 text-[11px]" disabled={busy || translating || !activePrompt.trim()} onClick={() => void handleGenerate('中文', activePrompt)}>生成中文</Button>
                   </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
@@ -2180,7 +2160,6 @@ export function PromptEnhancerModal({
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
                   <AgentRail
-                    width={railWidth}
                     projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
                     tab="enhance"
                     segments={segments.map((item, index) => ({ index, name: item.label, durationSeconds: 0, hasPrompt: Boolean((item as unknown as { prompt?: string }).prompt) }))}
