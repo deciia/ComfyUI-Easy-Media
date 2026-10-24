@@ -2264,6 +2264,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ display: resultTab === 'ai' ? undefined : 'none' }}>
                   <AgentRail
+                    active={resultTab === 'ai'}
                     projectKey={(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'}
                     tab="enhance"
                     segments={segments.map((item, index) => ({ index, name: item.label, durationSeconds: 0, hasPrompt: Boolean((item as unknown as { prompt?: string }).prompt) }))}
