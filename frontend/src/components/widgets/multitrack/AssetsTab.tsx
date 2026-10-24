@@ -394,11 +394,21 @@ export function AssetsTab({
                           setSelectedChildId(child.id)
                         }}
                       >
+                        <span className="pointer-events-none absolute text-lg">
+                          {type === 'Audio' ? '♪' : type === 'Video' ? '▶' : '🖼'}
+                        </span>
                         {type === 'Picture' && viewUrl ? (
-                          <img src={viewUrl} alt={child.name} className="h-full w-full object-cover" loading="lazy" />
-                        ) : (
-                          <span className="text-lg">{type === 'Audio' ? '♪' : type === 'Video' ? '▶' : '🖼'}</span>
-                        )}
+                          <img
+                            src={viewUrl}
+                            alt={child.name}
+                            className="relative h-full w-full object-cover"
+                            loading="lazy"
+                            onError={(event) => { event.currentTarget.style.display = 'none' }}
+                          />
+                        ) : null}
+                        {type === 'Picture' && !viewUrl ? (
+                          <span className="absolute bottom-0.5 rounded bg-black/60 px-1 text-[8px] text-amber-300">缺图</span>
+                        ) : null}
                       </button>
                       <button
                         type="button"
