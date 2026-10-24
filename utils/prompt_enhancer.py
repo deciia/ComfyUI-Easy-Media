@@ -123,7 +123,16 @@ def masked_config(config: dict) -> dict:
 
 def resolve_settings(config: dict | None = None) -> ProviderSettings:
     data = config if config is not None else load_config()
-    provider = str(data.get("provider") or DEFAULT_PROVIDER)
+    raw_provider = str(data.get("provider") or "").strip()
+    if not raw_provider:
+        # 配置文件里 provider 被显式清空时不要静默回落到 deepseek，
+        # 否则会拿别家的 key 去请求 deepseek 端点，报 401 但看不出原因
+        if data.get("api_key") or data.get("model") or data.get("base_url"):
+            raise PromptEnhancerError(
+                "AI 模型配置不完整：缺少 provider（提供方）。请打开 导演台设置 → API，重新选择提供方与模型后保存。"
+            )
+        raw_provider = DEFAULT_PROVIDER
+    provider = raw_provider
     defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS[DEFAULT_PROVIDER])
     base_url = normalize_endpoint(provider, str(data.get("base_url") or defaults["base_url"]))
     model = str(data.get("model") or defaults["model"])
