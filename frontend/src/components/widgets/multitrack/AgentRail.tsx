@@ -273,6 +273,14 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'list_task_track',
+        description: '读取任务轨当前片段（帧范围/任务类型/是否有提示词），用于确认「应用到任务轨」是否生效',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_segments',
         description: '列出分镜脚本所有段（序号/名称/时长/任务类型/是否已写提示词/绑定数量）',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -986,6 +994,24 @@ export function AgentRail({
         note: '分镜已写入项目，可在「分镜编排」页查看，或让我继续完善主体与资源、生成提示词',
       }
     }
+    if (name === 'list_task_track') {
+      const registry = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      if (!registry) return { error: '没有可用的多轨编辑器上下文（弹窗可能不是从节点打开）' }
+      let summary: { tasks?: Array<Record<string, unknown>> } = {}
+      try {
+        summary = registry() ?? {}
+      } catch (error) {
+        return { error: `读取任务轨失败：${error instanceof Error ? error.message : String(error)}` }
+      }
+      const tasks = summary.tasks ?? []
+      return {
+        count: tasks.length,
+        tasks,
+        note: tasks.length ? '任务轨已有片段' : '任务轨为空，需要先 apply_storyboard',
+      }
+    }
     if (name === 'list_segments') {
       return {
         count: segments.length,
@@ -1137,11 +1163,25 @@ export function AgentRail({
           videos.push({ token: `<Video ${videoNo}>`, name: resource.name })
         }
       }
+      // 名称 → 令牌：A 稿里写「老赵」也能落成 <Subject 1>
+      const nameToToken = new Map<string, string>()
+      for (const entry of subjectList) {
+        nameToToken.set(String(entry.name ?? ''), String(entry.token ?? ''))
+      }
+      for (const entry of [...pictures, ...audios, ...videos]) {
+        nameToToken.set(entry.name, entry.token)
+      }
+      let materializedBrief = sourcePrompt
+      for (const [name, token] of [...nameToToken.entries()].sort((a, b) => b[0].length - a[0].length)) {
+        if (!name.trim() || !token) continue
+        materializedBrief = materializedBrief.split(`〔${name}〕`).join(token)
+        materializedBrief = materializedBrief.split(name).join(token)
+      }
       const response = await fetch('/easy-media/prompt-studio/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          brief: sourcePrompt,
+          brief: materializedBrief,
           options: { ...mapped, duration_seconds: duration, output_language: String(args.language ?? '中文'), task_label: String(settings.taskType ?? '') },
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,

@@ -1280,10 +1280,27 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     openWorkspaceRef.current = openWorkspace
     const registry = globalThis as unknown as {
       __easyMediaOpenWorkspace?: () => void
-      __easyMediaTimelineSummary?: () => { ratio: string; audio: string[]; video: string[] }
+      __easyMediaTimelineSummary?: () => {
+    ratio: string
+    audio: string[]
+    video: string[]
+    tasks?: Array<Record<string, unknown>>
+  }
     }
     registry.__easyMediaOpenWorkspace = openWorkspace
     registry.__easyMediaTimelineSummary = () => ({
+      tasks: (data.tracks.find((track) => track.type === 'task')?.segments ?? []).map((segment, index) => {
+        const content = (segment.content ?? {}) as unknown as Record<string, unknown>
+        return {
+          index: index + 1,
+          start_frame: segment.start_frame,
+          end_frame: segment.end_frame,
+          stable_key: content.stable_key ?? '',
+          task_mode: content.task_mode ?? '',
+          has_prompt: Boolean(String(content.user_prompt ?? '').trim()),
+          prompt_len: String(content.user_prompt ?? '').length,
+        }
+      }),
       ratio: String(resolutionRef.current?.aspect_ratio || ''),
       audio: data.tracks
         .filter((track) => track.type === 'audio')
