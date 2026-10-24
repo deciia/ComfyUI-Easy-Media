@@ -134,6 +134,10 @@ export interface WorkspaceCache {
   resources?: ProjectResource[]
   /** ④ 提示词增强的引用绑定：键 `${segmentId}:${variant}` -> 资源 id 列表 */
   bindings?: Record<string, string[]>
+  /** 智能体执行清单：计划 → 执行 → 勾选 */
+  todos?: Array<{ text: string; status: string }>
+  /** 项目长期记忆（key → value），注入助手上下文 */
+  notes?: Record<string, string>
 }
 
 const cache = new Map<string, WorkspaceCache>()

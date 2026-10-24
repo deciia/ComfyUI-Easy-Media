@@ -273,6 +273,67 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'update_todos',
+        description: '维护本次任务的执行清单（计划→执行→勾选），跨步可见，用于多阶段工作',
+        parameters: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              description: '清单项：{text, status}，status = pending | doing | done',
+              items: {
+                type: 'object',
+                additionalProperties: true,
+                properties: {
+                  text: { type: 'string' },
+                  status: { type: 'string', enum: ['pending', 'doing', 'done'] },
+                },
+                required: ['text'],
+              },
+            },
+          },
+          required: ['items'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'remember',
+        description: '把项目级事实写入长期记忆（如素材路径、风格偏好、人物设定），后续会话自动带上',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: '短标识，如 老赵音色 / 画风偏好' },
+            value: { type: 'string', description: '具体内容' },
+          },
+          required: ['key', 'value'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'recall',
+        description: '读取项目长期记忆（不传 query 返回全部）',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'verify_project',
+        description: '自检项目一致性：脚本段 vs 任务轨、A稿/终稿缺失、资源缺文件、主体无子资源、绑定缺失',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_projects',
         description: '列出已存在的项目（可切换/参考）',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1045,6 +1106,95 @@ export function AgentRail({
         note: '分镜已写入项目，可在「分镜编排」页查看，或让我继续完善主体与资源、生成提示词',
       }
     }
+    if (name === 'update_todos') {
+      const rawItems = Array.isArray(args.items) ? args.items : []
+      const items = rawItems
+        .filter((item) => item && typeof item === 'object')
+        .slice(0, 24)
+        .map((item) => ({
+          text: String((item as Record<string, unknown>).text ?? '').slice(0, 120),
+          status: (['pending', 'doing', 'done'] as const).includes(String((item as Record<string, unknown>).status ?? '') as never)
+            ? String((item as Record<string, unknown>).status)
+            : 'pending',
+        }))
+      if (!items.length) return { error: 'items 不能为空' }
+      writeWorkspace(projectKey, { todos: items } as never)
+      return {
+        ok: true,
+        total: items.length,
+        done: items.filter((item) => item.status === 'done').length,
+        next: items.find((item) => item.status !== 'done')?.text ?? '全部完成',
+      }
+    }
+    if (name === 'remember') {
+      const key = String(args.key ?? '').trim().slice(0, 60)
+      const value = String(args.value ?? '').trim().slice(0, 800)
+      if (!key || !value) return { error: 'key 与 value 必填' }
+      const notes = { ...((readWorkspace(projectKey).notes ?? {}) as Record<string, string>), [key]: value }
+      writeWorkspace(projectKey, { notes } as never)
+      return { ok: true, key, total: Object.keys(notes).length }
+    }
+    if (name === 'recall') {
+      const notes = (readWorkspace(projectKey).notes ?? {}) as Record<string, string>
+      const query = String(args.query ?? '').trim().toLowerCase()
+      const entries = Object.entries(notes)
+        .filter(([key, value]) => !query || key.toLowerCase().includes(query) || value.toLowerCase().includes(query))
+        .slice(0, 30)
+        .map(([key, value]) => ({ key, value }))
+      return { count: entries.length, notes: entries }
+    }
+    if (name === 'verify_project') {
+      const planNow2 = readPlan() as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
+      const scriptSegments = planNow2?.segments ?? []
+      const trackSegments = segments
+      const pool = readResources(projectKey) as ProjectResource[]
+      const issues: Array<{ level: string; where: string; message: string }> = []
+      if (scriptSegments.length && trackSegments.length && scriptSegments.length !== trackSegments.length) {
+        issues.push({
+          level: 'warn',
+          where: '任务轨',
+          message: `脚本 ${scriptSegments.length} 段 vs 任务轨 ${trackSegments.length} 段，需重新 apply_storyboard`,
+        })
+      }
+      scriptSegments.forEach((segment, i) => {
+        const s = segment as Record<string, unknown>
+        const name = String(s.name ?? `段 ${i + 1}`)
+        if (!String(s.promptA ?? '').trim()) {
+          issues.push({ level: 'warn', where: name, message: 'A 稿为空（提示词增强无法生成）' })
+        }
+        if (!String(s.finalA ?? '').trim()) {
+          issues.push({ level: 'info', where: name, message: '终稿为空（可 generate_all_prompts）' })
+        }
+        if (!readBindings(projectKey, `script-${i + 1}:a`).length) {
+          issues.push({ level: 'info', where: name, message: '未绑定任何主体/资源' })
+        }
+      })
+      for (const resource of pool) {
+        if (resource.type === 'Subject') {
+          if (!(resource.childResourceIds ?? []).length) {
+            issues.push({ level: 'info', where: `主体 ${resource.name}`, message: '没有挂参考图/音色' })
+          }
+          continue
+        }
+        const hasFile = Boolean(resource.imageFile || resource.audioFile || resource.videoFile)
+        if (!hasFile) {
+          issues.push({ level: 'warn', where: `资源 ${resource.name}`, message: '缺文件（status=' + String(resource.status ?? '?') + '）' })
+        }
+      }
+      trackSegments.forEach((segment, i) => {
+        if (!String((segment as { hasPrompt?: boolean }).hasPrompt)) {
+          issues.push({ level: 'info', where: `任务轨段 ${i + 1}`, message: '没有提示词' })
+        }
+      })
+      const counts = {
+        scripts: scriptSegments.length,
+        tracks: trackSegments.length,
+        resources: pool.filter((item) => item.type !== 'Subject').length,
+        subjects: pool.filter((item) => item.type === 'Subject').length,
+        warn: issues.filter((item) => item.level === 'warn').length,
+      }
+      return { ok: counts.warn === 0, counts, issues: issues.slice(0, 30) }
+    }
     if (name === 'list_projects') {
       const response = await fetch('/easy-media/project/timelines')
       const data = await response.json().catch(() => ({}))
@@ -1449,6 +1599,9 @@ export function AgentRail({
     }
 
     const buildContext = () => {
+      const workspaceNow = readWorkspace(projectKey)
+      const todos = (workspaceNow.todos ?? []) as Array<{ text?: string; status?: string }>
+      const notes = (workspaceNow.notes ?? {}) as Record<string, string>
       const agent = readDirectorSettings(projectKey).agent
       const context: Record<string, unknown> = { project: projectKey, tab }
       if (agent.includeNodeSettings) {
@@ -1496,6 +1649,13 @@ export function AgentRail({
             .map((id) => (readWorkspace(projectKey).resources ?? []).find((item) => item.id === id)?.name)
             .filter(Boolean),
         }))
+      }
+      if (todos.length) {
+        context.todos = todos.slice(0, 24).map((item) => ({ text: String(item.text ?? ''), status: String(item.status ?? 'pending') }))
+      }
+      const noteEntries = Object.entries(notes).slice(0, 20)
+      if (noteEntries.length) {
+        context.notes = Object.fromEntries(noteEntries)
       }
       return context
     }

@@ -126,6 +126,15 @@ def _compact_context(context: dict | None) -> dict:
         "planned_resources": [
             str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("planned_resources") or [])
         ][:30],
+        "todos": [
+            {"text": str(item.get("text") or "")[:120], "status": str(item.get("status") or "pending")}
+            for item in (context.get("todos") or [])
+            if isinstance(item, dict)
+        ][:24],
+        "notes": {
+            str(key)[:60]: str(value)[:400]
+            for key, value in list((context.get("notes") or {}).items())[:20]
+        },
     }
 
 
