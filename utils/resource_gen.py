@@ -85,6 +85,22 @@ def _apply_template(value: Any, params: dict) -> Any:
     return text
 
 
+def resolve_entry(entry: dict, params: dict) -> dict:
+    """按 params.profile 选择档位；无档位则用顶层配置。"""
+    profiles = entry.get("profiles")
+    if isinstance(profiles, dict) and profiles:
+        name = str(params.get("profile") or entry.get("default_profile") or "").strip()
+        if not name:
+            name = next(iter(profiles))
+        profile = profiles.get(name)
+        if not isinstance(profile, dict):
+            raise ResourceGenError(f"没有该档位：{name}（可选：{', '.join(profiles)}）")
+        merged = {**entry, **profile}
+        merged.pop("profiles", None)
+        return merged
+    return entry
+
+
 def build_prompt_payload(entry: dict, params: dict) -> dict:
     workflow_raw = entry.get("workflow")
     if not workflow_raw:
@@ -92,7 +108,11 @@ def build_prompt_payload(entry: dict, params: dict) -> dict:
     workflow = json.loads(_resolve_workflow_path(workflow_raw).read_text(encoding="utf-8"))
     if not isinstance(workflow, dict):
         raise ResourceGenError("工作流必须是 API 格式 JSON（导出时选 Export (API)）")
-    inputs_map = entry.get("inputs") or {}
+    inputs_map = dict(entry.get("inputs") or {})
+    # 按次覆盖：params["inputs"] = {"246.prompt": "..."} 等
+    runtime_inputs = params.get("inputs")
+    if isinstance(runtime_inputs, dict):
+        inputs_map.update(runtime_inputs)
     if not isinstance(inputs_map, dict):
         raise ResourceGenError("inputs 必须是对象")
 
@@ -116,6 +136,7 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
     entry = (config.get("types") or {}).get(resource_type)
     if not isinstance(entry, dict):
         raise ResourceGenError(f"未配置 {resource_type} 的生成工作流，请先写 resource_workflows.json")
+    entry = resolve_entry(entry, params or {})
 
     workflow = build_prompt_payload(entry, params or {})
     client_id = uuid.uuid4().hex
@@ -154,8 +175,11 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                 messages = json.dumps(status.get("messages") or [], ensure_ascii=False)[:400]
                 raise ResourceGenError(f"生成失败：{messages}")
             outputs = entry_data.get("outputs") or {}
-            preferred = str(entry.get("output") or "")
-            ordered = [preferred] if preferred in outputs else []
+            preferred_nodes = entry.get("outputs")
+            if not isinstance(preferred_nodes, list):
+                single = str(entry.get("output") or "").strip()
+                preferred_nodes = [single] if single else []
+            ordered = [str(node_id) for node_id in preferred_nodes if str(node_id) in outputs]
             ordered += [key for key in outputs if key not in ordered]
             for node_id in ordered:
                 node_output = outputs.get(node_id) or {}
