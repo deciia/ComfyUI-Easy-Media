@@ -179,12 +179,52 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                 messages = json.dumps(status.get("messages") or [], ensure_ascii=False)[:400]
                 raise ResourceGenError(f"生成失败：{messages}")
             outputs = entry_data.get("outputs") or {}
+            submit_ts = time.time() - 5.0
             preferred_nodes = entry.get("outputs")
             if not isinstance(preferred_nodes, list):
                 single = str(entry.get("output") or "").strip()
                 preferred_nodes = [single] if single else []
             ordered = [str(node_id) for node_id in preferred_nodes if str(node_id) in outputs]
             ordered += [key for key in outputs if key not in ordered]
+            def _root_dir(kind: str) -> Path:
+                if kind == "input":
+                    return Path(folder_paths.get_input_directory())
+                if kind == "temp":
+                    return Path(folder_paths.get_temp_directory())
+                return Path(folder_paths.get_output_directory())
+
+            def _scan_saved_files(kind_filter: set[str]) -> Path | None:
+                """有些保存节点只把 temp 预览写进 history，正式文件落在 output 子目录：
+                按 mtime 扫描一次，优先选文件名含本次 name 的最新文件。"""
+                root = Path(folder_paths.get_output_directory())
+                wanted = str(params.get("name") or "").strip()
+                best: tuple[float, Path] | None = None
+                try:
+                    for candidate in root.rglob("*"):
+                        if not candidate.is_file():
+                            continue
+                        if candidate.suffix.lower() not in kind_filter:
+                            continue
+                        try:
+                            mtime = candidate.stat().st_mtime
+                        except OSError:
+                            continue
+                        if mtime < submit_ts:
+                            continue
+                        score = mtime + (10.0 if wanted and wanted in candidate.name else 0.0)
+                        if best is None or score > best[0]:
+                            best = (score, candidate)
+                except OSError:
+                    return None
+                return best[1] if best else None
+
+            extension_sets = {
+                "videos": {".mp4", ".webm", ".mov", ".mkv"},
+                "gifs": {".gif", ".webp"},
+                "images": {".png", ".jpg", ".jpeg", ".webp", ".bmp"},
+                "audio": {".wav", ".mp3", ".m4a", ".flac"},
+            }
+
             for node_id in ordered:
                 node_output = outputs.get(node_id) or {}
                 for key in ("videos", "gifs", "images", "audio"):
@@ -192,16 +232,32 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                         filename = item.get("filename") or item.get("file_name")
                         if not filename:
                             continue
-                        subfolder = item.get("subfolder") or ""
-                        kind = "input" if (item.get("type") == "input") else "output"
-                        abs_path = Path(folder_paths.get_output_directory()) / subfolder / filename
-                        if kind == "input":
-                            abs_path = Path(folder_paths.get_input_directory()) / subfolder / filename
+                        subfolder = str(item.get("subfolder") or "").replace("\\", "/")
+                        kind = str(item.get("type") or "output")
+                        if kind not in ("input", "temp", "output"):
+                            kind = "output"
+                        abs_path = _root_dir(kind) / subfolder / filename
+                        saved = _scan_saved_files(extension_sets.get(key, set()))
+                        if saved is not None:
+                            try:
+                                rel = saved.relative_to(Path(folder_paths.get_output_directory()))
+                                return {
+                                    "ok": True,
+                                    "prompt_id": prompt_id,
+                                    "file_name": saved.name,
+                                    "subfolder": str(rel.parent).replace("\\", "/").lstrip("."),
+                                    "root": "output",
+                                    "path": str(saved),
+                                    "kind": key,
+                                    "history_preview": filename,
+                                }
+                            except ValueError:
+                                pass
                         return {
                             "ok": True,
                             "prompt_id": prompt_id,
                             "file_name": filename,
-                            "subfolder": str(subfolder).replace("\\", "/"),
+                            "subfolder": subfolder,
                             "root": kind,
                             "path": str(abs_path),
                             "kind": key,
