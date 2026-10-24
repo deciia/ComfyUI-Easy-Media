@@ -238,6 +238,13 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                             kind = "output"
                         abs_path = _root_dir(kind) / subfolder / filename
                         saved = _scan_saved_files(extension_sets.get(key, set()))
+                        if saved is None and kind == "temp":
+                            # 保存型节点：temp 预览先入 history，正式文件约 1 秒后才落盘
+                            for _attempt in range(4):
+                                await asyncio.sleep(1.0)
+                                saved = _scan_saved_files(extension_sets.get(key, set()))
+                                if saved is not None:
+                                    break
                         if saved is not None:
                             try:
                                 rel = saved.relative_to(Path(folder_paths.get_output_directory()))
