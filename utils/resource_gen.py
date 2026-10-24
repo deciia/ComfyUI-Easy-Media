@@ -173,6 +173,7 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
 
     workflow, injected_output_id = build_prompt_payload(entry, params or {})
     client_id = uuid.uuid4().hex
+    request_started = time.time()
 
     import aiohttp
 
@@ -208,7 +209,7 @@ async def generate_resource(resource_type: str, params: dict, timeout: float = 9
                 messages = json.dumps(status.get("messages") or [], ensure_ascii=False)[:400]
                 raise ResourceGenError(f"生成失败：{messages}")
             outputs = entry_data.get("outputs") or {}
-            submit_ts = time.time() - 5.0
+            submit_ts = request_started - 5.0
             preferred_nodes = entry.get("outputs")
             if not isinstance(preferred_nodes, list):
                 single = str(entry.get("output") or "").strip()
