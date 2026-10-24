@@ -1997,15 +1997,13 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Image.Input("image", optional=True, lazy=True, tooltip="Optional image media list for slot-based multitrack segments."),
                 io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
                 io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
-                io.Float.Input(
+                # 仅作为上游覆盖接口：不设 widget，只在连线上生效；时长本身仍在任务轨上设置。
+                io.AnyType.Input(
                     "duration",
                     optional=True,
-                    default=0.0,
-                    min=0.0,
-                    max=60.0,
-                    step=0.1,
                     tooltip=(
-                        "可选：本次生成时长（秒）。接上后忽略轨道里的任务段，按该时长重建单段；"
+                        "可选（仅连线）：上游传入本次生成时长（秒），可传 6、6.5 或 6s。"
+                        "接上后忽略轨道任务段，按该时长重建单段；"
                         "任务类型按接入的图片/音频/视频自动推断（无输入=文生视频，有任一输入=参考生视频）。"
                         "prompt_override 带 [0-5s] 区间时以区间为准。"
                     ),
