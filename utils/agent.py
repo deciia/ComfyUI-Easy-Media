@@ -544,6 +544,54 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
     return str((choices[0].get("message") or {}).get("content") or "").strip()
 
 
+def _agent_debug_dir() -> Path:
+    import folder_paths
+
+    base = Path(folder_paths.get_user_directory()) / "DeciiaEasyMedia"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _dump_agent_debug(label: str, payload: dict, error: str) -> str:
+    try:
+        path = _agent_debug_dir() / f"agent_debug_{label}.json"
+        path.write_text(
+            json.dumps({"error": error, "body": payload}, ensure_ascii=False, indent=2)[:400000],
+            encoding="utf-8",
+        )
+        return str(path)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _minimal_agent_messages(system: str, items: list[dict]) -> list[dict]:
+    """把对话压成单条 user：保留最后一条用户输入 + 已执行工具名摘要。"""
+    user_text = ""
+    actions: list[str] = []
+    for item in items:
+        if item.get("role") == "user" and str(item.get("content") or "").strip():
+            user_text = str(item.get("content"))
+        elif item.get("role") == "assistant":
+            for call in item.get("tool_calls") or []:
+                fn = call.get("function") or {}
+                if fn.get("name"):
+                    actions.append(str(fn["name"]))
+        elif item.get("role") == "tool":
+            snippet = str(item.get("content") or "").strip()[:160]
+            if snippet:
+                actions.append("结果:" + snippet)
+    summary = "；".join(actions[-16:]) or "（无）"
+    merged = (
+        (user_text or "继续")
+        + "\n\n（此前已执行的动作摘要，供你参考，不要重复已完成的部分）\n"
+        + summary
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": merged[:12000]},
+    ]
+
+
 async def run_agent_step(
     messages: list[dict],
     context: dict | None = None,
@@ -660,12 +708,19 @@ async def run_agent_step(
     try:
         status, raw = await _post(body)
         if status >= 400 and tools and ("1214" in raw or "tool" in raw.lower() or "messages" in raw):
-            # 把工具历史压平后重试一次（仍保留 tools 定义）
+            # 二级：压平工具协议（保留 tools 定义）
             fallback = dict(body)
             fallback["messages"] = _strip_tool_protocol(body["messages"])
             status, raw = await _post(fallback)
+        if status >= 400 and tools:
+            # 三级：最小上下文重排（system + 单条 user + 已执行动作摘要）
+            minimal = dict(body)
+            minimal["messages"] = _minimal_agent_messages(system, body["messages"])
+            status, raw = await _post(minimal)
         if status >= 400:
-            raise AgentError(f"模型请求失败（{status}）：{raw[:300]}")
+            debug_path = _dump_agent_debug("last", body, raw[:600])
+            hint = f"；请求已落盘：{debug_path}" if debug_path else ""
+            raise AgentError(f"模型请求失败（{status}）：{raw[:300]}{hint}")
         data = json.loads(raw)
     except AgentError:
         raise
