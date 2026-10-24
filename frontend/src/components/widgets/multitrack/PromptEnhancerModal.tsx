@@ -1699,7 +1699,7 @@ export function PromptEnhancerModal({
           </div>
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1.15fr) minmax(0, 1fr)', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1.15fr) 480px', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
                 {PRESET_GROUPS.map((group) => (
