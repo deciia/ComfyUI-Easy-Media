@@ -2182,17 +2182,6 @@ export function AgentRail({
 
 
   const chatListRef = useRef<HTMLDivElement | null>(null)
-  const [scrollMetrics, setScrollMetrics] = useState({ thumbHeight: 0, thumbTop: 0, visible: false })
-  const updateScrollMetrics = () => {
-    const element = chatListRef.current
-    if (!element) return
-    const { scrollTop, scrollHeight, clientHeight } = element
-    const visible = scrollHeight > clientHeight + 4
-    const thumbHeight = visible ? Math.max(28, Math.round((clientHeight / scrollHeight) * clientHeight)) : 0
-    const maxTop = Math.max(0, clientHeight - thumbHeight)
-    const ratio = scrollHeight > 0 ? scrollTop / Math.max(1, scrollHeight - clientHeight) : 0
-    setScrollMetrics({ thumbHeight, thumbTop: Math.round(maxTop * Math.min(1, Math.max(0, ratio))), visible })
-  }
   const scrollToBottom = () => {
     const element = chatListRef.current
     if (!element) return
@@ -2204,16 +2193,6 @@ export function AgentRail({
     const timer = window.setTimeout(scrollToBottom, 30)
     return () => window.clearTimeout(timer)
   }, [active, railTab, tab])
-  // 自绘滚动条：内容或尺寸变化时重算
-  useEffect(() => {
-    const element = chatListRef.current
-    if (!element) return
-    updateScrollMetrics()
-    const observer = new ResizeObserver(() => updateScrollMetrics())
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [messages.length, messages[messages.length - 1]?.text, railTab])
-
   // 新消息 / 流式追加 → 跟随最新（仅当用户本来就在底部附近）
   useEffect(() => {
     if (!active || railTab !== 'chat') return
@@ -2261,14 +2240,12 @@ export function AgentRail({
         ))}
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
-              <div
-                ref={chatListRef}
-                className="easy-agent-scroll-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden"
-                style={{ paddingRight: 10 }}
-                onScroll={updateScrollMetrics}
-              >
-        {railTab === 'chat' ? (
+      <div
+              ref={chatListRef}
+              className="easy-agent-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden"
+              style={{ paddingRight: 4 }}
+            >
+{railTab === 'chat' ? (
           <>
             <div className="text-[10px] leading-relaxed text-muted-foreground">{TAB_HINTS[tab] ?? TAB_HINTS.storyboard}</div>
             {messages.length === 0 ? (
@@ -2459,19 +2436,6 @@ export function AgentRail({
           </div>
         )}
       
-              </div>
-              {scrollMetrics.visible ? (
-                <div
-                  className="easy-agent-scrollbar absolute bottom-0 right-0 top-0 w-2"
-                  style={{ pointerEvents: 'none' }}
-                  aria-hidden
-                >
-                  <div
-                    className="easy-agent-scrollbar-thumb absolute right-0 w-2"
-                    style={{ height: scrollMetrics.thumbHeight, top: scrollMetrics.thumbTop }}
-                  />
-                </div>
-              ) : null}
             </div>
 
       <div

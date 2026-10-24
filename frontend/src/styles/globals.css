@@ -304,10 +304,9 @@ body > .__CUSTOM_NODE_CLASS__ > * {
 }
 
 
-/* AI 助手右栏：强制可见的细滚动条（避免被窄列裁成半截） */
+/* AI 助手右栏：原生滚动条加宽上色（不设 scrollbar-width，否则 Chrome 不应用 webkit 样式） */
 .easy-agent-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border, 240 6% 25%)) transparent;
+  scrollbar-gutter: stable;
 }
 .easy-agent-scroll::-webkit-scrollbar {
   width: 10px;
@@ -328,12 +327,6 @@ body > .__CUSTOM_NODE_CLASS__ > * {
   background-clip: content-box;
 }
 
-
-/* AI 助手：隐藏原生滚动条，改用自绘滚动条 */
-.easy-agent-scroll-hidden {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
 .easy-agent-scroll-hidden::-webkit-scrollbar {
   width: 0;
   height: 0;
