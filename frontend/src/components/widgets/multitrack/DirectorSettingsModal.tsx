@@ -257,7 +257,7 @@ export function DirectorSettingsModal({
                 <span className="text-[10px] text-muted-foreground">缩放整个导演台（含三栏、设置、弹窗）；远程看不清时调到 125–150% 最实用</span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted-foreground">AI 助手字号</span>
+                <span className="text-[11px] text-muted-foreground">字体大小</span>
                 <div className="flex flex-wrap gap-1">
                   {[90, 100, 110, 125, 150].map((value) => (
                     <Button
@@ -271,7 +271,7 @@ export function DirectorSettingsModal({
                     </Button>
                   ))}
                 </div>
-                <span className="text-[10px] text-muted-foreground">只放大 AI 助手对话文字与输入框，不影响三栏布局</span>
+                <span className="text-[10px] text-muted-foreground">放大导演台内所有文字（按钮/标签/对话/输入框），与界面缩放可叠加；远程看不清建议 110–125%</span>
               </div>
               <div className="rounded border p-2 text-[11px] text-muted-foreground" style={{ borderColor: BORDER }}>
                 当前：界面 {uiScale}% · 对话 {chatScale}%<br />
