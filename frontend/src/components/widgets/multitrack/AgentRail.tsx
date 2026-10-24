@@ -582,7 +582,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'generate_resource',
-        description: '生成缺失资源（图片/配音/音乐/参考视频）：调用配置好的 ComfyUI 工作流并自动挂到资源上',
+        description: '生成缺失资源（图片/配音/音乐/参考视频）。低频操作：仅缺素材或用户明确要求时才调用；参考视频默认 5 秒（≤10 秒），更长需用户确认。调用会阻塞等待完成（参考视频 5–10 分钟）',
         parameters: {
           type: 'object',
           properties: {
