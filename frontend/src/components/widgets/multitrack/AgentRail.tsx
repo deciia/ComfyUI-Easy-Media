@@ -536,6 +536,14 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'dump_state',
+        description: '导出排障快照（各段 A/B 绑定、资源池文件字段、任务轨 stable_key 与 images），写入 user/DeciiaEasyMedia/agent_state_dump.json。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'list_bindings',
         description: '逐段列出已绑定的资源清单（含主体展开的子图）与稿内令牌，用来诊断"某段没绑图"的问题。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1658,6 +1666,58 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'dump_state') {
+      const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (plan?.segments ?? []) as Array<Record<string, unknown>>
+      const pool = readResources(projectKey) as ProjectResource[]
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const bindings: Array<Record<string, unknown>> = []
+      for (let i = 0; i < planSegments.length; i += 1) {
+        bindings.push({
+          index: i + 1,
+          name: String(planSegments[i].name ?? ''),
+          stable_key: String(planSegments[i].stable_key ?? ''),
+          a: readBindings(projectKey, `script-${i}:a`),
+          b: readBindings(projectKey, `script-${i}:b`),
+        })
+      }
+      const dump = {
+        project: projectKey,
+        saved_at: new Date().toISOString(),
+        bindings,
+        resources: pool.map((item) => ({
+          id: item.id,
+          name: item.name,
+          type: item.type,
+          status: item.status,
+          imageFile: item.imageFile,
+          subfolder: item.subfolder,
+          sharedRoot: item.sharedRoot,
+          children: item.childResourceIds ?? [],
+        })),
+        tasks,
+      }
+      const response = await fetch('/easy-media/debug/dump', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dump),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) return { error: String(data?.error || `导出失败（HTTP ${response.status}）`) }
+      return {
+        ok: true,
+        path: data.path,
+        segments: bindings.length,
+        bound_a: bindings.filter((row) => (row.a as string[]).length).length,
+        bound_b: bindings.filter((row) => (row.b as string[]).length).length,
+        resources: pool.length,
+        tasks: tasks.length,
+      }
+    }
+
     if (name === 'list_bindings') {
       const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (plan?.segments ?? []) as Array<Record<string, unknown>>

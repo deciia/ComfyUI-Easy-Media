@@ -1038,6 +1038,24 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Failed to save config: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/debug/dump")
+async def handle_debug_dump(request: web.Request) -> web.Response:
+    """把前端状态（绑定/资源/任务轨）写到 user/DeciiaEasyMedia/agent_state_dump.json，供排查。"""
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        payload = await request.json()
+        base = _Path(folder_paths.base_path) / "user" / "DeciiaEasyMedia"
+        base.mkdir(parents=True, exist_ok=True)
+        target = base / "agent_state_dump.json"
+        target.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return web.json_response({"ok": True, "path": str(target)})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/media/verify")
 async def handle_media_verify(request: web.Request) -> web.Response:
     """校验一批媒体引用是否真实存在；不存在的按"名称主干"在同一根目录下找回最新文件。"""
