@@ -1815,13 +1815,28 @@ export function AgentRail({
 
   const askResolveRef = useRef<((answer: string) => void) | null>(null)
   function askUser(question: string, options: string[]): Promise<string> {
+    const qid = `q-${Date.now()}`
     return new Promise((resolve) => {
       askResolveRef.current = resolve
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === activeReplyRef.current
-          ? { ...message, question: { id: `q-${Date.now()}`, text: question, options } }
+          ? { ...message, question: { id: qid, text: question, options } }
           : message
       )))
+      // 答案可能由别的实例写入 workspace（组件重挂载后仍能取到）
+      const poll = window.setInterval(() => {
+        const stored = (readWorkspace(projectKey) as { agentAnswer?: { id: string; answer: string } }).agentAnswer
+        if (!stored || stored.id !== qid) return
+        window.clearInterval(poll)
+        askResolveRef.current = null
+        writeWorkspace(projectKey, { agentAnswer: undefined } as never)
+        resolve(String(stored.answer || ''))
+      }, 400)
+      const originalResolve = resolve
+      askResolveRef.current = (answer: string) => {
+        window.clearInterval(poll)
+        originalResolve(answer)
+      }
     })
   }
   useEffect(() => {
@@ -1837,6 +1852,11 @@ export function AgentRail({
   })
 
   function answerQuestion(answer: string) {
+    const currentQuestion = (readWorkspace(projectKey).messages ?? [])
+      .find((message) => message.id === activeReplyRef.current)?.question as { id?: string } | undefined
+    if (currentQuestion?.id) {
+      writeWorkspace(projectKey, { agentAnswer: { id: String(currentQuestion.id), answer } } as never)
+    }
     const resolve = askResolveRef.current
     askResolveRef.current = null
     patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
@@ -2369,18 +2389,12 @@ export function AgentRail({
                           onClick={(event) => {
                             event.stopPropagation()
                             event.preventDefault()
-                            // 1) 本实例的等待中 Promise
-                            if (askResolveRef.current) {
-                              answerQuestion(option)
-                              return
-                            }
-                            // 2) 其它实例注册的应答器（弹窗重挂载后仍可用）
+                            // 统一走"回答"：写 workspace（提问方轮询）+ 本地 resolve + 全局注册器
+                            answerQuestion(option)
                             const registry = globalThis as unknown as {
                               __easyMediaAnswerQuestion?: (answer: string) => boolean
                             }
-                            if (registry.__easyMediaAnswerQuestion?.(option)) return
-                            // 3) 无人等待：把选项当新消息发出去，至少不会"点了没动静"
-                            void sendStepLoop(option)
+                            registry.__easyMediaAnswerQuestion?.(option)
                           }}
                         >
                           {option}
