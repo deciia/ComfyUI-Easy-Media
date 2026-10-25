@@ -1923,7 +1923,7 @@ export function AgentRail({
     }
 
     /** 提示词结构校验：返回问题列表（空=通过） */
-    const auditPrompt = (segmentIndex: number, prompt: string) => {
+    const auditPrompt = (segmentIndex: number, prompt: string, fragmentMode = false) => {
       const ids = boundIdsForSegment(segmentIndex)
       const pool = readResources(projectKey) as ProjectResource[]
       const expanded: ProjectResource[] = []
@@ -1957,6 +1957,7 @@ export function AgentRail({
       checkKind('Audio', audios)
       checkKind('Video', videos)
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
+      if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
       const identityAsPicture = /<Picture\s+\d+>[^\n]{0,80}(四视图|三视图|正脸|侧脸|正面照|全身照|面部特征|发型|五官|人物|角色|主角|男主|女主|技师|司机|店主|工人|老赵|小赵)/.test(prompt)
         || /(人物|角色|主角|技师|司机|店主|老赵|小赵)[^\n]{0,40}<Picture\s+\d+>/.test(prompt)
@@ -2018,6 +2019,7 @@ export function AgentRail({
             message: `${token}（${inner.slice(0, 16)}）指向的内容已建成主体${namedSubject ? `「${namedSubject}」` : `「${ownerSubject}」`}，优先改用 <Subject n>；若这段只想借这张图的构图，请加「仅借构图」`,
           })
         }
+      }
       }
       const identityTokensInRetention = (prompt.match(/<Picture\s+\d+>[^\n]{0,40}(完全沿用|面部|发型|服装|体型|容貌)/g) ?? []).length
       if (identityTokensInRetention >= 2) {
@@ -2515,6 +2517,27 @@ export function AgentRail({
       const audit = auditPrompt(index - 1, text)
       const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
       if (isFragmentWrite) {
+        if (/可用素材|素材清单|参考素材[:：]/.test(text)) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['片段稿里出现了「可用素材/素材清单」这类罗列'],
+            instruction: '不要罗列素材清单：把主体/资源用令牌直接写进句子里（如 "<Subject 1>（老赵）坐在 <Picture 1>（工作台）前"）。改完再写。',
+          }
+        }
+        const boundTop = boundIdsForSegment(index - 1)
+          .map((id) => (readResources(projectKey) as ProjectResource[]).find((entry) => entry.id === id))
+          .filter((item): item is ProjectResource => Boolean(item))
+        const needTokens = boundTop.some((item) => item.type === 'Subject' || item.type === 'Picture')
+        const hasTokens = /<(Subject|Picture)\s+\d+>/.test(text)
+        if (needTokens && !hasTokens) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['本段绑定了主体/图片，但片段稿里一个令牌都没有'],
+            instruction: '用令牌内联引用本段的主体与图片（<Subject n>/<Picture n>），编号照绑定表；改完再写。',
+          }
+        }
         const finalOnly = [
           /(^|\n)\s*subject_definitions\s*[:：]/,
           /(^|\n)\s*retention_analysis\s*[:：]/,
@@ -2710,9 +2733,12 @@ export function AgentRail({
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
       if (!planSegments.length) return { error: '没有分镜脚本' }
       const rows = planSegments.map((segment, i) => {
-        const prompt = String(segment.promptA ?? segment.finalA ?? segment.user_prompt ?? '')
-        const result = auditPrompt(i, prompt)
-        return { ...result, name: String(segment.name ?? ''), length: prompt.length }
+        const finalText = String(segment.finalA ?? segment.finalB ?? '')
+        const fragmentText = String(segment.promptA ?? segment.promptB ?? segment.user_prompt ?? '')
+        const isFragmentOnly = !finalText.trim()
+        const prompt = isFragmentOnly ? fragmentText : finalText
+        const result = auditPrompt(i, prompt, isFragmentOnly)
+        return { ...result, name: String(segment.name ?? ''), length: prompt.length, mode: isFragmentOnly ? 'fragment' : 'final' }
       })
       const errors = rows.reduce((sum, row) => sum + row.problems.filter((item) => item.level === 'error').length, 0)
       const warns = rows.reduce((sum, row) => sum + row.problems.filter((item) => item.level === 'warn').length, 0)
