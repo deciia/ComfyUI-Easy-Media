@@ -24,6 +24,7 @@ import {
   subscribeWorkspace,
   upsertResource,
   patchResource,
+  removeResource,
   writeBindings,
   writeWorkspace,
   type AgentMessage,
@@ -564,6 +565,22 @@ export function AgentRail({
             resource_names: { type: 'array', items: { type: 'string' } },
           },
           required: ['index', 'resource_names'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'delete_resources',
+        description: '删除主体或资源（按名称）。会同时：从主体子图关联里移除、从所有段的 A/B 绑定清单里解绑。必须传 confirm=true 才执行；删除前先用 list_resources 确认名称与引用情况。',
+        parameters: {
+          type: 'object',
+          properties: {
+            names: { type: 'array', items: { type: 'string' }, description: '要删除的主体/资源名称' },
+            confirm: { type: 'boolean', description: '确认删除（必须为 true）' },
+            dry_run: { type: 'boolean', description: '只报告会被删除/解绑的内容，不真正删除' },
+          },
+          required: ['names'],
         },
       },
     },
@@ -1789,6 +1806,67 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'delete_resources') {
+      const names = Array.isArray(args.names) ? args.names.map(String).filter(Boolean) : []
+      if (!names.length) return { error: 'names 不能为空' }
+      const dryRun = args.dry_run === true
+      if (!dryRun && args.confirm !== true) return { error: '删除需要 confirm=true（可先 dry_run=true 预览）' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const targets = pool.filter((item) => names.includes(item.name))
+      const missing = names.filter((name) => !pool.some((item) => item.name === name))
+      if (!targets.length) return { error: `没有找到：${names.join('、')}`, missing }
+
+      const targetIds = new Set(targets.map((item) => item.id))
+      // 会被解绑的段
+      const bindings = (readWorkspace(projectKey).bindings ?? {}) as Record<string, string[]>
+      const affectedBindings: Array<Record<string, unknown>> = []
+      for (const [key, ids] of Object.entries(bindings)) {
+        const kept = (ids ?? []).filter((id) => !targetIds.has(String(id)))
+        if (kept.length !== (ids ?? []).length) affectedBindings.push({ binding: key, removed: (ids ?? []).length - kept.length })
+      }
+      // 会被摘掉子图的主体
+      const affectedSubjects = pool
+        .filter((item) => item.type === 'Subject' && (item.childResourceIds ?? []).some((id) => targetIds.has(id)))
+        .map((item) => item.name)
+
+      if (dryRun) {
+        return {
+          ok: true,
+          dry_run: true,
+          would_delete: targets.map((item) => ({ name: item.name, type: item.type, status: item.status, file: item.imageFile ?? item.audioFile ?? item.videoFile ?? null })),
+          would_unbind_from: affectedBindings,
+          would_remove_from_subjects: affectedSubjects,
+          missing,
+        }
+      }
+
+      // 1) 从主体子图关联里摘除
+      for (const subject of pool.filter((item) => item.type === 'Subject')) {
+        const next = (subject.childResourceIds ?? []).filter((id) => !targetIds.has(id))
+        if (next.length !== (subject.childResourceIds ?? []).length) {
+          patchResource(projectKey, subject.id, { childResourceIds: next } as never)
+        }
+      }
+      // 2) 解绑所有段的 A/B 清单
+      for (const [key, ids] of Object.entries(bindings)) {
+        const kept = (ids ?? []).filter((id) => !targetIds.has(String(id)))
+        if (kept.length !== (ids ?? []).length) writeBindings(projectKey, key, kept)
+      }
+      // 3) 删除资源本身
+      for (const item of targets) removeResource(projectKey, item.id)
+
+      const flush = await flushProjectToDisk()
+      return {
+        ok: true,
+        deleted: targets.map((item) => item.name),
+        unbound_from: affectedBindings,
+        removed_from_subjects: affectedSubjects,
+        missing,
+        saved: flush.saved,
+        note: '任务轨已写入的 images 不会自动清除；如需同步请再执行 sync_task_images。',
+      }
+    }
+
     if (name === 'explain_task_modes') {
       return {
         modes: Object.values(TASK_MODE_SPECS).map((spec) => ({
