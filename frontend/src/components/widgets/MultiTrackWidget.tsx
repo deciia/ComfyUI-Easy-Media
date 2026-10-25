@@ -1393,6 +1393,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     source_type: image.sourceType ?? 'input',
                     file_name: image.name,
                     subfolder: image.subfolder ?? '',
+                    // 预览/生成都读 file_path（相对 input|output 的路径），缺它缩略图就是空白
+                    file_path: image.subfolder ? `${image.subfolder}/${image.name}` : image.name,
                   })),
                 }
               : {}),
@@ -1475,6 +1477,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           source_type: item.sourceType ?? 'input',
           file_name: item.name,
           subfolder: item.subfolder ?? '',
+          file_path: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
         }))
       }
       patchTaskSegmentContent(segmentId, patch)

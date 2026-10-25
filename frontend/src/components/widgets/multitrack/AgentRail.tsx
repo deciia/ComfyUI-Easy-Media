@@ -1535,15 +1535,17 @@ export function AgentRail({
     /** 绑定清单 → 任务轨 images（主体展开其子图；仅图片，带实际根目录） */
     const imagesFromBoundIds = (ids: string[]) => {
       const pool = readResources(projectKey) as ProjectResource[]
-      const pictures: Array<{ name: string; subfolder?: string; sourceType: 'input' | 'output' | 'temp' }> = []
+      const pictures: Array<{ name: string; subfolder?: string; sourceType: 'input' | 'output' | 'temp'; filePath: string }> = []
       const push = (resource: ProjectResource) => {
         if (resource.type !== 'Picture') return
         const fileName = String(resource.imageFile ?? '').trim()
         if (!fileName) return
+        const subfolder = String(resource.subfolder ?? '')
         pictures.push({
           name: fileName,
-          subfolder: resource.subfolder ?? '',
+          subfolder,
           sourceType: resource.sharedRoot === 'output' ? 'output' : resource.sharedRoot === 'temp' ? 'temp' : 'input',
+          filePath: subfolder ? `${subfolder}/${fileName}` : fileName,
         })
       }
       for (const id of ids) {
