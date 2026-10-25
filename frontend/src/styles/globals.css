@@ -304,26 +304,28 @@ body > .__CUSTOM_NODE_CLASS__ > * {
 }
 
 
-/* AI 助手右栏：原生滚动条加宽上色（不设 scrollbar-width，否则 Chrome 不应用 webkit 样式） */
+/* AI 助手右栏：滚动条常驻可见（滑块不再随悬停/静止淡出） */
 .easy-agent-scroll {
   scrollbar-gutter: stable;
 }
 .easy-agent-scroll::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 .easy-agent-scroll::-webkit-scrollbar-track {
-  background: transparent;
+  background: hsl(var(--muted-foreground, 240 5% 64%) / 0.08);
+  border-radius: 6px;
 }
 .easy-agent-scroll::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--border, 240 6% 25%));
+  background-color: hsl(var(--muted-foreground, 240 5% 64%) / 0.55);
   border: 2px solid transparent;
-  border-radius: 5px;
+  border-radius: 6px;
   background-clip: content-box;
-  min-height: 32px;
+  min-height: 40px;
 }
+.easy-agent-scroll::-webkit-scrollbar-thumb:hover,
 .easy-agent-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--muted-foreground, 240 5% 64%));
+  background-color: hsl(var(--muted-foreground, 240 5% 64%) / 0.85);
   background-clip: content-box;
 }
 
