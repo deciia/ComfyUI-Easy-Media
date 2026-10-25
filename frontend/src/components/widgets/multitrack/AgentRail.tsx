@@ -2517,6 +2517,32 @@ export function AgentRail({
       const audit = auditPrompt(index - 1, text)
       const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
       if (isFragmentWrite) {
+        const firstLine = text.split('\n').map((line) => line.trim()).find(Boolean) ?? ''
+        if (!firstLine.startsWith('概述：')) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['片段稿第一行不是「概述：…」'],
+            instruction: '第一行必须是「概述：画幅 + 时长；场景、人物、基调、观众该看什么」，标签和内容同一行。',
+          }
+        }
+        const overviewLine = firstLine
+        if (!/\d+\s*秒/.test(overviewLine) || !/(\d+\s*[:：]\s*\d+|竖屏|横屏)/.test(overviewLine)) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['概述第一句缺少时长或画幅'],
+            instruction: `概述第一句要带时长与画幅，例如「概述：9:16 竖屏，10 秒；…」。当前是：${overviewLine.slice(0, 40)}`,
+          }
+        }
+        if (/^\s*台词\s*[：:]/m.test(text) && !/<d>/.test(text)) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['台词写成了「台词：…」，没有用 <d>[Chinese] …</d>'],
+            instruction: '台词必须写成 <d>[Chinese] 台词原文</d>，每句一条，不要用「台词：」标签。',
+          }
+        }
         if (/^\s*第\s*\d+\s*段/m.test(text) || /^\s*第\s*\d+\s*段\s*[｜|]/m.test(text)) {
           return {
             ok: false,
