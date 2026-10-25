@@ -51,21 +51,30 @@ PROVIDER_DEFAULTS = {
 DEFAULT_PROVIDER = "deepseek"
 
 SYSTEM_PROMPT = """你是 MiniMax-H3 官方提示词规范（Ref2VA 全参考模式）的改写器。
+基准文件：minimax-h3-official/h3-prompt-writing/references/ref-en.txt。严格照它写，不要凭印象。
 
 任务：把用户口语化、不规范的片段描述，改写成一条**官方规范、结构完整**的视频提示词。
 
 硬性规则：
-1. 输出必须是六个段落，段落键名保持英文小写，顺序固定：
+1. 输出六段，键名英文小写、顺序固定：
    subject_definitions / summary / retention_analysis / detailed_description /
    overall_soundscape / non_diegetic_music
-2. 参考标签沿用输入里给出的 `<Picture n>` / `<Audio n>` / `<Video n>`，**不得新增或改动编号**；
-   用户片段里的 `@名字` 引用必须改写成官方标签：能用图片编号的写 `<Picture n>`，其余写 `<Subject n>`（n 见「可用主体」列表给出的编号）；`<d>…</d>` 与台词原样保留。**禁止在最终提示词里出现 @ 符号。**
-3. `<d>` 内的台词保持原语言；中文台词写作 `<d>[Chinese] 台词</d>`。
-4. 引用内容必须在 retention_analysis 里给出出现镜头：`<Picture 2> (appears in [Shot 1]): fully_preserved - …`。
-5. 生成内容禁止出现字幕、水印、logo、文字叠加。
-6. detailed_description 要按镜头顺序写：构图、主体外观与位置、环境与光线、动作与状态变化、
-   运镜、当前声音，以及参考内容真正生效的位置；不要写成剧情梗概。
-7. 如果给了参考素材补充/硬性要求，必须遵守；没给就不要编造事实。
+2. **章节正文一律英文**（官方要求）；只有 <d>…</d> 里的台词、以及画面里真实可见的文字保留原语言。
+   中文台词写成 <d>[Chinese] …</d>。
+3. 标签语义（最容易写错，必须照官方）：
+   - <Subject N> = 可在目标视频里复用/修改的**可见内容单元**：人物、动物、物体、场景、服装、道具、风格、动作。
+   - <Picture N> **只在图片本身充当某一镜的首帧/关键帧/尾帧/构图锚点/分镜参考时才单列**。
+   - 图片若只用来定义人物/场景/服装/风格，**不要单列 <Picture N>**，而应内嵌进对应 <Subject N> 的定义里引用：
+     `<Subject 1> is the middle-aged mechanic in <Picture 1>, short grey-flecked crew cut, light stubble, dark grey work jacket with rolled cuffs.` 错例：`<Picture 1> 老赵：…` 或 `<Picture 1> 老赵四视图 定义。`
+   - 如果输入只给了 <Picture n>，但内容是人物/场景/风格这类可复用单元，**可以新建 <Subject n>** 定义它并内嵌引用该图片；已有令牌编号的含义不得改变，不得重命名。
+4. 每个 subject/audio 行必须写清三件事：参考职责（负责什么）、要保留的具体特征（能验收的细节）、排除项（不许从它复制什么）。
+   音频写成 `<Audio 1>: reference audio for voice timbre and pacing; do not copy its dialogue content or background noise.`
+5. retention_analysis 逐项写 `appears in [Shot …]` 与 fully_preserved / partially_preserved / transferred / reused 的结论。
+6. detailed_description 按播放顺序写：构图、主体外观与位置、环境与光线、动作与状态变化、运镜、当前声音。
+   **不要在每个镜头重复"参考图生效位置"这类注释**；参考关系已在 subject_definitions / retention_analysis 声明。
+7. [Shot 1] 不带时间戳，其后镜头写 `[Shot N] At MM:SS.mmm`；时间戳必须递增且不超过目标时长。
+8. 生成内容禁止出现字幕、水印、logo、文字叠加。
+9. 如果给了参考素材补充/硬性要求，必须遵守；没给就不要编造事实。
 
 输出只有提示词正文，不要任何解释、不要 Markdown 代码围栏。"""
 
@@ -316,7 +325,11 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     task_mode = str(options.get("task_mode") or payload.get("task_mode") or "")
     duration_seconds = options.get("duration_seconds") or payload.get("duration_seconds") or 5
     lines = [
-        f"输出语言：{payload.get('language') or options.get('output_language') or '中文'}",
+        (
+            "输出语言：**英文**（六段正文英文；仅 <d> 台词与画面可见文字保留原语言）"
+            if str(task_type).lower() in ("ref2va", "r2v", "vi2v", "edit", "ref")
+            else f"输出语言：{payload.get('language') or options.get('output_language') or '中文'}"
+        ),
         (f"全局约束（整支视频）：{payload.get('global_prompt')}" if payload.get("global_prompt") else ""),
         f"生成类型：{task_type}" + (f"（模式 {task_mode}）" if task_mode else ""),
         f"镜头数量：{options.get('shot_count') or 'AUTO'}",
@@ -384,13 +397,16 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         "归一化要求：输出必须使用官方结构（subject_definitions / detailed_description（含 [Shot N] 与 At 00:0X.XXX 时间戳）/ "
         "overall_soundscape / non_diegetic_music）。R2V/VI2V 必须含 subject_definitions 六段式；T2V/L2V 可用三段式。"
         "用户片段中的中文自由描述、中文章节名都要就地改写成官方字段；"
-        "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌原样保留，禁止新增、重命名或重定义；"
+        "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌保持编号含义不变，禁止重命名或重定义已有令牌；"
+        "允许为人物/场景/风格这类可复用单元新建 <Subject n>，并在其定义里内嵌引用作为来源的 <Picture n>（图片本身不是某一镜的首帧/关键帧时不单列）；"
         "At 时间戳必须递增且不得超过目标时长；禁止出现文字、字幕、logo、水印。"
     )
     lines.append(
         "输出格式（硬性）：每个使用到的段名必须单独占一行、紧跟一个英文半角冒号，正文另起一行。"
         "正确示例：\n"
-        "subject_definitions:\n<Subject 1> 云鲸：…\n<Picture 1> 云鲸四视图 定义。\n\n"
+        "subject_definitions:\n"
+        "<Subject 1> is the mechanic in <Picture 1>: mid-fifties, short grey-flecked crew cut, light stubble, dark grey work jacket with rolled cuffs; preserve face, hair, build and wardrobe; do not copy the four-view layout itself.\n"
+        "<Picture 2> is the first frame of [Shot 1], showing the workbench from a slight high angle.\n\n"
         "summary:\n坠落之后的幽暗深海…\n\n"
         "retention_analysis:\n- <Subject 1> …\n"
         "禁止写成「## subject_definitions」「**subject_definitions**」「subject_definitions」后直接接正文，"
