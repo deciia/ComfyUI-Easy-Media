@@ -1853,12 +1853,22 @@ export function AgentRail({
 
   function answerQuestion(answer: string) {
     const currentQuestion = (readWorkspace(projectKey).messages ?? [])
-      .find((message) => message.id === activeReplyRef.current)?.question as { id?: string } | undefined
+      .find((message) => message.id === activeReplyRef.current)?.question as { id?: string; answer?: string } | undefined
+    if (currentQuestion?.answer) return  // 已答过，忽略重复点击
     if (currentQuestion?.id) {
       writeWorkspace(projectKey, { agentAnswer: { id: String(currentQuestion.id), answer } } as never)
     }
     const resolve = askResolveRef.current
     askResolveRef.current = null
+    if (!resolve) {
+      // 没有等待者：说明提问的那一轮已经不在了（中断/重挂载丢引用）。
+      // 把选择记为排队指令，下一步会被消费；绝不再当成"插话"文本乱发。
+      writeWorkspace(projectKey, { pendingInject: `（我已选择）${answer}` } as never)
+      patchWorkspaceMessages(projectKey, (current) => [
+        ...current,
+        { id: `u-choice-${Date.now()}`, role: 'user', text: `（选择）${answer}` },
+      ])
+    }
     patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
       message.id === activeReplyRef.current && message.question
         ? { ...message, question: { ...message.question, answer } }
