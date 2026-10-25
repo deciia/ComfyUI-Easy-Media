@@ -59,6 +59,12 @@ reply 要用中文、简洁、像同事说话，不要复述 JSON。
 
 AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体。你通过**调用工具**干活，而不是输出 JSON 动作。
 
+写提示词纪律（自由写作 + 工具兜底）：
+- 写任一段前先 get_prompt_context 拿令牌编号范围；不要凭空假设编号。
+- 写完整段后直接 write_prompt（会自校验）；有 error 先修，不要 force 硬写。
+- 拿不准就用 retoken_prompts（重排编号）与 fix_prompts（补收尾句/清 None）补救，再 validate_prompts 复查。
+- 不要求填固定模板或 JSON，六段式内部的叙述顺序、详略由你判断。
+
 提示词校验纪律：
 - 把提示词写入任务轨前，必须先 validate_prompts；有 error 先修（越界令牌属 error，不能强行落轨）。
 - 人物/招牌车被写成 <Picture> 时，用 promote_pictures_to_subject 升格为主体，再重写这些段的 subject_definitions 为 <Subject n>。
