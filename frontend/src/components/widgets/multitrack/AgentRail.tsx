@@ -1945,12 +1945,19 @@ export function AgentRail({
           })()
         } catch {
           if (controller.signal.aborted) break
-          let response = await fetch('/easy-media/agent/step', {
+          const postStep = () => fetch('/easy-media/agent/step', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
             body: stepBody,
-          }).catch(() => null as unknown as Response)
+          })
+          // 网络级失败（Failed to fetch / 服务重启）先等 1.2s 重试一次，再判失败
+          let response = await postStep().catch(() => null as unknown as Response)
+          if (!response) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1200))
+            if (controller.signal.aborted) break
+            response = await postStep().catch(() => null as unknown as Response)
+          }
           if (!response || response.status === 429 || response.status >= 500) {
             await new Promise((resolve) => window.setTimeout(resolve, 1200))
             if (controller.signal.aborted) break
@@ -1962,7 +1969,10 @@ export function AgentRail({
             })
           }
           const fallback = await response.json().catch(() => ({}))
-          if (!response.ok || !fallback?.ok) throw new Error(String(fallback?.error || `请求失败（HTTP ${response.status}）`))
+          if (!response.ok || !fallback?.ok) {
+            const detail = String(fallback?.error || `HTTP ${response.status}`)
+            throw new Error(detail)
+          }
           data = fallback
         }
         if (!data) break
