@@ -2654,7 +2654,7 @@ export function AgentRail({
         <Button
           size="sm"
           disabled={!input.trim()}
-          onClick={() => { void sendStepLoop() }}
+          onClick={() => { if (busy) { void sendStepLoop() } else { void send() } }}
           title={busy ? '插话：会在助手下一步开始前插入，不打断当前步骤' : '发送'}
         >
           {busy ? '插话' : '发送'}
