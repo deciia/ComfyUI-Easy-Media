@@ -1243,6 +1243,13 @@ export function AgentRail({
       const fileName = String(data.file_name || '')
       const subfolder = String(data.subfolder || '')
       const root = String(data.root || 'output') === 'input' ? 'input' : 'output'
+      // 完成即播报：把缩略图贴进对话，边生成边能看
+      if (fileName) {
+        const params = new URLSearchParams({ filename: fileName, type: root })
+        if (subfolder) params.set('subfolder', subfolder)
+        const imageUrl = `/view?${params.toString()}`
+        appendText(`\n\n![${targetName || fileName}](${imageUrl})\n✅ 「${targetName || fileName}」完成（${Math.round((Date.now() - startedAt) / 1000)}s，已入库）\n`)
+      }
       const pool = readResources(projectKey) as ProjectResource[]
       const existing = pool.find((item) => item.name === targetName)
       const filePatch = mediaKind === 'picture' ? { imageFile: fileName } : mediaKind === 'audio' ? { audioFile: fileName } : { videoFile: fileName }

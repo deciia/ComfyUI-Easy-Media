@@ -13,27 +13,39 @@ const PRIMARY = 'hsl(var(--primary, 199 89% 48%))'
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = []
   // 依次匹配 行内代码 / 粗体 / 斜体 / 链接
-  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g
+  const pattern = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g
   let lastIndex = 0
   let match: RegExpExecArray | null
   let index = 0
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index))
     const key = `${keyPrefix}-i${index++}`
-    if (match[1] !== undefined) {
+    if (match[2] !== undefined) {
+      // ![alt](url) → 缩略图
+      nodes.push(
+        <a key={key} href={match[2]} target="_blank" rel="noreferrer" style={{ display: 'inline-block', margin: '2px 4px 2px 0' }}>
+          <img
+            src={match[2]}
+            alt={match[1] || ''}
+            style={{ maxWidth: 132, maxHeight: 132, borderRadius: 4, border: `1px solid ${BORDER}`, display: 'block' }}
+          />
+          {match[1] ? <span style={{ display: 'block', fontSize: 9, opacity: 0.7, maxWidth: 132, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{match[1]}</span> : null}
+        </a>,
+      )
+    } else if (match[3] !== undefined) {
       nodes.push(
         <code key={key} style={{ background: FIELD_BG, border: `1px solid ${BORDER}`, borderRadius: 3, padding: '0 3px' }}>
-          {match[1]}
+          {match[3]}
         </code>,
       )
-    } else if (match[2] !== undefined) {
-      nodes.push(<strong key={key}>{match[2]}</strong>)
-    } else if (match[3] !== undefined) {
-      nodes.push(<em key={key}>{match[3]}</em>)
-    } else if (match[4] !== undefined && match[5] !== undefined) {
+    } else if (match[4] !== undefined) {
+      nodes.push(<strong key={key}>{match[4]}</strong>)
+    } else if (match[5] !== undefined) {
+      nodes.push(<em key={key}>{match[5]}</em>)
+    } else if (match[6] !== undefined && match[7] !== undefined) {
       nodes.push(
-        <a key={key} href={match[5]} target="_blank" rel="noreferrer" style={{ color: PRIMARY, textDecoration: 'underline' }}>
-          {match[4]}
+        <a key={key} href={match[7]} target="_blank" rel="noreferrer" style={{ color: PRIMARY, textDecoration: 'underline' }}>
+          {match[6]}
         </a>,
       )
     }
