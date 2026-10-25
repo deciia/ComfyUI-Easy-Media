@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
+import { Check, Copy, ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
@@ -419,6 +419,7 @@ export function PromptEnhancerModal({
   const [directorSettings, setDirectorSettings] = useState<DirectorSettings>(() => readDirectorSettings(settingsProject))
   const [abTab, setAbTab] = useState<'a' | 'b'>(() => readDirectorSettings((globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default').save.defaultVariant)
   const [previewVariant, setPreviewVariant] = useState<'a' | 'b'>('a')
+  const [finalCopied, setFinalCopied] = useState(false)
   const activePrompt = abTab === 'a' ? brief : draftPrompt
   const finalDraft = previewVariant === 'a' ? finalA : finalB
   const setFinalDraft = (value: string) => (previewVariant === 'a' ? setFinalA(value) : setFinalB(value))
@@ -2409,7 +2410,8 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     onInsertTokens={(next) => setFinalDraft(next)}
                     taskMode={currentTaskModeKey()}
                   />
-<span className="text-[11px] text-neutral-400">最终提示词
+<div className="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
+                  <span className="flex min-w-0 items-center gap-1">最终提示词
                   <span className="flex items-center gap-1">
                     {([['a', 'A 版'], ['b', 'B 版']] as const).map(([key, text]) => (
                       <button
@@ -2426,7 +2428,33 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       </button>
                     ))}
                   </span>
-                  （会保存到任务轨对应 A/B 用户提示词）</span>
+                  <span className="truncate">（会保存到任务轨对应 A/B 用户提示词）</span></span>
+                  <button
+                    type="button"
+                    title={finalCopied ? '已复制' : '复制最终提示词'}
+                    aria-label={finalCopied ? '已复制' : '复制最终提示词'}
+                    className="shrink-0 rounded p-1 hover:bg-white/10"
+                    style={{ border: `1px solid ${BORDER}` }}
+                    onClick={async () => {
+                      const text = finalDraft || finalPrompt
+                      if (!text) return
+                      try {
+                        await navigator.clipboard.writeText(text)
+                      } catch {
+                        const area = document.createElement('textarea')
+                        area.value = text
+                        document.body.appendChild(area)
+                        area.select()
+                        document.execCommand('copy')
+                        document.body.removeChild(area)
+                      }
+                      setFinalCopied(true)
+                      setTimeout(() => setFinalCopied(false), 1500)
+                    }}
+                  >
+                    {finalCopied ? <Check size={13} color="hsl(var(--primary, 199 89% 48%))" /> : <Copy size={13} />}
+                  </button>
+                </div>
                   <div className="min-h-[160px] shrink-0 overflow-hidden rounded-md" style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}>
                     <PromptContentEditor
                       value={finalDraft || finalPrompt}
