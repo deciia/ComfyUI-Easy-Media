@@ -665,6 +665,7 @@ export function AgentRail({
             description: { type: 'string', description: '主体描述（外观/服装/身份）' },
             retention: { type: 'array', items: { type: 'string' }, description: '保留项，如 面部特征/服装/发型' },
             drop_pictures: { type: 'boolean', description: '是否把这些图片从资源池顶层移除（默认 false，保留为子图）' },
+            dry_run: { type: 'boolean', description: '只看影响面，不写入（默认 false）' },
           },
           required: ['name', 'children'],
         },
@@ -2599,6 +2600,32 @@ export function AgentRail({
         childResourceIds: Array.from(new Set([...(existing?.childResourceIds ?? []), ...childResources.map((item) => item.id)])),
         status: 'ready',
       } as unknown as ProjectResource
+      // dry_run：只报告影响面
+      if (args.dry_run === true) {
+        const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+        const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+        const childIdsForDry = childResources.map((item) => item.id)
+        const affected: Array<Record<string, unknown>> = []
+        for (let i = 0; i < planSegments.length; i += 1) {
+          const boundIds = boundIdsForSegment(i)
+          const hit = boundIds.filter((id) => childIdsForDry.includes(id))
+          if (!hit.length) continue
+          const prompt = String(planSegments[i].promptA ?? planSegments[i].finalA ?? '')
+          affected.push({
+            segment: i + 1,
+            name: String(planSegments[i].name ?? ''),
+            pictures_replaced: hit.length,
+            prompt_picture_tokens: (prompt.match(/<Picture \d+>/g) ?? []).length,
+          })
+        }
+        return {
+          ok: true,
+          dry_run: true,
+          would_create: { name: subjectName, children: childResources.map((item) => item.name) },
+          affected_segments: affected,
+          note: '确认后去掉 dry_run 再调用即执行；升格后建议 retoken_prompts 重排编号并重写 subject_definitions。',
+        }
+      }
       upsertResource(projectKey, subject)
       // 把绑定里的图片替换成主体
       const childIds = new Set(childResources.map((item) => item.id))
