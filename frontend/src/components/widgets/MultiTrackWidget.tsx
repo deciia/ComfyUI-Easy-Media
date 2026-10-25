@@ -1483,11 +1483,56 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       patchTaskSegmentContent(segmentId, patch)
       return true
     }
-    const registry = globalThis as unknown as { __easyMediaUpdateSegment?: typeof updateSegment }
+    /** 批量写多段任务轨：一次 commit，避免连续单段写互相覆盖（只保留最后一次） */
+    const updateSegmentsBulk = (
+      patches: Array<{ segmentId: string; images: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }> }>,
+    ) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      if (!taskTrack || !patches.length) return false
+      const stamp = Date.now()
+      const byId = new Map(patches.map((item) => [item.segmentId, item]))
+      let touched = 0
+      const updatedTracks = data.tracks.map((track) => (
+        track.id !== taskTrack.id
+          ? track
+          : {
+              ...track,
+              segments: track.segments.map((segment) => {
+                const patch = byId.get(segment.id)
+                if (!patch) return segment
+                touched += 1
+                const images = patch.images.map((item, index) => ({
+                  id: `img-${stamp}-${touched}-${index + 1}`,
+                  source_type: item.sourceType ?? 'input',
+                  file_name: item.name,
+                  subfolder: item.subfolder ?? '',
+                  file_path: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
+                }))
+                return { ...segment, content: { ...segment.content, images } as MultiTrackSegment['content'] }
+              }),
+            }
+      ))
+      if (!touched) return false
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: updatedTracks,
+        total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+      })
+      return true
+    }
+
+    const registry = globalThis as unknown as {
+      __easyMediaUpdateSegment?: typeof updateSegment
+      __easyMediaUpdateSegments?: typeof updateSegmentsBulk
+    }
     registry.__easyMediaUpdateSegment = updateSegment
+    registry.__easyMediaUpdateSegments = updateSegmentsBulk
     return () => {
       if (registry.__easyMediaUpdateSegment === updateSegment) {
         delete registry.__easyMediaUpdateSegment
+      }
+      if (registry.__easyMediaUpdateSegments === updateSegmentsBulk) {
+        delete registry.__easyMediaUpdateSegments
       }
     }
   })
