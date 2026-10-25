@@ -1272,7 +1272,7 @@ export function PromptEnhancerModal({
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
     const tokenRows = editorResources.filter((item) => item.type === 'subject' || item.type === 'image' || item.type === 'audio')
     const bindingTable = tokenRows.map((item) => `${item.token}=${item.label}`).join('｜')
-    const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
+  const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
     const subjectCount = editorResources.filter((item) => item.type === 'subject').length
     const pictureCount = editorResources.filter((item) => item.type === 'image').length
     const audioCount = editorResources.filter((item) => item.type === 'audio').length
@@ -1327,22 +1327,38 @@ function askAgentGenerate(language: '中文' | 'English') {
   const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
 
+  const tokenRows = editorResources.filter((item) => item.type === 'subject' || item.type === 'image' || item.type === 'audio')
+  const bindingTable = tokenRows.map((item) => `${item.token}=${item.label}`).join('｜')
+  const shotCount = Array.isArray((activeScriptSegment as { shots?: unknown[] } | undefined)?.shots)
+    ? ((activeScriptSegment as { shots?: unknown[] }).shots ?? []).length
+    : 0
+  const seconds = Number((activeScriptSegment as { duration_seconds?: number } | undefined)?.duration_seconds ?? 0) || 0
+  const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
   const directive = [
     `只做第 ${activeScriptIndex + 1} 段「${segmentName}」的终稿：用 write_prompt(index=${activeScriptIndex + 1}, target=final) 写入，不要动片段稿和其它段（${language === 'English' ? '英文' : '中文'}正文）。`,
     '',
-    '【三份输入，先读】',
-    '1. get_segment：完整分镜（镜头/台词/时长/settings）；',
-    '2. get_prompt_context：本段绑定与令牌表（名称/保留项/文件），编号照抄；',
-    '3. 文末用户改过的片段稿：用户意图优先。需要时 read_skill h3-prompt-spec。',
+    '【事实】',
+    `本段令牌表：${bindingTable || '（无绑定）'}`,
+    `可用编号：Subject ≤ ${tokenRows.filter((item) => item.type === 'subject').length}，Picture ≤ ${tokenRows.filter((item) => item.type === 'image').length}，Audio ≤ ${tokenRows.filter((item) => item.type === 'audio').length}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}；镜头数 ${shotCount}`,
     '',
-    '【写法】',
-    '六段齐全：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music。',
-    '<Subject n> 承载人物与场景身份（保留项+排除项）；<Picture n> 只作帧锚点或场景道具；编号不得越界。',
-    '台词逐条 <d>[Chinese] …</d>，与分镜一致；[Shot 1] 不带时间戳；结尾禁字幕句。',
-    '目标：模型能直接理解使用，不是片段稿的扩写。',
+    '【三份输入，先读】',
+    '1. get_segment：完整分镜（镜头/台词/时长/settings），镜头数与台词以它为准；',
+    '2. get_prompt_context：本段绑定与保留项，编号照抄；',
+    '3. 文末片段稿：用户的意图与补充，优先级高于你的自由发挥。需要时 read_skill h3-prompt-spec。',
+    '',
+    '【六段怎么写】',
+    'subject_definitions：每个绑定令牌一行。`<Subject n>` 写身份 + 必须保留的项 + 明确排除项（不复制参考图的版式/背景/机位）；`<Picture n>` 只写"提供哪一帧或哪件道具的依据"；`<Audio n>` 写 `is the voice-timbre reference for <Subject n> (Sx)`（无说话人则写仅音色参考）。',
+    'summary：一段话讲清这段演了什么（地点/人物/动作/情绪落点），可带 `[reference generation + audio reference]` 之类标记。',
+    'retention_analysis：只列本段真正出现过的令牌；逐项写"保留什么 + 不复制什么"；音频项写 `reference - 仅取音色与语速`，不要写 `reused`。',
+    `detailed_description：先一句风格/画幅/时长总述，再逐镜。` +
+      '[Shot 1] 不带时间戳，[Shot 2] 起写 `At 00:0X.XXX`，时间码按分镜各镜时长累加、末镜结束等于总时长。',
+    '台词：`<Subject n> (Sx) says: <d>[Chinese] 原文</d>`。`(Sx)` 只在音色归属行与发声处出现，不许进定义行、不许进 <d>；分镜每句台词都要出现，一字不改。',
+    'overall_soundscape：只写现场声；non_diegetic_music：无配乐就写「无配乐」，有就写清风格与情绪。两段都不要复述 detailed_description。',
+    '结尾固定加一行禁字幕/水印句。',
     '',
     '【禁区】',
-    '不改片段稿；不扩展范围；不编造分镜里没有的镜头/台词。',
+    '不改片段稿；不扩展范围；不编造分镜里没有的镜头/台词/动作。',
+    '单镜出现的道具不要升格成 `<Subject n>`（跨段一致才建主体），用 `<Picture n>` 或句内描述；编号不得越界。',
     '返回 needs_revision 时按 problems 改一次再写，不要 force/auto_align 绕过。',
     '',
     '片段稿：',
