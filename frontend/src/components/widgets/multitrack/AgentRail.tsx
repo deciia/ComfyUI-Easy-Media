@@ -571,6 +571,22 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'delete_task_segments',
+        description: '删除任务轨上的段（按段号，1 起）。会联动删除关联任务；只影响任务轨，不改分镜脚本。需 confirm=true，建议先 dry_run=true。',
+        parameters: {
+          type: 'object',
+          properties: {
+            indexes: { type: 'array', items: { type: 'number' } },
+            confirm: { type: 'boolean' },
+            dry_run: { type: 'boolean' },
+          },
+          required: ['indexes'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'delete_segments',
         description: '删除分镜脚本里的段（按段号）。只改脚本，不动任务轨；删后自动重排各段绑定键。必须 confirm=true，建议先 dry_run=true 预览。删空会拒绝。',
         parameters: {
@@ -1822,6 +1838,39 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'delete_task_segments') {
+      const raw = Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : []
+      const indexes = Array.from(new Set(raw.filter((item) => Number.isFinite(item) && item >= 1))).sort((a, b) => a - b)
+      if (!indexes.length) return { error: 'indexes 不能为空（段号从 1 开始）' }
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const invalid = indexes.filter((index) => index > tasks.length)
+      if (invalid.length) return { error: `任务轨只有 ${tasks.length} 段，段号超出：${invalid.join('、')}` }
+      const detail = indexes.map((index) => ({
+        index,
+        stable_key: tasks[index - 1]?.stable_key ?? '',
+        images: tasks[index - 1]?.images_count ?? 0,
+      }))
+      const dryRun = args.dry_run === true
+      if (!dryRun && args.confirm !== true) return { error: '删除需要 confirm=true（可先 dry_run=true 预览）' }
+      if (dryRun) return { ok: true, dry_run: true, would_delete: detail, remaining: tasks.length - indexes.length }
+      const registry = (globalThis as unknown as {
+        __easyMediaDeleteTaskSegments?: (list: number[]) => { deleted: string[] }
+      }).__easyMediaDeleteTaskSegments
+      if (!registry) return { error: '任务轨编辑器未就绪（请从多轨编辑器节点打开弹窗）' }
+      const result = registry(indexes)
+      const flush = await flushProjectToDisk()
+      return {
+        ok: result.deleted.length > 0,
+        deleted: detail,
+        saved: flush.saved,
+        save_error: flush.saved ? undefined : flush.reason,
+        note: '分镜脚本未改动；如需重新落轨请 apply_storyboard。',
+      }
+    }
+
     if (name === 'delete_segments') {
       const raw = Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : []
       const indexes = Array.from(new Set(raw.filter((item) => Number.isFinite(item) && item >= 1))).sort((a, b) => a - b)

@@ -1524,18 +1524,42 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       return true
     }
 
+    /** 批量删除任务轨段（含联动任务），单次提交 */
+    const deleteTaskSegmentsByIndex = (indexes: number[]) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      if (!taskTrack) return { deleted: [] as string[] }
+      const ids = new Set(
+        indexes
+          .map((index) => taskTrack.segments[index - 1]?.id)
+          .filter((id): id is string => Boolean(id)),
+      )
+      if (!ids.size) return { deleted: [] as string[] }
+      const updatedTracks = deleteSegmentsWithLinkedTasks(data.tracks, ids, data.frame_rate)
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: updatedTracks,
+        total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+      })
+      return { deleted: Array.from(ids) }
+    }
+
     const registry = globalThis as unknown as {
       __easyMediaUpdateSegment?: typeof updateSegment
       __easyMediaUpdateSegments?: typeof updateSegmentsBulk
+      __easyMediaDeleteTaskSegments?: typeof deleteTaskSegmentsByIndex
     }
     registry.__easyMediaUpdateSegment = updateSegment
     registry.__easyMediaUpdateSegments = updateSegmentsBulk
+    registry.__easyMediaDeleteTaskSegments = deleteTaskSegmentsByIndex
     return () => {
       if (registry.__easyMediaUpdateSegment === updateSegment) {
         delete registry.__easyMediaUpdateSegment
       }
       if (registry.__easyMediaUpdateSegments === updateSegmentsBulk) {
         delete registry.__easyMediaUpdateSegments
+      }
+      if (registry.__easyMediaDeleteTaskSegments === deleteTaskSegmentsByIndex) {
+        delete registry.__easyMediaDeleteTaskSegments
       }
     }
   })
