@@ -2567,7 +2567,7 @@ export function AgentRail({
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault()
-              void send()
+              void sendStepLoop()
             }
           }}
         />
@@ -2653,20 +2653,26 @@ export function AgentRail({
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          disabled={busy ? false : !input.trim()}
-          onClick={() => {
-            if (busy) {
+          disabled={!input.trim()}
+          onClick={() => { void sendStepLoop() }}
+          title={busy ? '插话：会在助手下一步开始前插入，不打断当前步骤' : '发送'}
+        >
+          {busy ? '插话' : '发送'}
+        </Button>
+        {busy ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
               abortRef.current?.abort()
               writeWorkspace(projectKey, { agentBusy: false })
               setBusy(false)
-              return
-            }
-            void sendStepLoop()
-          }}
-        >
-          {busy ? '停止' : '发送'}
-        </Button>
-
+            }}
+            title="中止本轮执行"
+          >
+            停止
+          </Button>
+        ) : null}
       </div>
     </div>
   )
