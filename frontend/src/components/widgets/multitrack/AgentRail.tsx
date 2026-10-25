@@ -1924,6 +1924,31 @@ export function AgentRail({
           message: '用 <Picture> 定义人物身份/四视图；人物必须用 <Subject n> 承载（先升格为主体再引用），这是 H3 结构错误，不是可选项',
         })
       }
+      // 令牌与紧随其后的括号内名称必须一致（防止 <Picture 2>（工作台） 但工作台其实是 Picture 1）
+      const tokenToName = new Map<string, string>()
+      let subjectIdx = 0
+      let pictureIdx = 0
+      let audioIdx = 0
+      let videoIdx = 0
+      for (const item of topLevel) {
+        if (item.type === 'Subject') { subjectIdx += 1; tokenToName.set(`<Subject ${subjectIdx}>`, item.name) }
+        else if (item.type === 'Picture') { pictureIdx += 1; tokenToName.set(`<Picture ${pictureIdx}>`, item.name) }
+        else if (item.type === 'Audio') { audioIdx += 1; tokenToName.set(`<Audio ${audioIdx}>`, item.name) }
+        else if (item.type === 'Video') { videoIdx += 1; tokenToName.set(`<Video ${videoIdx}>`, item.name) }
+      }
+      for (const match of prompt.matchAll(/<(Subject|Picture|Audio|Video)\s+(\d+)>\s*[（(]([^）)]{1,30})[）)]/g)) {
+        const token = `<${match[1]} ${match[2]}>`
+        const written = String(match[3]).trim()
+        const expected = tokenToName.get(token)
+        if (!expected) continue
+        const ownerToken = Array.from(tokenToName.entries()).find(([, name]) => name && written.includes(name))?.[0]
+        if (ownerToken && ownerToken !== token && expected && !written.includes(expected)) {
+          problems.push({
+            level: 'error',
+            message: `${token} 后面写的是「${written}」，但 ${token} 对应「${expected}」，「${written}」其实是 ${ownerToken}：请照绑定表抄编号，不要推断`,
+          })
+        }
+      }
       const identityTokensInRetention = (prompt.match(/<Picture\s+\d+>[^\n]{0,40}(完全沿用|面部|发型|服装|体型|容貌)/g) ?? []).length
       if (identityTokensInRetention >= 2) {
         problems.push({ level: 'warn', message: `retention_analysis 有 ${identityTokensInRetention} 处用 <Picture> 声明人物保留项，应为 <Subject n>` })
