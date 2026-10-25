@@ -22,6 +22,7 @@ import {
   patchResource,
   readWorkspace,
   readBindings,
+  readResources,
   removeResource,
   resourceUid,
   unbindResourceFile,
