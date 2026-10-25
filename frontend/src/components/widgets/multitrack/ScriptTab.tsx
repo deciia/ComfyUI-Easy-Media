@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { readWorkspace, writeWorkspace } from './agentStore'
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
@@ -14,11 +14,9 @@ const fieldStyle: React.CSSProperties = {
   outline: 'none',
 }
 
-interface ShotLine {
-  speaker?: string
-  line?: string
-}
+const labelStyle: React.CSSProperties = { fontSize: 10, color: 'hsl(var(--muted-foreground, 240 5% 65%))' }
 
+interface ShotLine { speaker?: string; line?: string }
 interface PlanShot {
   shot?: number
   framing?: string
@@ -29,7 +27,6 @@ interface PlanShot {
   sound?: string
   transition?: string
 }
-
 interface PlanSegment {
   name?: string
   beat?: string
@@ -41,186 +38,189 @@ interface PlanSegment {
   shots?: PlanShot[]
 }
 
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value ?? {})) as T
+
 /**
- * 提示词增强 → 「分镜」页签：展示并直接编辑当前分镜脚本段。
- * 六个设置（段名/钩子/时长/衔接/参考图/任务）一行；改动即时写回分镜编排（同一份 plan.segments）。
+ * 提示词增强 → 「分镜」页签：对照 + 轻编辑。
+ * 六项设置分两行（窄栏可读）；改动 0.4 秒防抖写回，离开输入框立即写回；带一次性撤销。
+ * 长文本按镜头折叠，点「编辑」展开，避免和「分镜编排」抢注意力。
  */
 export function ScriptTab({ projectKey, segmentIndex }: { projectKey: string; segmentIndex: number }) {
-  const [, setVersion] = useState(0)
-  const plan = readWorkspace(projectKey).plan as { segments?: PlanSegment[]; fps?: number } | null
-  const segment = plan?.segments?.[segmentIndex]
-  const fps = Number((plan as { fps?: number } | null)?.fps ?? 24) || 24
+  const [draft, setDraft] = useState<PlanSegment | null>(null)
+  const [editingShot, setEditingShot] = useState<number | null>(null)
+  const [savedHint, setSavedHint] = useState('')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const undoRef = useRef<PlanSegment | null>(null)
 
-  /** 改一项就写回一次（与分镜编排共用 plan.segments） */
-  const patchSegment = (mutate: (draft: PlanSegment) => void) => {
-    const current = readWorkspace(projectKey).plan as { segments?: PlanSegment[] } | null
-    if (!current?.segments) return
-    const segments = current.segments.map((item, index) => {
-      if (index !== segmentIndex) return item
-      const draft: PlanSegment = JSON.parse(JSON.stringify(item ?? {}))
-      mutate(draft)
-      return draft
-    })
-    writeWorkspace(projectKey, { plan: { ...(current as Record<string, unknown>), segments } as never })
-    setVersion((value) => value + 1)
+  const readPlan = () => readWorkspace(projectKey).plan as { segments?: PlanSegment[]; fps?: number } | null
+
+  useEffect(() => {
+    const plan = readPlan()
+    setDraft(plan?.segments?.[segmentIndex] ? clone(plan.segments[segmentIndex] as PlanSegment) : null)
+    setEditingShot(null)
+    undoRef.current = null
+    setSavedHint('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKey, segmentIndex])
+
+  const fps = Number(readPlan()?.fps ?? 24) || 24
+
+  const flush = (next: PlanSegment) => {
+    const plan = readPlan()
+    if (!plan?.segments) return
+    const segments = plan.segments.map((item, index) => (index === segmentIndex ? next : item))
+    writeWorkspace(projectKey, { plan: { ...(plan as Record<string, unknown>), segments } as never })
+    setSavedHint('已写回分镜编排')
+    setTimeout(() => setSavedHint(''), 1200)
   }
 
-  const patchShot = (shotIndex: number, mutate: (shot: PlanShot) => void) => {
-    patchSegment((draft) => {
-      const shots = Array.isArray(draft.shots) ? draft.shots : []
-      shots[shotIndex] = shots[shotIndex] ?? {}
-      mutate(shots[shotIndex])
-      draft.shots = shots
-    })
+  const change = (mutate: (value: PlanSegment) => void, immediate = false) => {
+    if (!draft) return
+    if (!undoRef.current) undoRef.current = clone(draft)
+    const next = clone(draft)
+    mutate(next)
+    setDraft(next)
+    if (timer.current) clearTimeout(timer.current)
+    if (immediate) flush(next)
+    else timer.current = setTimeout(() => flush(next), 400)
   }
 
-  const patchSettings = (key: 'contextMode' | 'refImageSize' | 'taskType', value: string) => {
-    patchSegment((draft) => {
-      draft.settings = { ...(draft.settings ?? {}), [key]: value }
-    })
+  const undo = () => {
+    const previous = undoRef.current
+    if (!previous) return
+    undoRef.current = null
+    setDraft(previous)
+    flush(previous)
   }
 
-  if (!segment) {
+  if (!draft) {
     return <div className="p-3 text-[11px] text-muted-foreground">当前没有选中的分镜脚本段。</div>
   }
 
+  const shots = Array.isArray(draft.shots) ? draft.shots : []
+
   return (
     <div className="flex min-h-0 flex-col gap-2 overflow-auto p-2">
-      {/* 六个设置一行 */}
-      <div
-        className="grid items-center gap-1.5 text-[11px]"
-        style={{ gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1.2fr) 56px 132px 100px 92px' }}
-      >
-        <input
-          title="段名"
-          style={{ ...fieldStyle, width: '100%', minWidth: 0 }}
-          value={String(segment.name ?? '')}
-          placeholder="段名"
-          onChange={(event) => patchSegment((draft) => { draft.name = event.target.value })}
-        />
-        <input
-          title="钩子/beat"
-          style={{ ...fieldStyle, width: '100%', minWidth: 0 }}
-          value={String(segment.beat ?? '')}
-          placeholder="钩子/beat"
-          onChange={(event) => patchSegment((draft) => { draft.beat = event.target.value })}
-        />
-        <input
-          title="时长（秒）"
-          style={{ ...fieldStyle, width: '100%', minWidth: 0 }}
-          value={String(segment.duration_seconds ?? '')}
-          placeholder="秒"
-          onChange={(event) => patchSegment((draft) => {
+      <div className="grid items-end gap-1.5" style={{ gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1.3fr) 60px' }}>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>段名</span>
+          <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={String(draft.name ?? '')} onChange={(event) => change((value) => { value.name = event.target.value })} onBlur={() => flush(draft)} />
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>钩子 / beat</span>
+          <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={String(draft.beat ?? '')} onChange={(event) => change((value) => { value.beat = event.target.value })} onBlur={() => flush(draft)} />
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>时长</span>
+          <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={String(draft.duration_seconds ?? '')} onChange={(event) => change((value) => {
             const seconds = Number(event.target.value) || 0
-            draft.duration_seconds = seconds
-            draft.duration_frames = Math.round(seconds * fps)
-          })}
-        />
-        <select
-          title="衔接"
-          style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }}
-          value={String(segment.settings?.contextMode ?? 'shot')}
-          onChange={(event) => patchSettings('contextMode', event.target.value)}
-        >
-          <option value="shot">shot 独立镜头</option>
-          <option value="context">context 带上下文</option>
-          <option value="context_drift">context_drift 漂移</option>
-        </select>
-        <select
-          title="参考图"
-          style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }}
-          value={String(segment.settings?.refImageSize ?? '')}
-          onChange={(event) => patchSettings('refImageSize', event.target.value)}
-        >
-          <option value="">参考图跟随脚本</option>
-          <option value="match">参考图 match</option>
-          <option value="max">参考图 max</option>
-        </select>
-        <select
-          title="任务"
-          style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }}
-          value={String(segment.settings?.taskType ?? '')}
-          onChange={(event) => patchSettings('taskType', event.target.value)}
-        >
-          <option value="">任务跟随脚本</option>
-          <option value="r2v">R2V</option>
-          <option value="fmlf2v">FMLF2V</option>
-          <option value="vi2v">VI2V</option>
-          <option value="l2v">L2V</option>
-          <option value="passthrough">Pass</option>
-        </select>
+            value.duration_seconds = seconds
+            value.duration_frames = Math.round(seconds * fps)
+          })} onBlur={() => flush(draft)} />
+        </label>
       </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-[10px] text-muted-foreground">本段概要</span>
-        <textarea
-          style={{ ...fieldStyle, minHeight: 56, resize: 'vertical' }}
-          value={String(segment.summary ?? '')}
-          onChange={(event) => patchSegment((draft) => { draft.summary = event.target.value })}
-        />
+      <div className="grid items-end gap-1.5" style={{ gridTemplateColumns: '1.2fr 1fr 1fr' }}>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>衔接</span>
+          <select style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={String(draft.settings?.contextMode ?? 'shot')} onChange={(event) => change((value) => { value.settings = { ...(value.settings ?? {}), contextMode: event.target.value } }, true)}>
+            <option value="shot">shot 独立镜头</option>
+            <option value="context">context 带上文</option>
+            <option value="context_drift">context_drift 漂移</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>参考图</span>
+          <select style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={String(draft.settings?.refImageSize ?? '')} onChange={(event) => change((value) => { value.settings = { ...(value.settings ?? {}), refImageSize: event.target.value } }, true)}>
+            <option value="">跟随脚本</option>
+            <option value="match">match</option>
+            <option value="max">max</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span style={labelStyle}>任务</span>
+          <select style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={String(draft.settings?.taskType ?? '')} onChange={(event) => change((value) => { value.settings = { ...(value.settings ?? {}), taskType: event.target.value } }, true)}>
+            <option value="">跟随脚本</option>
+            <option value="r2v">R2V</option>
+            <option value="fmlf2v">FMLF2V</option>
+            <option value="vi2v">VI2V</option>
+            <option value="l2v">L2V</option>
+            <option value="passthrough">Pass</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>{savedHint || '改动 0.4 秒后写回分镜编排'}</span>
+        <button
+          type="button"
+          className="shrink-0 rounded px-1.5"
+          style={{ border: `1px solid ${BORDER}`, opacity: undoRef.current ? 1 : 0.4 }}
+          disabled={!undoRef.current}
+          onClick={undo}
+        >
+          ↶ 撤销这次修改
+        </button>
+      </div>
+
+      <label className="flex flex-col gap-0.5">
+        <span style={labelStyle}>本段概要</span>
+        <textarea style={{ ...fieldStyle, minHeight: 54, resize: 'vertical' }} value={String(draft.summary ?? '')} onChange={(event) => change((value) => { value.summary = event.target.value })} onBlur={() => flush(draft)} />
       </label>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-[10px] text-muted-foreground">导演说明</span>
-        <textarea
-          style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }}
-          value={String(segment.director_note ?? '')}
-          onChange={(event) => patchSegment((draft) => { draft.director_note = event.target.value })}
-        />
+      <label className="flex flex-col gap-0.5">
+        <span style={labelStyle}>导演说明</span>
+        <textarea style={{ ...fieldStyle, minHeight: 40, resize: 'vertical' }} value={String(draft.director_note ?? '')} onChange={(event) => change((value) => { value.director_note = event.target.value })} onBlur={() => flush(draft)} />
       </label>
 
-      {(segment.shots ?? []).map((shot, index) => {
+      {shots.map((shot, index) => {
         const lines = Array.isArray(shot.dialogue) ? shot.dialogue : []
+        const open = editingShot === index
         return (
-          <div key={index} className="flex flex-col gap-1 rounded p-2" style={{ border: `1px solid ${BORDER}` }}>
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span className="rounded px-1" style={{ border: `1px solid ${BORDER}` }}>{shot.framing ?? '—'}</span>
-              <span>镜 {shot.shot ?? index + 1}</span>
-              <span>{shot.camera ?? ''}</span>
+          <div key={index} className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}` }}>
+            <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+              <span className="truncate">
+                <span className="rounded px-1" style={{ border: `1px solid ${BORDER}` }}>{shot.framing ?? '—'}</span>
+                {' '}镜 {shot.shot ?? index + 1}{shot.camera ? ` · ${shot.camera}` : ''}
+              </span>
+              <button type="button" className="shrink-0 rounded px-1.5" style={{ border: `1px solid ${BORDER}` }} onClick={() => setEditingShot(open ? null : index)}>
+                {open ? '收起' : '编辑'}
+              </button>
             </div>
-            <textarea
-              title="画面"
-              style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }}
-              placeholder="画面/动作"
-              value={String(shot.action ?? '')}
-              onChange={(event) => patchShot(index, (draft) => { draft.action = event.target.value })}
-            />
-            <textarea
-              title="台词（一行一句，可写「角色：台词」）"
-              style={{ ...fieldStyle, minHeight: 34, resize: 'vertical' }}
-              placeholder="台词：一行一句，可写「角色：台词」"
-              value={lines.map((line) => `${line.speaker ? `${line.speaker}：` : ''}${line.line ?? ''}`).join('\n')}
-              onChange={(event) => patchShot(index, (draft) => {
-                draft.dialogue = event.target.value
-                  .split('\n')
-                  .map((raw) => raw.trim())
-                  .filter(Boolean)
-                  .map((raw) => {
-                    const match = raw.match(/^([^：:]{1,12})[：:](.*)$/)
-                    return match ? { speaker: match[1].trim(), line: match[2].trim() } : { line: raw }
-                  })
-              })}
-            />
-            <div className="grid grid-cols-2 gap-1.5">
-              <textarea
-                title="微表情"
-                style={{ ...fieldStyle, minHeight: 30, resize: 'vertical' }}
-                placeholder="微表情"
-                value={String(shot.micro_expression ?? '')}
-                onChange={(event) => patchShot(index, (draft) => { draft.micro_expression = event.target.value })}
-              />
-              <textarea
-                title="声音"
-                style={{ ...fieldStyle, minHeight: 30, resize: 'vertical' }}
-                placeholder="声音"
-                value={String(shot.sound ?? '')}
-                onChange={(event) => patchShot(index, (draft) => { draft.sound = event.target.value })}
-              />
-            </div>
+            {open ? (
+              <>
+                <textarea title="画面" style={{ ...fieldStyle, minHeight: 52, resize: 'vertical' }} placeholder="画面/动作" value={String(shot.action ?? '')} onChange={(event) => change((value) => { value.shots![index].action = event.target.value })} onBlur={() => flush(draft)} />
+                <textarea
+                  title="台词：一行一句，可写「角色：台词」"
+                  style={{ ...fieldStyle, minHeight: 40, resize: 'vertical' }}
+                  placeholder="台词：一行一句，可写「角色：台词」"
+                  value={lines.map((line) => `${line.speaker ? `${line.speaker}：` : ''}${line.line ?? ''}`).join('\n')}
+                  onChange={(event) => change((value) => {
+                    value.shots![index].dialogue = event.target.value
+                      .split('\n')
+                      .map((raw) => raw.trim())
+                      .filter(Boolean)
+                      .map((raw) => {
+                        const match = raw.match(/^([^：:]{1,12})[：:](.*)$/)
+                        return match ? { speaker: match[1].trim(), line: match[2].trim() } : { line: raw }
+                      })
+                  })}
+                  onBlur={() => flush(draft)}
+                />
+                <div className="grid grid-cols-2 gap-1.5">
+                  <textarea title="微表情" style={{ ...fieldStyle, minHeight: 32, resize: 'vertical' }} placeholder="微表情" value={String(shot.micro_expression ?? '')} onChange={(event) => change((value) => { value.shots![index].micro_expression = event.target.value })} onBlur={() => flush(draft)} />
+                  <textarea title="声音" style={{ ...fieldStyle, minHeight: 32, resize: 'vertical' }} placeholder="声音" value={String(shot.sound ?? '')} onChange={(event) => change((value) => { value.shots![index].sound = event.target.value })} onBlur={() => flush(draft)} />
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-0.5 text-[11px] leading-snug">
+                {shot.action ? <div className="line-clamp-2">{shot.action}</div> : null}
+                {lines.length ? <div className="line-clamp-2 text-muted-foreground">{lines.map((line) => `${line.speaker ? `${line.speaker}：` : ''}${line.line ?? ''}`).join(' / ')}</div> : null}
+              </div>
+            )}
           </div>
         )
       })}
-      <div className="text-[10px] text-muted-foreground">改动即时写回「分镜编排」，两边共用同一份分镜脚本。</div>
     </div>
   )
 }
