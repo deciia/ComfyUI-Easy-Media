@@ -3028,7 +3028,6 @@ export function AgentRail({
                     ))}
                   </div>
                 ) : null}
-                {message.text ? <div className="whitespace-pre-wrap">{message.text}</div> : null}
                 {message.toolCalls?.length ? (
                   <div className="mt-1 flex flex-col gap-1">
                     {message.toolCalls.map((call) => (
@@ -3053,6 +3052,9 @@ export function AgentRail({
                       </details>
                     ))}
                   </div>
+                ) : null}
+                {message.text ? (
+                  <div className={message.toolCalls?.length ? 'mt-1 whitespace-pre-wrap' : 'whitespace-pre-wrap'}>{message.text}</div>
                 ) : null}
                 {message.question ? (
                   <div className="mt-1 rounded p-1.5 text-[11px]" style={{ border: `1px solid ${BORDER}`, background: PANEL_BG }}>
