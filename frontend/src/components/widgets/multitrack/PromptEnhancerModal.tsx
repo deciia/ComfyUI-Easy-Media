@@ -467,12 +467,12 @@ export function PromptEnhancerModal({
       const resource = resources.find((item) => item.id === id)
       if (!resource) continue
       if (resource.type === 'Subject') {
+        // 主体承载身份，其子图不单独占 <Picture n> 编号（作为主体来源内嵌引用）
         map.set(resource.id, bump('Subject'))
         for (const childId of resource.childResourceIds ?? []) {
           const child = resources.find((item) => item.id === childId)
           if (!child) continue
-          if (child.type === 'Picture') map.set(child.id, bump('Picture'))
-          else if (child.type === 'Audio') map.set(child.id, bump('Audio'))
+          if (child.type === 'Audio') map.set(child.id, bump('Audio'))
           else if (child.type === 'Video') map.set(child.id, bump('Video'))
         }
         continue
@@ -1117,10 +1117,6 @@ export function PromptEnhancerModal({
       if (!resource) continue
       if (resource.type === 'Subject') {
         pushWithToken(resource, resource.name, tokens.get(resource.id))
-        for (const childId of resource.childResourceIds ?? []) {
-          const child = resources.find((item) => item.id === childId)
-          if (child) pushWithToken(child, child.name, tokens.get(child.id))
-        }
       } else {
         pushWithToken(resource, resource.name, tokens.get(resource.id))
       }

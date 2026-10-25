@@ -1895,8 +1895,9 @@ export function AgentRail({
           }
         }
       }
-      const pictures = expanded.filter((item) => item.type === 'Picture').length
-      const subjects = expanded.filter((item) => item.type === 'Subject').length
+      const topLevel = ids.map((id) => pool.find((entry) => entry.id === id)).filter((item): item is ProjectResource => Boolean(item))
+      const pictures = topLevel.filter((item) => item.type === 'Picture').length
+      const subjects = topLevel.filter((item) => item.type === 'Subject').length
       const audios = expanded.filter((item) => item.type === 'Audio').length
       const videos = expanded.filter((item) => item.type === 'Video').length
       const problems: Array<Record<string, unknown>> = []
@@ -2354,9 +2355,11 @@ export function AgentRail({
         if (!item) continue
         push(item)
         if (item.type === 'Subject') {
-          for (const childId of item.childResourceIds ?? []) {
-            const child = pool.find((entry) => entry.id === childId)
-            if (child) push(child, `主体「${item.name}」子图`)
+          const childNames = (item.childResourceIds ?? [])
+            .map((childId) => pool.find((entry) => entry.id === childId)?.name)
+            .filter((name): name is string => Boolean(name))
+          if (childNames.length) {
+            table[table.length - 1] = { ...table[table.length - 1], source_images: childNames }
           }
         }
       }
@@ -2475,10 +2478,13 @@ export function AgentRail({
             }
           }
         }
+        const topLevelBound: ProjectResource[] = ids
+          .map((id) => pool.find((entry) => entry.id === id))
+          .filter((item): item is ProjectResource => Boolean(item))
         const tokenOf = new Map<string, string>()   // resource id → <Subject k>/<Picture m>
         let subjectNo = 0
         let pictureNo = 0
-        for (const item of bound) {
+        for (const item of topLevelBound) {
           if (item.type === 'Subject') { subjectNo += 1; tokenOf.set(item.id, `<Subject ${subjectNo}>`) }
           else if (item.type === 'Picture') { pictureNo += 1; tokenOf.set(item.id, `<Picture ${pictureNo}>`) }
         }
