@@ -233,40 +233,32 @@ export function PlanPreview({
             ) : null}
             {editingIndex === segmentIndex ? (
               <div className="flex flex-col gap-1.5 rounded p-2" style={{ background: FIELD_BG, border: `1px dashed ${BORDER}` }}>
-                {/* 段名 / 钩子 / 时长 固定同一行，窄栏也不换行 */}
-                <div className="grid items-center gap-2 text-[11px]" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) 64px' }}>
-                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.name} placeholder="段名" onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
-                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.beat} placeholder="钩子/beat" onChange={(e) => setEditDraft({ ...editDraft, beat: e.target.value })} />
-                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.duration} placeholder="秒" onChange={(e) => setEditDraft({ ...editDraft, duration: e.target.value })} />
+                {/* 六个设置排在同一行：段名 / 钩子 / 时长 / 衔接 / 参考图 / 任务 */}
+                <div className="grid items-center gap-1.5 text-[11px]" style={{ gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1.2fr) 56px 132px 100px 92px' }}>
+                  <input title="段名" style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.name} placeholder="段名" onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+                  <input title="钩子/beat" style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.beat} placeholder="钩子/beat" onChange={(e) => setEditDraft({ ...editDraft, beat: e.target.value })} />
+                  <input title="时长（秒）" style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.duration} placeholder="秒" onChange={(e) => setEditDraft({ ...editDraft, duration: e.target.value })} />
+                  <select title="衔接" style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={editDraft.contextMode} onChange={(event) => setEditDraft({ ...editDraft, contextMode: event.target.value })}>
+                    <option value="shot">shot 独立镜头</option>
+                    <option value="context">context 带上下文</option>
+                    <option value="context_drift">context_drift 漂移</option>
+                  </select>
+                  <select title="参考图" style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={editDraft.refImageSize} onChange={(event) => setEditDraft({ ...editDraft, refImageSize: event.target.value })}>
+                    <option value="">参考图跟随脚本</option>
+                    <option value="match">参考图 match</option>
+                    <option value="max">参考图 max</option>
+                  </select>
+                  <select title="任务" style={{ ...fieldStyle, padding: '1px 3px', width: '100%', minWidth: 0 }} value={editDraft.taskType} onChange={(event) => setEditDraft({ ...editDraft, taskType: event.target.value })}>
+                    <option value="">任务跟随脚本</option>
+                    <option value="r2v">R2V</option>
+                    <option value="fmlf2v">FMLF2V</option>
+                    <option value="vi2v">VI2V</option>
+                    <option value="l2v">L2V</option>
+                    <option value="passthrough">Pass</option>
+                  </select>
                 </div>
                 <textarea style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }} value={editDraft.summary} placeholder="本段概要" onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })} />
                 <textarea style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }} value={editDraft.directorNote} placeholder="导演说明（可选）" onChange={(e) => setEditDraft({ ...editDraft, directorNote: e.target.value })} />
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                    <label className="flex items-center gap-1">衔接
-                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.contextMode} onChange={(event) => setEditDraft({ ...editDraft, contextMode: event.target.value })}>
-                        <option value="shot">shot 独立镜头</option>
-                        <option value="context">context 带上一段上下文</option>
-                        <option value="context_drift">context_drift 上下文漂移</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-1">参考图
-                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.refImageSize} onChange={(event) => setEditDraft({ ...editDraft, refImageSize: event.target.value })}>
-                        <option value="">跟随脚本</option>
-                        <option value="match">match</option>
-                        <option value="max">max</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-1">任务
-                      <select style={{ ...fieldStyle, padding: '1px 3px' }} value={editDraft.taskType} onChange={(event) => setEditDraft({ ...editDraft, taskType: event.target.value })}>
-                        <option value="">跟随脚本</option>
-                        <option value="r2v">R2V</option>
-                        <option value="fmlf2v">FMLF2V</option>
-                        <option value="vi2v">VI2V</option>
-                        <option value="l2v">L2V</option>
-                        <option value="passthrough">Pass</option>
-                      </select>
-                    </label>
-                  </div>
                 <div className="flex gap-2">
                   <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => {
                     onMutateSegments?.((segs) => segs.map((seg, i) => (
