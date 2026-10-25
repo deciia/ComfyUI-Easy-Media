@@ -586,6 +586,36 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'get_prompt_context',
+        description: '写提示词前先取上下文包：该段脚本要点、时长、任务类型/衔接、绑定资源与可用令牌编号（明确到 1..n）、已有 A/B 稿、写作检查清单。拿它之后再自由写作，不需要按固定模板填。',
+        parameters: {
+          type: 'object',
+          properties: { index: { type: 'number', description: '段号，1 起' } },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'write_prompt',
+        description: '把一段的最终提示词写回脚本（可同时写任务轨）。写入前自动校验令牌编号/占位符/收尾句；有 error 会拒绝，可传 force=true 强写。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '段号，1 起' },
+            text: { type: 'string', description: '完整提示词正文' },
+            variant: { type: 'string', enum: ['a', 'b'], description: '写 A 还是 B（默认 a）' },
+            to_task_track: { type: 'boolean', description: '同时写入任务轨（默认 false）' },
+            force: { type: 'boolean', description: '忽略校验错误强写（默认 false）' },
+          },
+          required: ['index', 'text'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'retoken_prompts',
         description: '按当前绑定重排提示词令牌：读取 subject_definitions 里"令牌 → 名称"的对应，重建为当前绑定顺序的编号；已被升格为主体的图片改写成 <Subject n>，越界的幽灵编号整条移除。默认 dry_run 只给逐行 diff，confirm=true 才写回。',
         parameters: {
@@ -2256,6 +2286,132 @@ export function AgentRail({
           zeroReference.length ? `有 ${zeroReference.length} 个零引用资产，可删除或补绑定` : '无零引用资产',
         ],
         note: '此工具只出表，不建不删。用户确认后再执行生成/删除。',
+      }
+    }
+
+    if (name === 'get_prompt_context') {
+      const index = Number(args.index ?? 0)
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      const segment = planSegments[index - 1]
+      if (!segment) return { error: `段 ${index} 不存在（共 ${planSegments.length} 段）` }
+      const ids = boundIdsForSegment(index - 1)
+      const pool = readResources(projectKey) as ProjectResource[]
+      const table: Array<Record<string, unknown>> = []
+      let subjectNo = 0
+      let pictureNo = 0
+      let audioNo = 0
+      let videoNo = 0
+      const push = (item: ProjectResource, via?: string) => {
+        let token = ''
+        if (item.type === 'Subject') { subjectNo += 1; token = `<Subject ${subjectNo}>` }
+        else if (item.type === 'Picture') { pictureNo += 1; token = `<Picture ${pictureNo}>` }
+        else if (item.type === 'Audio') { audioNo += 1; token = `<Audio ${audioNo}>` }
+        else if (item.type === 'Video') { videoNo += 1; token = `<Video ${videoNo}>` }
+        table.push({
+          token,
+          type: item.type,
+          name: item.name,
+          status: item.status,
+          file: item.imageFile ?? item.audioFile ?? item.videoFile ?? null,
+          via: via ?? 'direct',
+          retention: item.retention ?? [],
+        })
+      }
+      for (const id of ids) {
+        const item = pool.find((entry) => entry.id === id)
+        if (!item) continue
+        push(item)
+        if (item.type === 'Subject') {
+          for (const childId of item.childResourceIds ?? []) {
+            const child = pool.find((entry) => entry.id === childId)
+            if (child) push(child, `主体「${item.name}」子图`)
+          }
+        }
+      }
+      const settings = (segment.settings ?? {}) as Record<string, unknown>
+      return {
+        segment: index,
+        name: String(segment.name ?? ''),
+        duration_seconds: Number(segment.duration_seconds ?? 0),
+        beat: String(segment.beat ?? ''),
+        summary: String(segment.summary ?? ''),
+        task_type: String(settings.taskType ?? ''),
+        context_mode: String(settings.contextMode ?? ''),
+        shots: Array.isArray(segment.shots) ? (segment.shots as Array<Record<string, unknown>>).map((shot) => ({
+          framing: String(shot.framing ?? ''),
+          action: String(shot.action ?? ''),
+        })) : [],
+        tokens: table,
+        limits: { subject: subjectNo, picture: pictureNo, audio: audioNo, video: videoNo },
+        existing: {
+          prompt_a_len: String(segment.promptA ?? '').length,
+          prompt_b_len: String(segment.promptB ?? '').length,
+          final_a_len: String(segment.finalA ?? '').length,
+          final_b_len: String(segment.finalB ?? '').length,
+        },
+        checklist: [
+          '六段式键名：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music',
+          '人物与招牌物用 <Subject n> 定义身份；场景/道具用 <Picture n>',
+          `编号不得越界：Subject ≤ ${subjectNo}，Picture ≤ ${pictureNo}，Audio ≤ ${audioNo}，Video ≤ ${videoNo}`,
+          '每个令牌在声明处写一次，detailed_description 只在真正要对齐的镜头点一次（总引用 ≤ 绑定数×2）',
+          '每段结尾必须有：全片画面不得出现任何文字、字幕、logo 或水印叠加。',
+          '台词用 <d>[Chinese] …</d>；禁止 None / N/A / undefined',
+        ],
+        note: '这是上下文包，不是模板。按你的判断自由写，写完用 write_prompt 落库（会自动校验）。',
+      }
+    }
+
+    if (name === 'write_prompt') {
+      const index = Number(args.index ?? 0)
+      const text = String(args.text ?? '')
+      if (!text.trim()) return { error: 'text 不能为空' }
+      const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      const segment = planSegments[index - 1]
+      if (!segment) return { error: `段 ${index} 不存在` }
+      const audit = auditPrompt(index - 1, text)
+      const errors = audit.problems.filter((item) => item.level === 'error')
+      if (errors.length && args.force !== true) {
+        return { error: '校验未通过，未写入（可修好后重试，或 force=true）', audit, hint: '可用 fix_prompts 自动修 None/收尾句，retoken_prompts 重排编号。' }
+      }
+      const nextSegments = planSegments.map((item, i) => (
+        i === index - 1
+          ? { ...item, ...(variant === 'b' ? { promptB: text, finalB: text } : { promptA: text, finalA: text }) }
+          : item
+      ))
+      writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
+
+      let taskWrite: Record<string, unknown> | null = null
+      if (args.to_task_track === true) {
+        const summary = (globalThis as unknown as {
+          __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+        }).__easyMediaTimelineSummary
+        const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+        const stableKey = String(segment.stable_key ?? '')
+        const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
+          ?? tasks.find((task) => Number(task.index ?? 0) === index)
+        const applyAll = (globalThis as unknown as {
+          __easyMediaApplyAll?: (segmentId: string, payload: Record<string, unknown>) => boolean
+        }).__easyMediaApplyAll
+        if (matched?.id && applyAll) {
+          const ok = applyAll(String(matched.id), { prompt: text, variant })
+          taskWrite = { ok, task_index: Number(matched.index ?? index) }
+        } else {
+          taskWrite = { ok: false, reason: '任务轨未就绪或该段尚未落轨' }
+        }
+      }
+      const flush = await flushProjectToDisk()
+      return {
+        ok: true,
+        segment: index,
+        variant,
+        length: text.length,
+        audit,
+        task_track: taskWrite,
+        saved: flush.saved,
+        note: errors.length ? '已按 force 强写，注意仍有 error。' : '已写入并通过校验。',
       }
     }
 
