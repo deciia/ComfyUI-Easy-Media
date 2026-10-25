@@ -153,6 +153,7 @@ export function PlanPreview({
               {field('ratio', '比例', [['9:16', '9:16'], ['16:9', '16:9'], ['1:1', '1:1'], ['4:3', '4:3']])}
               {field('refImageSize', '参考图', [['match', 'match'], ['max', 'max']])}
               {field('taskType', '任务', [['', '未设置（按素材推断）'], ['r2v', 'R2V'], ['fmlf2v', 'FMLF2V'], ['vi2v', 'VI2V'], ['l2v', 'L2V'], ['passthrough', 'Pass']])}
+              {field('contextMode', '衔接', [['shot', 'shot'], ['context', 'context'], ['context_drift', 'context_drift']])}
             </div>
           )
         })() : null}

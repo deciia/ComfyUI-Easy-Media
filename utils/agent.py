@@ -67,6 +67,11 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
   · 完全没有参考素材，纯描述生成 → T2V（task_mode=default）
   · 明确要求直通不生成 → Pass（task_mode=passthrough）
 - 判断结果用 set_task_modes 一次性写入（可附 reason 说明依据），不要靠界面默认值，也不要写死规则。
+- 同时判断衔接模式 context_mode：
+  · shot = 本段独立切镜，不与上一段画面连续
+  · context = 承接上一段末帧继续演（同场景同机位延续、动作接续）
+  · context_drift = 允许明显跳变（换场、换时间、风格突变）
+- 连续动作/同一场景延续用 context；换场或明显跳切用 shot/context_drift。逐段给出依据，不要整片一刀切。
 - 若某段素材不够支撑想要的模式，先告知用户缺什么，而不是硬套模式。
 
 工作原则：

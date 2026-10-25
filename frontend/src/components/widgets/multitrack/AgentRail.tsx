@@ -537,7 +537,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'set_task_modes',
-        description: '按素材与稿内令牌判断并设置各段任务类型（助手自己决策，不要盲填）。task_mode: default=T2V(无参考素材) / ref=R2V(参考图或参考视频/音频做主体或风格依据) / l2v=L2V(给尾帧) / edit=VI2V(改现有视频) / passthrough=Pass(直通不生成)。可只传部分段。',
+        description: '按素材与稿内令牌判断并设置各段任务类型与衔接模式（助手自己决策，不要盲填）。task_mode: default=T2V(无参考素材) / ref=R2V(参考图或参考视频/音频做主体或风格依据) / l2v=L2V(给尾帧) / edit=VI2V(改现有视频) / passthrough=Pass(直通不生成)。可只传部分段。',
         parameters: {
           type: 'object',
           properties: {
@@ -549,6 +549,7 @@ export function AgentRail({
                 properties: {
                   index: { type: 'number', description: '段号，1 起' },
                   task_mode: { type: 'string', enum: ['default', 'ref', 'l2v', 'edit', 'passthrough'] },
+                  context_mode: { type: 'string', enum: ['shot', 'context', 'context_drift'], description: '衔接：shot=独立切镜 / context=承接上一段末帧 / context_drift=允许漂移' },
                   reason: { type: 'string', description: '判断依据（一句话，会写进汇报）' },
                 },
                 required: ['index', 'task_mode'],
@@ -1719,15 +1720,28 @@ export function AgentRail({
         }
         const taskTypeByMode: Record<string, string> = { ref: 'r2v', l2v: 'l2v', edit: 'vi2v', default: 't2v', passthrough: 'passthrough' }
         const taskType = taskTypeByMode[mode] ?? ''
-        applied.push({ index: i + 1, task_mode: mode, task_type: taskType, reason: String(hit.reason ?? '') })
+        const contextMode = String(hit.context_mode ?? '').toLowerCase()
+        const validContext = ['shot', 'context', 'context_drift'].includes(contextMode) ? contextMode : ''
+        applied.push({
+          index: i + 1,
+          task_mode: mode,
+          task_type: taskType,
+          context_mode: validContext || undefined,
+          reason: String(hit.reason ?? ''),
+        })
         // 同步写任务轨（若已落轨）
         const stableKey = String(segment.stable_key ?? '')
         const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
           ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
         if (matched?.id && updateSegment) {
-          updateSegment(String(matched.id), { taskMode: mode })
+          updateSegment(String(matched.id), {
+            taskMode: mode,
+            ...(validContext ? { continuityMode: validContext } : {}),
+          })
         }
-        return { ...segment, settings: { ...((segment.settings ?? {}) as Record<string, unknown>), taskType } }
+        const nextSettings: Record<string, unknown> = { ...((segment.settings ?? {}) as Record<string, unknown>), taskType }
+        if (validContext) nextSettings.contextMode = validContext
+        return { ...segment, settings: nextSettings }
       })
       writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
       const flush = await flushProjectToDisk()
