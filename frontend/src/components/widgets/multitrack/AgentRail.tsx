@@ -2186,7 +2186,7 @@ export function AgentRail({
     const text = String(textOverride ?? input).trim()
     if (!text) return
     // 纯工具名（如 dump_state / list_bindings）→ 直接执行，不经过模型
-    const toolNames = new Set((AGENT_TOOLS as Array<{ function?: { name?: string } }>)
+    const toolNames = new Set((AGENT_TOOLS as unknown as Array<{ function?: { name?: string } }>)
       .map((item) => String(item?.function?.name ?? ''))
       .filter(Boolean))
     if (!busy && toolNames.has(text)) {
