@@ -2081,6 +2081,7 @@ export function AgentRail({
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === activeReplyRef.current
           ? { ...message, question: { id: qid, text: question, options } }
+          } as never)
           : message
       )))
       // 答案可能由别的实例写入 workspace（组件重挂载后仍能取到）
@@ -2160,12 +2161,12 @@ export function AgentRail({
       const pretty = JSON.stringify(result, null, 2)
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === replyId
-          ? {
+          ? ({
               ...message,
               status: 'done',
               text: `${toolName} 结果：\n\`\`\`json\n${pretty.slice(0, 8000)}\n\`\`\``,
               steps: [{ label: toolName, status: 'done' }],
-              toolCalls: [{ id: `tc-${stamp}`, name: toolName, args: toolArgs, status: 'done', result: pretty.slice(0, 4000) }],
+              toolCalls: [{ id: `tc-${stamp}`, name: toolName, args: toolArgs, status: 'done', result: pretty.slice(0, 4000) }]],
             }
           : message
       )))
@@ -2186,7 +2187,7 @@ export function AgentRail({
     const text = String(textOverride ?? input).trim()
     if (!text) return
     // 纯工具名（如 dump_state / list_bindings）→ 直接执行，不经过模型
-    const toolNames = new Set((TOOL_DEFINITIONS as Array<{ function?: { name?: string } }>)
+    const toolNames = new Set((AGENT_TOOLS as Array<{ function?: { name?: string } }>)
       .map((item) => String(item?.function?.name ?? ''))
       .filter(Boolean))
     if (!busy && toolNames.has(text)) {
