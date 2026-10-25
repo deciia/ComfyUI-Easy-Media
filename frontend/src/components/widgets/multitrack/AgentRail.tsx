@@ -1812,9 +1812,10 @@ export function AgentRail({
         fixed.push({ resource: resource.name, from: String(resource.imageFile ?? ''), to: nextName })
       })
 
-      // 3) 修复后重新同步任务轨
+      // 3) 修复后重新同步任务轨（批量单次提交）
       let synced = 0
       if (updateSegment) {
+        const patches: Array<{ segmentId: string; images: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }> }> = []
         for (let i = 0; i < planSegments.length; i += 1) {
           if (onlyIndex && onlyIndex !== i + 1) continue
           const stableKey = String((planSegments[i] as Record<string, unknown>).stable_key ?? '')
@@ -1823,7 +1824,14 @@ export function AgentRail({
           if (!matched?.id) continue
           const images = imagesFromBoundIds(boundIdsForSegment(i))
           if (!images.length) continue
-          if (updateSegment(String(matched.id), { images })) synced += 1
+          patches.push({ segmentId: String(matched.id), images })
+        }
+        if (patches.length) {
+          const bulkUpdate = (globalThis as unknown as {
+            __easyMediaUpdateSegments?: (items: typeof patches) => boolean
+          }).__easyMediaUpdateSegments
+          const done = bulkUpdate ? bulkUpdate(patches) : patches.every((patch) => updateSegment(patch.segmentId, { images: patch.images }))
+          if (done) synced = patches.length
         }
       }
 
@@ -1866,7 +1874,11 @@ export function AgentRail({
         __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
       }).__easyMediaUpdateSegment
       if (!updateSegment) return { error: '任务轨编辑器未就绪，无法同步' }
+      const bulkUpdate = (globalThis as unknown as {
+        __easyMediaUpdateSegments?: (items: Array<{ segmentId: string; images: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }> }>) => boolean
+      }).__easyMediaUpdateSegments
       const results: Array<Record<string, unknown>> = []
+      const patches: Array<{ segmentId: string; images: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }> }> = []
       for (let i = 0; i < planSegments.length; i += 1) {
         if (onlyIndex && onlyIndex !== i + 1) continue
         const stableKey = String((planSegments[i] as Record<string, unknown>).stable_key ?? '')
@@ -1876,13 +1888,18 @@ export function AgentRail({
           results.push({ index: i + 1, ok: false, reason: '该段未落地任务轨' })
           continue
         }
-        const images = imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`))
+        const images = imagesFromBoundIds(boundIdsForSegment(i))
         if (!images.length) {
           results.push({ index: i + 1, ok: false, reason: '无已绑定且带文件的图片' })
           continue
         }
-        const done = updateSegment(String(matched.id), { images })
-        results.push({ index: i + 1, ok: done, images: images.map((item) => item.name) })
+        patches.push({ segmentId: String(matched.id), images })
+        results.push({ index: i + 1, ok: true, images: images.map((item) => item.name) })
+      }
+      // 所有段一次性提交：多次单段提交会互相覆盖（只留最后一段）
+      if (patches.length) {
+        if (bulkUpdate) bulkUpdate(patches)
+        else for (const patch of patches) updateSegment(patch.segmentId, { images: patch.images })
       }
       const synced = results.filter((item) => item.ok).length
       const flush = synced > 0 ? await flushProjectToDisk() : { saved: false, reason: '没有可写入的段' }
