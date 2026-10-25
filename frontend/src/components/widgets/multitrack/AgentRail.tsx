@@ -2517,6 +2517,14 @@ export function AgentRail({
       const audit = auditPrompt(index - 1, text)
       const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
       if (isFragmentWrite) {
+        if (/\.(png|jpe?g|webp|wav|mp3|mp4)\b/i.test(text)) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['片段稿里出现了文件名（.jpg/.png/.wav 等），这是素材清单的写法'],
+            instruction: '不要写文件名：素材一律用令牌引用（<Subject n>/<Picture n>/<Audio n>），名字由编辑器渲染。改完再写。',
+          }
+        }
         if (/可用素材|素材清单|参考素材[:：]/.test(text)) {
           return {
             ok: false,

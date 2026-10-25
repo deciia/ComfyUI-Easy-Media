@@ -1270,7 +1270,8 @@ export function PromptEnhancerModal({
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
     setResultTab('ai')
     registry.__easyMediaAgentAsk([
-      `请把第 ${activeScriptIndex + 1} 段「${name}」写成**片段提示词**，用 write_prompt 写进片段稿（target=fragment），不要动最终提示词。`,
+      `只处理第 ${activeScriptIndex + 1} 段「${name}」：写成**片段提示词**，用 write_prompt 写进片段稿（target=fragment），不要动最终提示词。`,
+      '**范围**：只写这一段。不要改其它段、不要顺手全篇重写、不要额外跑全篇校验；我另说再做。',
       '',
       '【这是什么】',
       '写给我看、给我改的工作稿；改好后你再据此写最终提示词。白话、条目化，不要求六段齐全。',
@@ -1322,7 +1323,8 @@ function askAgentGenerate(language: '中文' | 'English') {
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
   const variant = abTab === 'a' ? 'finalA' : 'finalB'
   const directive = [
-    `请把第 ${activeScriptIndex + 1} 段「${segmentName}」生成为可直接写入任务轨的最终提示词（${language === 'English' ? '英文' : '中文'}正文）。`,
+    `只处理第 ${activeScriptIndex + 1} 段「${segmentName}」：生成为可直接写入任务轨的最终提示词（${language === 'English' ? '英文' : '中文'}正文）。`,
+    '**范围**：只写这一段。不要改其它段、不要顺手全篇重写、不要额外跑全篇校验；我另说再做。',
     '',
     '【信息来源（三份都要看，缺一不可）】',
     '1. **完整分镜**：先 get_segment 读该段全部内容（段名/时长/画面 summary/节奏 beat/镜头 shots/台词/settings），镜头数与台词以分镜为准，不得漏、不得编。',
