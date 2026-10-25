@@ -606,6 +606,7 @@ export function AgentRail({
             index: { type: 'number', description: '段号，1 起' },
             text: { type: 'string', description: '完整提示词正文' },
             variant: { type: 'string', enum: ['a', 'b'], description: '写 A 还是 B（默认 a）' },
+            target: { type: 'string', enum: ['final', 'fragment'], description: 'final=最终提示词（默认）；fragment=片段提示词' },
             to_task_track: { type: 'boolean', description: '同时写入任务轨（默认 false）' },
             force: { type: 'boolean', description: '忽略校验错误强写（默认 false）' },
           },
@@ -2406,13 +2407,21 @@ export function AgentRail({
       const segment = planSegments[index - 1]
       if (!segment) return { error: `段 ${index} 不存在` }
       const audit = auditPrompt(index - 1, text)
-      const errors = audit.problems.filter((item) => item.level === 'error')
+      const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
+      const errors = audit.problems.filter((item) => (
+        !isFragmentWrite || /编号到|None|undefined/.test(String(item.message ?? ''))
+      )).filter((item) => item.level === 'error')
       if (errors.length && args.force !== true) {
         return { error: '校验未通过，未写入（可修好后重试，或 force=true）', audit, hint: '可用 fix_prompts 自动修 None/收尾句，retoken_prompts 重排编号。' }
       }
       const nextSegments = planSegments.map((item, i) => (
         i === index - 1
-          ? { ...item, ...(variant === 'b' ? { promptB: text, finalB: text } : { promptA: text, finalA: text }) }
+          ? {
+                ...item,
+                ...(String(args.target ?? 'final') === 'fragment'
+                  ? (variant === 'b' ? { promptB: text } : { promptA: text })
+                  : (variant === 'b' ? { finalB: text } : { finalA: text })),
+              }
           : item
       ))
       writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
