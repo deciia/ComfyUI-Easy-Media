@@ -1010,6 +1010,13 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
                 new_key = str(entry.pop("api_key", "") or "").strip()
                 entry["api_key"] = new_key or existing_keys.get(str(entry.get("id") or ""), "")
                 cleaned.append(entry)
+            if not cleaned:
+                # 空列表视为无效提交：保留磁盘上已有配置，避免界面异常时误清空
+                return web.json_response({
+                    "ok": False,
+                    "error": "profiles 为空，已忽略本次保存（原有配置保持不变）",
+                    "config": mask_prompt_enhancer_config(current),
+                }, status=400)
             merged["profiles"] = cleaned
             merged["active_profile"] = str(payload.get("active_profile") or "")
             # 顶层同步当前档，保证旧代码仍可读

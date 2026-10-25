@@ -72,9 +72,10 @@ export function DirectorSettingsModal({
     fetch('/easy-media/prompt-studio/config')
       .then((response) => response.json())
       .then((data) => {
-        if (!data?.ok) return
-        const list = Array.isArray(data.profiles) ? data.profiles : []
-        setProfiles(list.map((item: Record<string, unknown>) => ({
+        // GET 返回 { config: {...}, providers: {...} }；兼容直接返回扁平对象的情况
+        const cfg = (data && (data.config ?? data)) as Record<string, unknown>
+        const list = Array.isArray(cfg.profiles) ? (cfg.profiles as Array<Record<string, unknown>>) : []
+        const mapped = list.map((item) => ({
           id: String(item.id ?? ''),
           name: String(item.name ?? item.provider ?? ''),
           provider: String(item.provider ?? ''),
@@ -83,13 +84,31 @@ export function DirectorSettingsModal({
           api_key: '',
           api_key_masked: String(item.api_key_tail ? `…${item.api_key_tail}` : (item.api_key_set ? '已保存' : '')),
           upload_images: item.upload_images !== false,
-        })))
-        setActiveProfile(String(data.active_profile ?? list[0]?.id ?? ''))
+        }))
+        if (mapped.length === 0 && (cfg.provider || cfg.model || cfg.api_key_set)) {
+          // 旧扁平配置：合成一条，避免界面看起来"没有配置"
+          mapped.push({
+            id: 'legacy',
+            name: String(cfg.name ?? cfg.provider ?? '默认配置'),
+            provider: String(cfg.provider ?? ''),
+            model: String(cfg.model ?? ''),
+            base_url: String(cfg.base_url ?? ''),
+            api_key: '',
+            api_key_masked: String(cfg.api_key_tail ? `…${cfg.api_key_tail}` : (cfg.api_key_set ? '已保存' : '')),
+            upload_images: cfg.upload_images !== false,
+          })
+        }
+        setProfiles(mapped)
+        setActiveProfile(String(cfg.active_profile ?? mapped[0]?.id ?? ''))
       })
       .catch(() => { /* ignore */ })
   }, [open])
 
   async function persistApi() {
+    if (profiles.length === 0) {
+      setApiSaving(false)
+      return
+    }
     setApiSaving(true)
     try {
       const response = await fetch('/easy-media/prompt-studio/config', {
