@@ -45,7 +45,8 @@ export function analyzePrompt(prompt: string, referenceMode: boolean) {
   )
   const strayQuotes = quotes.filter((line) => !inDialogue.has(line))
   const issues: PromptIssue[] = []
-  if (!text.trim()) issues.push({ level: 'warn', text: '本段还没有提示词（上方标签已标出缺哪几段）' })
+  if (!text.trim()) issues.push({ level: 'warn', text: '本段还没有提示词' })
+  if (missing.length) issues.push({ level: 'warn', text: `结构缺 ${missing.length} 段：${missing.map((m) => m[1]).join('、')}` })
   if (strayQuotes.length) issues.push({ level: 'error', text: `有 ${strayQuotes.length} 处引号台词不在 <d> 内（会被模型念出来）` })
   if (tagCounts.Subject || tagCounts.Picture || tagCounts.Audio) {
     issues.push({
@@ -125,14 +126,6 @@ export function PromptQualityBar({
     <div className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}` }}>
       <div className="flex flex-wrap items-center gap-1 text-[11px]">
         <span className="text-muted-foreground">{modeLabel}</span>
-        {analysis.sections.map(([key, label]) => {
-          const ok = !analysis.missing.some(([missingKey]) => missingKey === key)
-          return (
-            <span key={key} className="rounded px-1" style={{ border: `1px solid ${ok ? PRIMARY : AMBER}`, color: ok ? PRIMARY : AMBER }} title={key}>
-              {ok ? '✓' : '缺'} {label}
-            </span>
-          )
-        })}
         {analysis.missing.length ? (
           <Button size="sm" variant="secondary" className="h-5 px-1.5 text-[10px]" onClick={insertSkeleton}>
             插入缺失骨架
