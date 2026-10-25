@@ -31,6 +31,7 @@ import {
   type ProjectResource,
   type StoryboardPlanLike,
 } from './agentStore'
+import { AgentMarkdown } from './AgentMarkdown'
 import { checkTaskModeAssets, maxImagesForTaskMode, TASK_MODE_SPECS } from '@/lib/task-mode-spec'
 
 const PANEL_BG = 'hsl(var(--card, 240 10% 10%))'
@@ -3409,7 +3410,11 @@ export function AgentRail({
                   </div>
                 ) : null}
                 {message.text ? (
-                  <div className={message.toolCalls?.length ? 'mt-1 whitespace-pre-wrap' : 'whitespace-pre-wrap'}>{message.text}</div>
+                  <div className={message.toolCalls?.length ? 'mt-1' : ''}>
+                    {message.role === 'assistant'
+                      ? <AgentMarkdown text={message.text} />
+                      : <div className="whitespace-pre-wrap">{message.text}</div>}
+                  </div>
                 ) : null}
                 {message.question ? (
                   <div className="mt-1 rounded p-1.5 text-[11px]" style={{ border: `1px solid ${BORDER}`, background: PANEL_BG }}>
