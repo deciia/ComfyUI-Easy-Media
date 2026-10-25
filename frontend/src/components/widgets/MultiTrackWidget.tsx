@@ -1487,12 +1487,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     const updateSegmentsBulk = (
       patches: Array<{ segmentId: string; images: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }> }>,
     ) => {
-      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      // 用 dataRef 拿最新快照：同一轮里多次工具调用时 data 闭包可能是旧的
+      const live = dataRef.current ?? data
+      const taskTrack = live.tracks.find((track) => track.type === 'task')
       if (!taskTrack || !patches.length) return false
       const stamp = Date.now()
       const byId = new Map(patches.map((item) => [item.segmentId, item]))
       let touched = 0
-      const updatedTracks = data.tracks.map((track) => (
+      const updatedTracks = live.tracks.map((track) => (
         track.id !== taskTrack.id
           ? track
           : {
@@ -1517,16 +1519,17 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       ))
       if (!touched) return false
       commitNormalizedTrackChange({
-        ...data,
+        ...live,
         tracks: updatedTracks,
-        total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+        total_length: calculateTotalLength(updatedTracks, live.frame_rate),
       })
       return true
     }
 
     /** 批量删除任务轨段（含联动任务），单次提交 */
     const deleteTaskSegmentsByIndex = (indexes: number[]) => {
-      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const live = dataRef.current ?? data
+      const taskTrack = live.tracks.find((track) => track.type === 'task')
       if (!taskTrack) return { deleted: [] as string[] }
       const ids = new Set(
         indexes
@@ -1534,11 +1537,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           .filter((id): id is string => Boolean(id)),
       )
       if (!ids.size) return { deleted: [] as string[] }
-      const updatedTracks = deleteSegmentsWithLinkedTasks(data.tracks, ids, data.frame_rate)
+      const updatedTracks = deleteSegmentsWithLinkedTasks(live.tracks, ids, live.frame_rate)
       commitNormalizedTrackChange({
-        ...data,
+        ...live,
         tracks: updatedTracks,
-        total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+        total_length: calculateTotalLength(updatedTracks, live.frame_rate),
       })
       return { deleted: Array.from(ids) }
     }
