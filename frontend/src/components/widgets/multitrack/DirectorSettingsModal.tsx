@@ -104,7 +104,7 @@ export function DirectorSettingsModal({
       .catch(() => { /* ignore */ })
   }, [open])
 
-  async function persistApi() {
+  async function persistApi(activeOverride?: string) {
     if (profiles.length === 0) {
       setApiSaving(false)
       return
@@ -124,7 +124,7 @@ export function DirectorSettingsModal({
             api_key: item.api_key || undefined,
             upload_images: item.upload_images,
           })),
-          active_profile: activeProfile,
+          active_profile: activeOverride ?? activeProfile,
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -140,7 +140,8 @@ export function DirectorSettingsModal({
           api_key_masked: String(item.api_key_tail ? `…${item.api_key_tail}` : (item.api_key_set ? '已保存' : '')),
           upload_images: item.upload_images !== false,
         })))
-        setActiveProfile(String(data?.config?.active_profile ?? activeProfile))
+        setActiveProfile(String(data?.config?.active_profile ?? activeOverride ?? activeProfile))
+        try { globalThis.dispatchEvent(new CustomEvent('easy-media-api-changed')) } catch { /* ignore */ }
         setKeyEditingId('')
       }
     } catch {
@@ -358,8 +359,12 @@ export function DirectorSettingsModal({
                         type="button"
                         className="rounded px-2 py-0.5"
                         style={{ border: `1px solid ${active ? PRIMARY : BORDER}`, color: active ? PRIMARY : undefined }}
-                        onClick={() => setActiveProfile(item.id)}
-                        title="切换为当前生效配置"
+                        onClick={() => {
+                          setActiveProfile(item.id)
+                          // 切换即保存，避免"点了使用但没保存"的误解
+                          void persistApi(item.id)
+                        }}
+                        title="切换为当前生效配置（立即保存）"
                       >
                         {active ? '使用中' : '使用'}
                       </button>

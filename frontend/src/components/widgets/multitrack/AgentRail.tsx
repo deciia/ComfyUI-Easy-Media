@@ -139,14 +139,20 @@ export function AgentRail({
 
   useEffect(() => {
     let cancelled = false
-    fetch('/easy-media/agent/info')
-      .then((response) => response.json())
-      .then((data) => {
-        if (!cancelled && data?.ok) setModel(String(data.model || ''))
-      })
-      .catch(() => undefined)
+    const loadInfo = () => {
+      fetch('/easy-media/agent/info')
+        .then((response) => response.json())
+        .then((data) => {
+          if (!cancelled && data?.ok) setModel(String(data.model || ''))
+        })
+        .catch(() => undefined)
+    }
+    loadInfo()
+    // 设置里切换 API 配置后刷新模型名
+    globalThis.addEventListener?.('easy-media-api-changed', loadInfo)
     return () => {
       cancelled = true
+      globalThis.removeEventListener?.('easy-media-api-changed', loadInfo)
     }
   }, [])
 
