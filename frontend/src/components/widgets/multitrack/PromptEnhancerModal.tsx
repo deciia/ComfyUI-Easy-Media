@@ -1268,25 +1268,11 @@ export function PromptEnhancerModal({
     const segment = activeScriptSegment as unknown as Record<string, unknown> | undefined
     const name = String(segment?.name ?? `第 ${activeScriptIndex + 1} 段`)
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
-    const pool = readResources(projectKey) as ProjectResource[]
-    const ids = boundIdsForSegment(activeScriptIndex)
-    let sN = 0
-    let pN = 0
-    let aN = 0
-    const parts: string[] = []
-    for (const id of ids) {
-      const item = pool.find((entry) => entry.id === id)
-      if (!item) continue
-      let token = ''
-      if (item.type === 'Subject') { sN += 1; token = `<Subject ${sN}>` }
-      else if (item.type === 'Picture') { pN += 1; token = `<Picture ${pN}>` }
-      else if (item.type === 'Audio') { aN += 1; token = `<Audio ${aN}>` }
-      if (token) parts.push(`${token}=${item.name}`)
-    }
-    const bindingTable = parts.join('｜')
-    const subjectCount = sN
-    const pictureCount = pN
-    const audioCount = aN
+    const tokenRows = editorResources.filter((item) => item.type === 'subject' || item.type === 'image' || item.type === 'audio')
+    const bindingTable = tokenRows.map((item) => `${item.token}=${item.label}`).join('｜')
+    const subjectCount = editorResources.filter((item) => item.type === 'subject').length
+    const pictureCount = editorResources.filter((item) => item.type === 'image').length
+    const audioCount = editorResources.filter((item) => item.type === 'audio').length
     setResultTab('ai')
     registry.__easyMediaAgentAsk([
       `只做第 ${activeScriptIndex + 1} 段「${name}」的片段稿：用 write_prompt(index=${activeScriptIndex + 1}, target=fragment) 写入，不要动终稿和其它段。`,
@@ -1313,9 +1299,9 @@ export function PromptEnhancerModal({
 function askAgentGenerate(language: '中文' | 'English') {
   const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
-  const variant = abTab === 'a' ? 'finalA' : 'finalB'
+
   const directive = [
-    `只做第 ${activeScriptIndex + 1} 段「${segmentName}」的终稿：用 write_prompt(index=${activeScriptIndex + 1}, target=final) 写入，不要动片段稿和其它段。`,
+    `只做第 ${activeScriptIndex + 1} 段「${segmentName}」的终稿：用 write_prompt(index=${activeScriptIndex + 1}, target=final) 写入，不要动片段稿和其它段（${language === 'English' ? '英文' : '中文'}正文）。`,
     '',
     '【三份输入，先读】',
     '1. get_segment：完整分镜（镜头/台词/时长/settings）；',
