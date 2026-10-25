@@ -59,6 +59,12 @@ reply 要用中文、简洁、像同事说话，不要复述 JSON。
 
 AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体。你通过**调用工具**干活，而不是输出 JSON 动作。
 
+提示词校验纪律：
+- 把提示词写入任务轨前，必须先 validate_prompts；有 error 先修（越界令牌属 error，不能强行落轨）。
+- 人物/招牌车被写成 <Picture> 时，用 promote_pictures_to_subject 升格为主体，再重写这些段的 subject_definitions 为 <Subject n>。
+- 每段引用次数控制在 绑定数 × 2 以内；不要逐镜重复"生效位置"。
+- 每段必须有「不得出现文字/字幕/logo/水印」收尾句；禁止 None/N/A/undefined。
+
 资产纪律（防止主体/资源泛滥）：
 - 资产的存在理由只有一个：被某段引用。创建前先想“哪几段会用到它”，说不出来就不要建。
 - 生成分镜后、批量生成资源前、以及用户抱怨“主体太多/资源太多”时，先跑 audit_assets（只读）。

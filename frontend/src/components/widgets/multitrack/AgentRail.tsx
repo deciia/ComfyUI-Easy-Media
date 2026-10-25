@@ -3140,6 +3140,26 @@ export function AgentRail({
       return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
     }
     if (name === 'apply_storyboard') {
+      // 落轨前置校验：令牌越界/占位符直接拦下，避免脏提示词进任务轨
+      {
+        const planForGate = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+        const gateSegments = (planForGate?.segments ?? []) as Array<Record<string, unknown>>
+        const gateErrors: Array<Record<string, unknown>> = []
+        for (let i = 0; i < gateSegments.length; i += 1) {
+          const prompt = String(gateSegments[i].promptA ?? gateSegments[i].finalA ?? gateSegments[i].user_prompt ?? '')
+          if (!prompt.trim()) continue
+          const result = auditPrompt(i, prompt)
+          const errors = result.problems.filter((item) => item.level === 'error')
+          if (errors.length) gateErrors.push({ segment: i + 1, errors })
+        }
+        if (gateErrors.length && args.force !== true) {
+          return {
+            error: '提示词未通过校验，已拒绝落轨（修好后重试，或传 force=true 强制）',
+            segments: gateErrors,
+            hint: '先跑 validate_prompts 看全部问题；fix_prompts 可自动修 None/缺禁字幕句；越界令牌需要重写对应段。',
+          }
+        }
+      }
       const planCurrent = readWorkspace(projectKey).plan as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
       if (!planCurrent || !(planCurrent.segments ?? []).length) return { error: '当前没有可应用的分镜脚本' }
       const applyTracks = (globalThis as unknown as { __easyMediaApplyStoryboard?: (items: unknown) => boolean }).__easyMediaApplyStoryboard
