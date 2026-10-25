@@ -1880,6 +1880,47 @@ export function AgentRail({
       }
     }
 
+    /** 按括号里的资源名，把令牌编号对齐到真实绑定（只改编号，不动任何文字） */
+    const alignTokenNumbers = (segmentIndex: number, text: string) => {
+      const ids = boundIdsForSegment(segmentIndex)
+      const pool = readResources(projectKey) as ProjectResource[]
+      const topLevel = ids
+        .map((id) => pool.find((entry) => entry.id === id))
+        .filter((item): item is ProjectResource => Boolean(item))
+      const nameToToken = new Map<string, string>()
+      let subjectNo = 0
+      let pictureNo = 0
+      let audioNo = 0
+      let videoNo = 0
+      for (const item of topLevel) {
+        let token = ''
+        if (item.type === 'Subject') { subjectNo += 1; token = `<Subject ${subjectNo}>` }
+        else if (item.type === 'Picture') { pictureNo += 1; token = `<Picture ${pictureNo}>` }
+        else if (item.type === 'Audio') { audioNo += 1; token = `<Audio ${audioNo}>` }
+        else if (item.type === 'Video') { videoNo += 1; token = `<Video ${videoNo}>` }
+        if (token && item.name) nameToToken.set(item.name, token)
+      }
+      const fixes: Array<{ from: string; to: string; name: string }> = []
+      const aligned = text.replace(/<(Subject|Picture|Audio|Video)\s+(\d+)>\s*[（(]([^）)]{1,40})[）)]/g, (whole, kind, num, inner) => {
+        const written = String(inner)
+        let matchedName = ''
+        let matchedToken = ''
+        for (const [name, token] of nameToToken.entries()) {
+          if (!name || !written.includes(name)) continue
+          if (!token.startsWith(`<${kind} `)) continue
+          matchedName = name
+          matchedToken = token
+          break
+        }
+        if (!matchedToken) return whole
+        const current = `<${kind} ${num}>`
+        if (current === matchedToken) return whole
+        fixes.push({ from: current, to: matchedToken, name: matchedName })
+        return whole.replace(current, matchedToken)
+      })
+      return { text: aligned, fixes }
+    }
+
     /** 提示词结构校验：返回问题列表（空=通过） */
     const auditPrompt = (segmentIndex: number, prompt: string) => {
       const ids = boundIdsForSegment(segmentIndex)
@@ -1944,7 +1985,7 @@ export function AgentRail({
         const ownerToken = Array.from(tokenToName.entries()).find(([, name]) => name && written.includes(name))?.[0]
         if (ownerToken && ownerToken !== token && expected && !written.includes(expected)) {
           problems.push({
-            level: 'error',
+            level: 'warn',
             message: `${token} 后面写的是「${written}」，但 ${token} 对应「${expected}」，「${written}」其实是 ${ownerToken}：请照绑定表抄编号，不要推断`,
           })
         }
@@ -2424,8 +2465,11 @@ export function AgentRail({
 
     if (name === 'write_prompt') {
       const index = Number(args.index ?? 0)
-      const text = String(args.text ?? '')
-      if (!text.trim()) return { error: 'text 不能为空' }
+      const rawText = String(args.text ?? '')
+      if (!rawText.trim()) return { error: 'text 不能为空' }
+      // 编号按真实绑定自动对齐（只改编号，不动文字），改动会随结果回报
+      const alignedResult = alignTokenNumbers(index - 1, rawText)
+      const text = alignedResult.text
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
       const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
@@ -2477,6 +2521,11 @@ export function AgentRail({
         variant,
         length: text.length,
         audit,
+        aligned_tokens: alignedResult.fixes.length ? alignedResult.fixes : undefined,
+        aligned_note: alignedResult.fixes.length
+          ? `已按绑定表把 ${alignedResult.fixes.length} 处令牌编号对齐（文字未改）：` +
+            alignedResult.fixes.map((f) => `${f.from}→${f.to}（${f.name}）`).join('、')
+          : undefined,
         task_track: taskWrite,
         saved: flush.saved,
         note: errors.length ? '已按 force 强写，注意仍有 error。' : '已写入并通过校验。',
