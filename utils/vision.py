@@ -33,9 +33,10 @@ def _vision_candidates(config: dict | None = None) -> list[dict]:
     """按优先级挑出支持图像的配置档：先支持图像的自定义档，再环境变量里的多模态 provider。"""
     data = config if config is not None else load_config()
     profiles, active = normalize_profiles(data)
+    # 当前对话模型优先（用户确认 deepseek-flash 可直接读图）；不行再回退到其它支持图像的档
     ordered = sorted(
         profiles,
-        key=lambda item: (0 if item.get("id") == active else 1, 0 if item.get("supports_image") else 1),
+        key=lambda item: (0 if item.get("id") == active else 1, 0 if item.get("supports_image") else 2),
     )
     candidates = [
         {
@@ -43,10 +44,10 @@ def _vision_candidates(config: dict | None = None) -> list[dict]:
             "model": item["model"],
             "base_url": normalize_endpoint(item["provider"], item["base_url"]),
             "api_key": item["api_key"],
-            "label": item.get("name") or item["provider"],
+            "label": (item.get("name") or item["provider"]) + ("" if item.get("id") == active else "（备用）"),
         }
         for item in ordered
-        if item.get("supports_image") and item.get("api_key")
+        if item.get("api_key")
     ]
     if candidates:
         return candidates
