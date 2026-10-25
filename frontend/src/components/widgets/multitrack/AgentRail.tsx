@@ -536,6 +536,32 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'set_task_modes',
+        description: '按素材与稿内令牌判断并设置各段任务类型（助手自己决策，不要盲填）。task_mode: default=T2V(无参考素材) / ref=R2V(参考图或参考视频/音频做主体或风格依据) / l2v=L2V(给尾帧) / edit=VI2V(改现有视频) / passthrough=Pass(直通不生成)。可只传部分段。',
+        parameters: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              description: '要设置的段',
+              items: {
+                type: 'object',
+                properties: {
+                  index: { type: 'number', description: '段号，1 起' },
+                  task_mode: { type: 'string', enum: ['default', 'ref', 'l2v', 'edit', 'passthrough'] },
+                  reason: { type: 'string', description: '判断依据（一句话，会写进汇报）' },
+                },
+                required: ['index', 'task_mode'],
+              },
+            },
+          },
+          required: ['items'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'dump_state',
         description: '导出排障快照（各段 A/B 绑定、资源池文件字段、任务轨 stable_key 与 images），写入 user/DeciiaEasyMedia/agent_state_dump.json。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1666,6 +1692,48 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'set_task_modes') {
+      const items = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : []
+      if (!items.length) return { error: 'items 不能为空' }
+      const validModes = new Set(['default', 'ref', 'l2v', 'edit', 'passthrough'])
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '当前项目没有分镜脚本' }
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const updateSegment = (globalThis as unknown as {
+        __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+      }).__easyMediaUpdateSegment
+
+      const applied: Array<Record<string, unknown>> = []
+      const rejected: Array<Record<string, unknown>> = []
+      const nextSegments = planSegments.map((segment, i) => {
+        const hit = items.find((item) => Number(item.index ?? 0) === i + 1)
+        if (!hit) return segment
+        const mode = String(hit.task_mode ?? '').toLowerCase()
+        if (!validModes.has(mode)) {
+          rejected.push({ index: i + 1, task_mode: mode, reason: '非法模式' })
+          return segment
+        }
+        const taskTypeByMode: Record<string, string> = { ref: 'r2v', l2v: 'l2v', edit: 'vi2v', default: 't2v', passthrough: 'passthrough' }
+        const taskType = taskTypeByMode[mode] ?? ''
+        applied.push({ index: i + 1, task_mode: mode, task_type: taskType, reason: String(hit.reason ?? '') })
+        // 同步写任务轨（若已落轨）
+        const stableKey = String(segment.stable_key ?? '')
+        const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
+          ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
+        if (matched?.id && updateSegment) {
+          updateSegment(String(matched.id), { taskMode: mode })
+        }
+        return { ...segment, settings: { ...((segment.settings ?? {}) as Record<string, unknown>), taskType } }
+      })
+      writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
+      const flush = await flushProjectToDisk()
+      return { ok: applied.length > 0, applied, rejected, saved: flush.saved, save_error: flush.saved ? undefined : flush.reason }
+    }
+
     if (name === 'dump_state') {
       const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (plan?.segments ?? []) as Array<Record<string, unknown>>
@@ -2048,8 +2116,7 @@ export function AgentRail({
           durationFrames: Number(segment.duration_frames ?? Math.round(duration * fps)) || Math.round(duration * fps),
           brief: formatPlanSegmentBrief(segment as never),
           prompt: String(segment.finalA ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? ''),
-          taskMode: (settings.taskType as string | undefined)
-            || (imagesFromBoundIds(boundIdsForSegment(i)).length ? 'r2v' : undefined),
+          taskMode: (settings.taskType as string | undefined) || undefined,
           continuityMode: (settings.contextMode as string | undefined) || undefined,
           refImageSize: (settings.refImageSize as string | undefined) || undefined,
           stableKey: String((segment as Record<string, unknown>).stable_key ?? `sk-${i + 1}`),
