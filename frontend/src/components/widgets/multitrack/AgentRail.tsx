@@ -1623,7 +1623,7 @@ export function AgentRail({
           results.push({ index: i + 1, ok: false, reason: '该段未落地任务轨' })
           continue
         }
-        const images = imagesFromBoundIds(readBindings(projectKey, script-:a))
+        const images = imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`))
         if (!images.length) {
           results.push({ index: i + 1, ok: false, reason: '无已绑定且带文件的图片' })
           continue
