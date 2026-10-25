@@ -1261,6 +1261,30 @@ export function PromptEnhancerModal({
   }
 
   /** 把「生成标准提示词」这件事交给 AI 助手执行（进度显示在右栏对话里） */
+  /** 「分镜→片段」：派给 AI 助手写片段提示词（白话、不要求六段），不可用则回退本地构建 */
+  function askAgentFragment(): boolean {
+    const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
+    if (!registry.__easyMediaAgentAsk) return false
+    const segment = activeScriptSegment as unknown as Record<string, unknown> | undefined
+    const name = String(segment?.name ?? `第 ${activeScriptIndex + 1} 段`)
+    setResultTab('ai')
+    registry.__easyMediaAgentAsk([
+      `请把第 ${activeScriptIndex + 1} 段「${name}」的分镜脚本写成**片段提示词**，写进片段稿（promptA），不要动最终提示词。`,
+      '',
+      '片段提示词要求（我自己的用法）：',
+      '1. 白话描述，方便我读和改；**不需要六段式**，不要套完整 H3 语法。',
+      '2. 内容 = 分镜脚本（画面/节奏/镜头/台词）+ 本段绑定的主体与资源，用令牌引用它们（编号按本段绑定顺序）。',
+      '3. 令牌在编辑器里会渲染成资源名，正文里别重复写名字，只补保留项/用途。',
+      '',
+      '分镜信息：',
+      `- 段名：${name}`,
+      `- 时长：${Number(segment?.duration_seconds ?? 0) || '?'} 秒`,
+      `- 画面：${String(segment?.summary ?? '')}`,
+      `- 节奏：${String(segment?.beat ?? '')}`,
+    ].join('\n'))
+    return true
+  }
+
 function askAgentGenerate(language: '中文' | 'English') {
   const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
@@ -2157,6 +2181,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       style={{ border: `1px solid ${BORDER}` }}
                       title="把分镜脚本（名称/画面/节奏/镜头/台词）与本段绑定的主体、资源合成便于编辑的片段提示词"
                       onClick={() => {
+                        if (askAgentFragment()) return
                         const segment = activeScriptSegment as unknown as Record<string, unknown>
                         const tokens = computeBindingTokens(boundIds)
                         const line: string[] = []
@@ -2178,7 +2203,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                           const token = tokens.get(resource.id) ?? ''
                           if (!token) continue
                           const retention = (resource.retention ?? []).slice(0, 4).join('、')
-                          actorLines.push(`${token} ${resource.name}${retention ? `（保留：${retention}）` : ''}`)
+                          actorLines.push(retention ? `${token}（保留：${retention}）` : token)
                         }
                         if (actorLines.length) {
                           line.push('人物与资源：')
