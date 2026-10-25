@@ -572,6 +572,14 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'audit_assets',
+        description: '资产体检（只读，不改任何数据）：输出每个主体/资源被哪些段引用（引用矩阵）、零引用资产、只在 1 段出现的主体、稿内令牌缺口、疑似重复命名。用于防资产泛滥与判断该删/该降级/该合并。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'inspect_images',
         description: '读图（真正的多模态视觉）：把生成的图片交给视觉模型，返回画面描述与问题清单。核对出图是否合理时必须用它，不能靠文件名猜。一次最多 6 张。',
         parameters: {
@@ -2014,6 +2022,122 @@ export function AgentRail({
         save_error: flush.saved ? undefined : flush.reason,
         undo_available: true,
         note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。撤销用 undo_last_delete。',
+      }
+    }
+
+    if (name === 'audit_assets') {
+      const pool = readResources(projectKey) as ProjectResource[]
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!pool.length) return { error: '资源池为空，没有可审计的内容' }
+
+      // 1) 段 → 绑定资源（A+B 并集，主体展开子图）
+      const byId = new Map(pool.map((item) => [item.id, item]))
+      const segmentRefs: Array<{ segment: number; name: string; ids: string[] }> = []
+      for (let i = 0; i < Math.max(planSegments.length, 1); i += 1) {
+        const ids = boundIdsForSegment(i)
+        const expanded: string[] = []
+        for (const id of ids) {
+          const item = byId.get(id)
+          if (!item) continue
+          if (!expanded.includes(id)) expanded.push(id)
+          if (item.type === 'Subject') {
+            for (const childId of item.childResourceIds ?? []) {
+              if (!expanded.includes(childId)) expanded.push(childId)
+            }
+          }
+        }
+        segmentRefs.push({
+          segment: i + 1,
+          name: String(planSegments[i]?.name ?? ''),
+          ids: expanded,
+        })
+      }
+
+      // 2) 资源 → 引用段
+      const refsOf = new Map<string, number[]>()
+      for (const row of segmentRefs) {
+        for (const id of row.ids) {
+          const list = refsOf.get(id) ?? []
+          if (!list.includes(row.segment)) list.push(row.segment)
+          refsOf.set(id, list)
+        }
+      }
+
+      // 3) 分类统计
+      const zeroReference: Array<Record<string, unknown>> = []
+      const singleSegmentSubjects: Array<Record<string, unknown>> = []
+      const matrix: Array<Record<string, unknown>> = []
+      for (const item of pool) {
+        const segments = refsOf.get(item.id) ?? []
+        matrix.push({
+          name: item.name,
+          type: item.type,
+          status: item.status,
+          segments,
+          has_file: Boolean(item.imageFile || item.audioFile || item.videoFile),
+        })
+        if (!segments.length) {
+          zeroReference.push({ name: item.name, type: item.type, status: item.status, file: item.imageFile ?? item.audioFile ?? item.videoFile ?? null })
+        } else if (item.type === 'Subject' && segments.length === 1) {
+          singleSegmentSubjects.push({ name: item.name, segments })
+        }
+      }
+
+      // 4) 稿内令牌缺口（按类型粗算：令牌数 > 已绑定数即视为缺口）
+      const tokenGaps: Array<Record<string, unknown>> = []
+      for (let i = 0; i < planSegments.length; i += 1) {
+        const prompt = String(planSegments[i]?.promptA ?? planSegments[i]?.user_prompt ?? '')
+        const count = (kind: string) => (prompt.match(new RegExp(`<${kind} \\d+>`, 'g')) ?? []).length
+        const bound = segmentRefs[i]?.ids ?? []
+        const boundOf = (type: string) => bound.filter((id) => byId.get(id)?.type === type).length
+        const gaps: string[] = []
+        if (count('Picture') > boundOf('Picture')) gaps.push(`Picture 令牌 ${count('Picture')} > 绑定图片 ${boundOf('Picture')}`)
+        if (count('Subject') > boundOf('Subject')) gaps.push(`Subject 令牌 ${count('Subject')} > 绑定主体 ${boundOf('Subject')}`)
+        if (count('Audio') > boundOf('Audio')) gaps.push(`Audio 令牌 ${count('Audio')} > 绑定音频 ${boundOf('Audio')}`)
+        if (count('Video') > boundOf('Video')) gaps.push(`Video 令牌 ${count('Video')} > 绑定视频 ${boundOf('Video')}`)
+        if (gaps.length) tokenGaps.push({ segment: i + 1, name: String(planSegments[i]?.name ?? ''), gaps })
+      }
+
+      // 5) 疑似重复命名（去掉常见后缀/型号词后比较）
+      const stem = (name: string) => String(name)
+        .replace(/\.(png|jpe?g|webp|mp4|wav|mp3)$/i, '')
+        .replace(/[_\-\s]?\d{6,}.*$/, '')
+        .replace(/(四视图|三视图|空景|参考图|参考|单体图|白底图|特写|全景图)/g, '')
+        .replace(/[（(].*?[)）]/g, '')
+        .trim()
+      const groups = new Map<string, string[]>()
+      for (const item of pool) {
+        const key = stem(item.name)
+        if (!key) continue
+        groups.set(key, [...(groups.get(key) ?? []), item.name])
+      }
+      const duplicates = Array.from(groups.entries())
+        .filter(([, names]) => names.length > 1)
+        .map(([key, names]) => ({ stem: key, names }))
+
+      const subjects = pool.filter((item) => item.type === 'Subject')
+      const pictures = pool.filter((item) => item.type === 'Picture')
+      return {
+        ok: true,
+        totals: {
+          subjects: subjects.length,
+          pictures: pictures.length,
+          audio: pool.filter((item) => item.type === 'Audio').length,
+          video: pool.filter((item) => item.type === 'Video').length,
+          segments: planSegments.length,
+        },
+        zero_reference: zeroReference,
+        single_segment_subjects: singleSegmentSubjects,
+        token_gaps: tokenGaps,
+        duplicate_names: duplicates,
+        matrix,
+        suggestions: {
+          demote_to_resource: singleSegmentSubjects.map((row) => row.name),
+          delete_or_bind: zeroReference.map((row) => row.name),
+          merge_candidates: duplicates.map((row) => row.names),
+        },
+        note: '只读审计。零引用资产是"泛滥"的主要来源；只在 1 段出现的主体建议降为资源。改完再跑一次对比。',
       }
     }
 
