@@ -2048,7 +2048,8 @@ export function AgentRail({
           durationFrames: Number(segment.duration_frames ?? Math.round(duration * fps)) || Math.round(duration * fps),
           brief: formatPlanSegmentBrief(segment as never),
           prompt: String(segment.finalA ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? ''),
-          taskMode: (settings.taskType as string | undefined) || undefined,
+          taskMode: (settings.taskType as string | undefined)
+            || (imagesFromBoundIds(boundIdsForSegment(i)).length ? 'r2v' : undefined),
           continuityMode: (settings.contextMode as string | undefined) || undefined,
           refImageSize: (settings.refImageSize as string | undefined) || undefined,
           stableKey: String((segment as Record<string, unknown>).stable_key ?? `sk-${i + 1}`),

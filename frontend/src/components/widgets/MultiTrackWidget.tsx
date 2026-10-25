@@ -1479,6 +1479,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           subfolder: item.subfolder ?? '',
           file_path: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
         }))
+        // 有参考图却不是参考模式 → 会按文生视频跑，参考图被忽略；这里纠正
+        const previousMode = String(previousContent.task_mode ?? '').toLowerCase()
+        if (!['ref', 'edit', 'l2v', 'passthrough'].includes(previousMode)) {
+          patch.task_mode = 'ref'
+        }
       }
       patchTaskSegmentContent(segmentId, patch)
       return true
@@ -1508,7 +1513,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                   subfolder: item.subfolder ?? '',
                   file_path: item.subfolder ? `${item.subfolder}/${item.name}` : item.name,
                 }))
-                return { ...segment, content: { ...segment.content, images } as MultiTrackSegment['content'] }
+                const previousMode = String((segment.content as { task_mode?: string }).task_mode ?? '').toLowerCase()
+                const nextMode = ['ref', 'edit', 'l2v', 'passthrough'].includes(previousMode) ? undefined : 'ref'
+                return {
+                  ...segment,
+                  content: {
+                    ...segment.content,
+                    images,
+                    ...(nextMode ? { task_mode: nextMode } : {}),
+                  } as MultiTrackSegment['content'],
+                }
               }),
             }
       ))
