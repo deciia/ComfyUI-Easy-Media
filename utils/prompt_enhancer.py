@@ -407,7 +407,10 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         "禁止写成「## subject_definitions」「**subject_definitions**」「subject_definitions」后直接接正文，"
         "也不要使用中文全角冒号。"
     )
-    lines.append("用户片段（可能不规范，请改写成规范版本）：\n" + brief)
+    lines.append(
+        "用户片段（片段提示词：可能是白话提纲/分镜脚本/口语描述，**不要求六段式**，也不需要 H3 语法；\n"
+        "你的任务是把它加上主体与资源引用，改写成结构规范的最终提示词）：\n" + brief
+    )
     instruction = "\n".join(lines)
 
     content: list[dict] | str = instruction

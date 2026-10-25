@@ -2139,15 +2139,54 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       ⤓ 从分镜导入原稿
                     </button>
                   ) : null}
+                  {abTab === 'a' && activeScriptSegment ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-[10px]"
+                      style={{ border: `1px solid ${BORDER}` }}
+                      title="把分镜脚本（名称/画面/节奏/镜头/台词）与本段绑定的主体、资源合成便于编辑的片段提示词"
+                      onClick={() => {
+                        const segment = activeScriptSegment as unknown as Record<string, unknown>
+                        const tokens = computeBindingTokens(boundIds)
+                        const line: string[] = []
+                        line.push(`第 ${activeScriptIndex + 1} 段｜${String(segment.name ?? '')}（${Number(segment.duration_seconds ?? 0) || '?'}s）`)
+                        if (String(segment.summary ?? '').trim()) line.push(`画面：${String(segment.summary).trim()}`)
+                        if (String(segment.beat ?? '').trim()) line.push(`节奏：${String(segment.beat).trim()}`)
+                        const shots = Array.isArray(segment.shots) ? (segment.shots as Array<Record<string, unknown>>) : []
+                        if (shots.length) {
+                          line.push('镜头：')
+                          shots.forEach((shot, i) => {
+                            const parts = [String(shot.framing ?? ''), String(shot.action ?? '')].filter(Boolean).join('，')
+                            if (parts) line.push(`- 镜头 ${i + 1}：${parts}`)
+                          })
+                        }
+                        const actorLines: string[] = []
+                        for (const id of boundIds) {
+                          const resource = resources.find((item) => item.id === id)
+                          if (!resource) continue
+                          const token = tokens.get(resource.id) ?? ''
+                          if (!token) continue
+                          const retention = (resource.retention ?? []).slice(0, 4).join('、')
+                          actorLines.push(`${token} ${resource.name}${retention ? `（保留：${retention}）` : ''}`)
+                        }
+                        if (actorLines.length) {
+                          line.push('人物与资源：')
+                          line.push(...actorLines)
+                        }
+                        const dialogues = (String(segment.promptA ?? '') + String(segment.summary ?? '')).match(/<d>[\s\S]*?<\/d>/g)
+                        if (dialogues?.length) line.push(`台词：${dialogues.join(' ')}`)
+                        const text = line.join('\n')
+                        setBrief(text)
+                        patchScriptSegment({ promptA: text })
+                      }}
+                    >
+                      ⤓ 分镜→片段
+                    </button>
+                  ) : null}
                 </div>
-                <PromptQualityBar
-                prompt={brief}
-                resources={resources}
-                referenceMode={/ref|r2v|reference/i.test(String(options.prompt_mode ?? ''))}
-                taskType={taskTypeOfCurrentSegment()}
-                onChangePrompt={(next) => setBrief(next)}
-              />
-              <div className="text-[11px] text-neutral-500">点上方标签可引用主体/资源</div>
+              <div className="text-[11px] text-neutral-500">
+                片段提示词：白话描述即可（分镜脚本 + 主体/资源），不需要六段式；生成终稿时再规范化。
+              </div>
                 <div
                   className="min-h-0 flex-1 overflow-hidden rounded-md"
                   style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}
