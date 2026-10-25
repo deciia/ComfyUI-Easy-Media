@@ -599,7 +599,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'write_prompt',
-        description: '把一段的最终提示词写回脚本（可同时写任务轨）。写入前自动校验令牌编号/占位符/收尾句；有 error 会拒绝，可传 force=true 强写。',
+        description: '把一段的提示词写回脚本。只写 target 指定的那一种稿子：target=fragment 只写片段稿，target=final 只写最终提示词。默认不写任务轨、不改另一种稿子、不改其它段；这些都要显式传参或用户明确要求才做。',
         parameters: {
           type: 'object',
           properties: {
