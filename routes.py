@@ -1038,6 +1038,62 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Failed to save config: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/agent/vision")
+async def handle_agent_vision(request: web.Request) -> web.Response:
+    """用支持图像的配置档读图（与当前对话模型解耦）。body: {files:[{name,subfolder,root}], question, prompt_hint}"""
+    try:
+        from pathlib import Path as _Path
+
+        from .utils.vision import describe_images
+
+        payload = await request.json()
+        files = (payload or {}).get("files") or []
+        if not isinstance(files, list) or not files:
+            return web.json_response({"ok": False, "error": "files 不能为空"}, status=400)
+        base = _Path(folder_paths.base_path) if folder_paths else _Path(".")
+        resolved: list[_Path] = []
+        missing: list[str] = []
+        for item in files[:6]:
+            if not isinstance(item, dict):
+                continue
+            root = str(item.get("root") or "output")
+            if root not in ("input", "output", "temp"):
+                root = "output"
+            subfolder = str(item.get("subfolder") or "").replace("\\", "/").strip("/")
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            target = (base / root / subfolder / name).resolve()
+            try:
+                target.relative_to(base.resolve())
+            except ValueError:
+                missing.append(f"{name}（路径越界）")
+                continue
+            if target.is_file():
+                resolved.append(target)
+            else:
+                missing.append(str(target))
+        if not resolved:
+            return web.json_response({"ok": False, "error": "图片不存在", "missing": missing}, status=404)
+        result = await describe_images(
+            resolved,
+            question=str((payload or {}).get("question") or ""),
+            prompt_hint=str((payload or {}).get("prompt_hint") or ""),
+        )
+        return web.json_response({
+            "ok": True,
+            "text": result.get("text", ""),
+            "provider": result.get("provider", ""),
+            "model": result.get("model", ""),
+            "label": result.get("label", ""),
+            "read": [str(path.relative_to(base.resolve())).replace("\\", "/") for path in resolved],
+            "missing": missing,
+        })
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/debug/dump")
 async def handle_debug_dump(request: web.Request) -> web.Response:
     """把前端状态（绑定/资源/任务轨）写到 user/DeciiaEasyMedia/agent_state_dump.json，供排查。"""

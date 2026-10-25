@@ -572,6 +572,35 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'inspect_images',
+        description: '读图（真正的多模态视觉）：把生成的图片交给视觉模型，返回画面描述与问题清单。核对出图是否合理时必须用它，不能靠文件名猜。一次最多 6 张。',
+        parameters: {
+          type: 'object',
+          properties: {
+            names: { type: 'array', items: { type: 'string' }, description: '项目资源名或图片文件名（自动查资源池定位路径）' },
+            files: {
+              type: 'array',
+              description: '直接指定文件（优先级高于 names）',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  subfolder: { type: 'string' },
+                  root: { type: 'string', enum: ['input', 'output', 'temp'] },
+                },
+                required: ['name'],
+              },
+            },
+            question: { type: 'string', description: '想问的问题，例如"这张图有什么明显错误"' },
+            prompt_hint: { type: 'string', description: '该段提示词，用于核对画面是否相符' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'undo_last_delete',
         description: '撤销最近一次删除（资源/主体、分镜段、任务轨段都支持）。可连续撤销最近 5 次，每次撤一步。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1985,6 +2014,56 @@ export function AgentRail({
         save_error: flush.saved ? undefined : flush.reason,
         undo_available: true,
         note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。撤销用 undo_last_delete。',
+      }
+    }
+
+    if (name === 'inspect_images') {
+      const pool = readResources(projectKey) as ProjectResource[]
+      const explicit = Array.isArray(args.files) ? (args.files as Array<Record<string, unknown>>) : []
+      const names = Array.isArray(args.names) ? args.names.map(String).filter(Boolean) : []
+      const files: Array<{ name: string; subfolder?: string; root?: string }> = []
+      for (const item of explicit) {
+        const fileName = String(item.name ?? '').trim()
+        if (!fileName) continue
+        files.push({
+          name: fileName,
+          subfolder: String(item.subfolder ?? ''),
+          root: String(item.root ?? 'output'),
+        })
+      }
+      if (!files.length && names.length) {
+        for (const resourceName of names) {
+          const resource = pool.find((entry) => entry.name === resourceName && entry.type === 'Picture')
+            ?? pool.find((entry) => entry.name === resourceName)
+          const fileName = String(resource?.imageFile ?? resourceName).trim()
+          if (!fileName) continue
+          files.push({
+            name: fileName,
+            subfolder: String(resource?.subfolder ?? ''),
+            root: resource?.sharedRoot === 'input' ? 'input' : resource?.sharedRoot === 'temp' ? 'temp' : 'output',
+          })
+        }
+      }
+      if (!files.length) return { error: '请给 names（资源名/文件名）或 files' }
+      const response = await fetch('/easy-media/agent/vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: files.slice(0, 6),
+          question: String(args.question ?? ''),
+          prompt_hint: String(args.prompt_hint ?? ''),
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok) {
+        return { error: String(data?.error || `读图失败（HTTP ${response.status}）`), missing: data?.missing }
+      }
+      return {
+        ok: true,
+        model: `${data.label || data.provider} / ${data.model}`,
+        read: data.read,
+        description: String(data.text ?? ''),
+        missing: data.missing?.length ? data.missing : undefined,
       }
     }
 
