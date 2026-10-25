@@ -536,6 +536,14 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'list_bindings',
+        description: '逐段列出已绑定的资源清单（含主体展开的子图）与稿内令牌，用来诊断"某段没绑图"的问题。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'repair_task_images',
         description: '校验并修复任务轨图片：检查每个绑定图片文件是否真实存在，按名称主干找回真实文件（同名不同时间戳），写回资源后同步到任务轨。用于"图看起来绑了但预览空白/生成找不到文件"。',
         parameters: {
@@ -1617,6 +1625,40 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'list_bindings') {
+      const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (plan?.segments ?? []) as Array<Record<string, unknown>>
+      const pool = readResources(projectKey) as ProjectResource[]
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const rows = planSegments.map((segment, i) => {
+        const stableKey = String(segment.stable_key ?? '')
+        const ids = readBindings(projectKey, `script-${i}:a`)
+        const names = ids.map((id) => pool.find((item) => item.id === id)?.name ?? id)
+        const images = imagesFromBoundIds(ids)
+        const prompt = String(segment.promptA ?? segment.user_prompt ?? '')
+        const tokens = Array.from(new Set((prompt.match(/<(?:Subject|Picture|Audio|Video) \d+>/g) ?? [])))
+        const task = tasks.find((entry) => stableKey && String(entry.stable_key ?? '') === stableKey)
+          ?? tasks.find((entry) => Number(entry.index ?? 0) === i + 1)
+        return {
+          index: i + 1,
+          name: String(segment.name ?? ''),
+          bound: names,
+          bound_images: images.map((item) => item.name),
+          tokens_in_prompt: tokens,
+          landed_on_task_track: Boolean(task?.id),
+          task_images_count: Number(task?.images_count ?? 0),
+        }
+      })
+      return {
+        total: rows.length,
+        rows,
+        note: '如果 bound_images 为空而 tokens_in_prompt 里有 <Picture n>，说明该段只写了令牌但没绑定资源，需要 bind_resources 绑定后才能出图。',
+      }
+    }
+
     if (name === 'repair_task_images') {
       const onlyIndex = Number(args.index ?? 0)
       const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
