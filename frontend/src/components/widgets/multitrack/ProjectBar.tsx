@@ -283,7 +283,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     }
   }
 
-  async function handleSave(name?: string) {
+  async function handleSave(name?: string, force = false) {
     const target = (name ?? currentName).trim()
     const invalid = validateProjectName(target)
     if (invalid) {
@@ -298,7 +298,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         trackData: stripProjectMeta(data),
         resolution: resolutionSnapshot(resolution),
         format: resolution.format ?? null,
-        baseUpdatedAt: lastLoadedAtRef.current,
+        baseUpdatedAt: force ? null : lastLoadedAtRef.current,
       })
       const trackData = { ...stripProjectMeta(data), project: { name: result.project_name, updated_at: result.updated_at } }
       savedSignatureRef.current = timelineSignature(trackData)

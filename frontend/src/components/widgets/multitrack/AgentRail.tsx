@@ -1540,6 +1540,25 @@ export function AgentRail({
       } as unknown as ProjectResource)
       return { ok: true, created: subjectName }
     }
+    /** 把当前节点内存里的任务轨写盘（不带 base_updated_at = 覆盖保存） */
+    const flushProjectToDisk = async () => {
+      const registry = (globalThis as unknown as { __easyMediaGetTrackData?: () => Record<string, unknown> | null }).__easyMediaGetTrackData
+      const timeline = registry?.()
+      if (!timeline) return { saved: false, reason: '拿不到任务轨数据' }
+      try {
+        const response = await fetch('/easy-media/project/timeline', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_name: projectKey, timeline: { version: 1, track_data: timeline } }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) return { saved: false, reason: String(data?.error || `HTTP ${response.status}`) }
+        return { saved: true, updated_at: data?.updated_at ?? null }
+      } catch (error) {
+        return { saved: false, reason: String(error) }
+      }
+    }
+
     /** 段绑定 id 并集：A 版优先，再补 B 版（避免"绑在 B 版却同步不到"） */
     const boundIdsForSegment = (segmentIndex: number) => {
       const merged: string[] = []
@@ -1624,8 +1643,10 @@ export function AgentRail({
       } catch {
         /* 同步失败不影响绑定结果，下面如实汇报 */
       }
+      const flush = syncedImages > 0 ? await flushProjectToDisk() : { saved: false }
       return {
         ok: true,
+        saved: Boolean((flush as { saved?: boolean }).saved),
         bound: ids.length,
         names: names.filter((resourceName) => pool.some((item) => item.name === resourceName)),
         images: images.map((item) => item.name),
@@ -1756,8 +1777,12 @@ export function AgentRail({
           images: imgs.map((item) => item.name),
         }
       }).filter(Boolean)
+      const flush = await flushProjectToDisk()
       return {
         ok: fixed.length > 0 || synced > 0,
+        saved: flush.saved,
+        saved_updated_at: flush.saved ? flush.updated_at : undefined,
+        save_error: flush.saved ? undefined : flush.reason,
         checked: pictures.length,
         fixed,
         missing,
@@ -1800,7 +1825,14 @@ export function AgentRail({
         results.push({ index: i + 1, ok: done, images: images.map((item) => item.name) })
       }
       const synced = results.filter((item) => item.ok).length
-      return { ok: synced > 0, synced_segments: synced, detail: results }
+      const flush = synced > 0 ? await flushProjectToDisk() : { saved: false, reason: '没有可写入的段' }
+      return {
+        ok: synced > 0,
+        synced_segments: synced,
+        saved: flush.saved,
+        save_error: flush.saved ? undefined : (flush as { reason?: string }).reason,
+        detail: results,
+      }
     }
 
     if (name === 'generate_prompt') {
