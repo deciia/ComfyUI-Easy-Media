@@ -67,6 +67,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
   · 完全没有参考素材，纯描述生成 → T2V（task_mode=default）
   · 明确要求直通不生成 → Pass（task_mode=passthrough）
 - 判断结果用 set_task_modes 一次性写入（可附 reason 说明依据），不要靠界面默认值，也不要写死规则。
+- 删除分镜段用 delete_segments（删后自动重排绑定键），删任务轨段用 delete_task_segments（联动删任务）；三者都先 dry_run 再 confirm，删完如实汇报删了什么、剩多少。
 - 删除主体/资源用 delete_resources：先 dry_run=true 报告会删除什么、会从哪些段解绑，用户确认后再 confirm=true。删除不会自动清任务轨已写入的 images，需要时再 sync_task_images。
 - 素材数量硬约束（节点真实规则，超出会被拒绝或忽略）：
   · T2V(default)：0 张图（传 1 张会变成 i2v 首帧，多传的图被忽略）
