@@ -2514,6 +2514,23 @@ export function AgentRail({
       if (!segment) return { error: `段 ${index} 不存在` }
       const audit = auditPrompt(index - 1, text)
       const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
+      if (isFragmentWrite) {
+        const finalOnly = [
+          /(^|\n)\s*subject_definitions\s*[:：]/,
+          /(^|\n)\s*retention_analysis\s*[:：]/,
+          /(^|\n)\s*overall_soundscape\s*[:：]/,
+          /(^|\n)\s*non_diegetic_music\s*[:：]/,
+          /(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)/,
+        ]
+        if (finalOnly.some((pattern) => pattern.test(text))) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['片段稿里出现了终稿结构（subject_definitions/retention_analysis/整体声场/非叙事音乐/禁字幕句之一）'],
+            instruction: '片段稿只需要：段名/时长 → 概述 → 钩子 → [Shot N] 镜头 → 台词 → 声音。请删掉终稿结构，改完再写；确实要保留可传 force=true。',
+          }
+        }
+      }
       const errors = audit.problems.filter((item) => (
         !isFragmentWrite || /编号到|None|undefined/.test(String(item.message ?? ''))
       )).filter((item) => item.level === 'error')
@@ -3548,8 +3565,7 @@ export function AgentRail({
           for (const childId of resource.childResourceIds ?? []) {
             const child = pool.find((item) => item.id === childId)
             if (!child) continue
-            pictureNo += 1
-            pictures.push({ token: `<Picture ${pictureNo}>`, name: child.name })
+            // 主体子图只作为上传素材（身份来源），不再单独占用 <Picture n> 编号
             const file = child.imageFile || child.sharedPath || ''
             if (file) images.push(file)
           }
