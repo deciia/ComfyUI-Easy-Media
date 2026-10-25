@@ -233,10 +233,11 @@ export function PlanPreview({
             ) : null}
             {editingIndex === segmentIndex ? (
               <div className="flex flex-col gap-1.5 rounded p-2" style={{ background: FIELD_BG, border: `1px dashed ${BORDER}` }}>
-                <div className="flex flex-wrap gap-2 text-[11px]">
-                  <input style={{ ...fieldStyle, width: 140 }} value={editDraft.name} placeholder="镜头名" onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
-                  <input style={{ ...fieldStyle, width: 90 }} value={editDraft.beat} placeholder="beat（钩子/铺垫…）" onChange={(e) => setEditDraft({ ...editDraft, beat: e.target.value })} />
-                  <input style={{ ...fieldStyle, width: 64 }} value={editDraft.duration} placeholder="秒" onChange={(e) => setEditDraft({ ...editDraft, duration: e.target.value })} />
+                {/* 段名 / 钩子 / 时长 固定同一行，窄栏也不换行 */}
+                <div className="grid items-center gap-2 text-[11px]" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) 64px' }}>
+                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.name} placeholder="段名" onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
+                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.beat} placeholder="钩子/beat" onChange={(e) => setEditDraft({ ...editDraft, beat: e.target.value })} />
+                  <input style={{ ...fieldStyle, width: '100%', minWidth: 0 }} value={editDraft.duration} placeholder="秒" onChange={(e) => setEditDraft({ ...editDraft, duration: e.target.value })} />
                 </div>
                 <textarea style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }} value={editDraft.summary} placeholder="本段概要" onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })} />
                 <textarea style={{ ...fieldStyle, minHeight: 44, resize: 'vertical' }} value={editDraft.directorNote} placeholder="导演说明（可选）" onChange={(e) => setEditDraft({ ...editDraft, directorNote: e.target.value })} />
