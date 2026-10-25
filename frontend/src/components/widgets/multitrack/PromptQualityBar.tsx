@@ -45,8 +45,7 @@ export function analyzePrompt(prompt: string, referenceMode: boolean) {
   )
   const strayQuotes = quotes.filter((line) => !inDialogue.has(line))
   const issues: PromptIssue[] = []
-  if (!text.trim()) issues.push({ level: 'warn', text: '本段还没有提示词' })
-  if (missing.length) issues.push({ level: 'warn', text: `结构缺 ${missing.length} 段：${missing.map((m) => m[1]).join('、')}` })
+  if (!text.trim()) issues.push({ level: 'warn', text: '本段还没有提示词（上方标签已标出缺哪几段）' })
   if (strayQuotes.length) issues.push({ level: 'error', text: `有 ${strayQuotes.length} 处引号台词不在 <d> 内（会被模型念出来）` })
   if (tagCounts.Subject || tagCounts.Picture || tagCounts.Audio) {
     issues.push({
