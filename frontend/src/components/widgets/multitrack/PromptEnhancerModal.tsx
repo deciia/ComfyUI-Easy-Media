@@ -1268,52 +1268,44 @@ export function PromptEnhancerModal({
     const segment = activeScriptSegment as unknown as Record<string, unknown> | undefined
     const name = String(segment?.name ?? `第 ${activeScriptIndex + 1} 段`)
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
+    const pool = readResources(projectKey) as ProjectResource[]
+    const ids = boundIdsForSegment(activeScriptIndex)
+    let sN = 0
+    let pN = 0
+    let aN = 0
+    const parts: string[] = []
+    for (const id of ids) {
+      const item = pool.find((entry) => entry.id === id)
+      if (!item) continue
+      let token = ''
+      if (item.type === 'Subject') { sN += 1; token = `<Subject ${sN}>` }
+      else if (item.type === 'Picture') { pN += 1; token = `<Picture ${pN}>` }
+      else if (item.type === 'Audio') { aN += 1; token = `<Audio ${aN}>` }
+      if (token) parts.push(`${token}=${item.name}`)
+    }
+    const bindingTable = parts.join('｜')
+    const subjectCount = sN
+    const pictureCount = pN
+    const audioCount = aN
     setResultTab('ai')
     registry.__easyMediaAgentAsk([
-      `只处理第 ${activeScriptIndex + 1} 段「${name}」：写成**片段提示词**，用 write_prompt 写进片段稿（target=fragment），不要动最终提示词。`,
-      '**范围**：只写这一段。不要改其它段、不要顺手全篇重写、不要额外跑全篇校验；我另说再做。',
+      `只做第 ${activeScriptIndex + 1} 段「${name}」的片段稿：用 write_prompt(index=${activeScriptIndex + 1}, target=fragment) 写入，不要动终稿和其它段。`,
       '',
-      '【这是什么】',
-      '写给我看、给我改的工作稿；改好后你再据此写最终提示词。白话、条目化，不要求六段齐全。',
+      '【事实】',
+      `本段令牌表：${bindingTable || '（无绑定）'}`,
+      `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒`,
       '',
-      '【怎么写（重点）】',
-      '1. **优先用主体，未定义主体才用图片资源**：人物、场景、道具如果建了 <Subject n>，就用主体当句子里的对象/视角；只有没建成主体的才引用 <Picture n>。若这段只想借某张图的构图、不在意身份，写 <Picture n> 并注明「仅借构图」。',
-      '   "<Subject 1>（老赵）坐在 <Subject 2>（工作台，保留台面质感与台灯落位）前直对镜头口播"。',
-      '2. **括号紧跟令牌本身**，不要挪到句尾或另起一句：',
-      '   正确："落入 <Picture 2>（保留盘内排布与积碳状态）的盘里"；',
-      '   错误："落入 <Picture 2> 的盘里，弹一下停住（保留盘内排布与积碳状态）"。',
-      '3. **保留说明只在首次出现时写**：概述里已经用括号交代过的保留项，镜头里不要再重复；同一令牌后续出现只写令牌本身，除非这次口径有变化。',
-      '4. **不要单列「资源」清单，也不要用「可用素材」罗列**；主体/资源必须用令牌直接写进句子里。',
-      '4a. **先照表抄编号再写**：先 get_prompt_context 拿到本段令牌表（每个令牌对应哪个资源），写的时候直接照抄编号；**禁止自己推断或重排**。',
-'4b. 写完逐个核对：每个令牌后面括号里的名字，必须是这个令牌对应的资源名。',
-      '4c. **写入被退回时自己改一次**：write_prompt 返回 needs_revision 时，按 problems 改完再写一次；不要用 auto_align=true 绕过。',
-      '5. **概述要承担背景信息，可以多写**：这段在哪儿、谁在场（含音色参考）、什么基调（光线/景深/风格/情绪）、观众该看什么，2–4 句都行。',
-      '5a. **概述里已经说过的，镜头里不要再重复**；镜头部分只写镜头与画面实现：景别、机位、构图、动作、节奏、切换。',
-      '6. 本段绑定的每个主体/资源都要在正文里自然出现一次。',
-      '6a. **人物音色不必在片段稿里写**：如果主体定义里已经挂了参考音色，助手写终稿时会自动补上音色声明；你写了也不冲突，但不写也可以。',
-      '6b. **只有独立引用的音频才需要写**：配乐、环境音、音效这类不属于某个主体的音频，写在「声音」那句里并带上令牌（如 "&lt;Audio 2&gt; 铺底氛围，音量低于口播"）。',
-      '6c. 人物口播的现场声（口播、动作声、底噪）照写，不需要挂音频令牌。',
-      '7. 台词按原文逐条保留（含口误/重复），放 <d>[Chinese] …</d>；不润色、不合并。',
-      '8. 用 [Shot 1] 标镜头 + 景别 + 动作；不写 At 00:0X.XXX 时间码。',
-      '9. 不写六段键名、整体声场/非叙事音乐小节、禁字幕水印句（都属终稿）。',
-      '10. 长度随分镜信息量，不设上限，也不为凑长加料。',
+      '【写法】',
+      '从「概述」开始，不写段号/段名标题。',
+      '概述（2–4 句）：在哪儿、谁在场、什么基调（光线/景深/风格）、观众该看什么。',
+      '[Shot N] 约 Xs｜景别：只写镜头与画面实现（机位/构图/动作/节奏/切换）；概述说过的不要重复。',
+      '台词：<d>[Chinese] 原文</d>；声音：现场声。',
+      '主体/资源直接写进句子：<Subject 1>（老赵）坐在 <Picture 1>（工作台）前…；括号紧跟令牌，保留说明只在首次出现写一次。',
+      '说话角色的音色可省（主体定义里已有）；只有独立音频（配乐/环境/音效）才写进「声音」。',
+      '语言、详略、镜头描述方式随你。',
       '',
-      '【样例】',
-      '（片段稿直接从「概述」开始，不写段号/段名标题）',
-      '概述：维修车间内景，<Subject 1>（老赵）坐在 <Subject 2>（工作台，保留台面质感与台灯落位）前；冷调侧顶光、浅景深，写实记录风格；整段是「劝人别乱花钱却劝你修整套」的反差开场，注意力压在老赵的表情和手边那只坏油嘴上。',
-      '钩子：最不建议乱花钱的人，反而劝你修整套。',
-      '[Shot 1] 约 4.5s｜中近景：<Subject 1> 坐在 <Subject 2> 前直对镜头口播，右手压在擦布上',
-      '<d>[Chinese] 修油嘴这行，我是最不建议大家乱花钱的。</d>',
-      '[Shot 2] 约 3s｜俯拍特写：一只积碳发黑的油嘴从画外落入 <Picture 2>（保留盘内排布与积碳状态）的盘里，弹一下停住',
-      '[Shot 3] 约 3s｜中近景：切回同机位，<Subject 1> 抬手在台面轻按两下',
-      '<d>[Chinese] 先别急着骂，听完再决定。</d>',
-      '声音：口播 + 台面闷响，车间底噪持续；无独立配乐。',
-      '',
-      '【本段分镜信息（细节请再 get_segment 核对）】',
-      `- 段名：${name}`,
-      `- 时长：${seconds || '?'} 秒`,
-      `- 画面：${String(segment?.summary ?? '')}`,
-      `- 节奏：${String(segment?.beat ?? '')}`,
+      '【禁区】',
+      '不写文件名（.jpg/.png/.wav）；不列「可用素材」清单；不写六段键名或禁字幕句；不扩展范围。',
     ].join('\n'))
     return true
   }
@@ -1323,28 +1315,26 @@ function askAgentGenerate(language: '中文' | 'English') {
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
   const variant = abTab === 'a' ? 'finalA' : 'finalB'
   const directive = [
-    `只处理第 ${activeScriptIndex + 1} 段「${segmentName}」：生成为可直接写入任务轨的最终提示词（${language === 'English' ? '英文' : '中文'}正文）。`,
-    '**范围**：只写这一段。不要改其它段、不要顺手全篇重写、不要额外跑全篇校验；我另说再做。',
+    `只做第 ${activeScriptIndex + 1} 段「${segmentName}」的终稿：用 write_prompt(index=${activeScriptIndex + 1}, target=final) 写入，不要动片段稿和其它段。`,
     '',
-    '【信息来源（三份都要看，缺一不可）】',
-    '1. **完整分镜**：先 get_segment 读该段全部内容（段名/时长/画面 summary/节奏 beat/镜头 shots/台词/settings），镜头数与台词以分镜为准，不得漏、不得编。',
-    '2. **完整主体与资源定义**：用 get_prompt_context 或 list_resources 读本段绑定的每个主体与资源，包括名称、描述、retention 保留项、文件；这些定义是 subject_definitions 与 retention_analysis 的依据。',
-    '3. **用户改过的片段提示词**（见文末）：这是用户的意图与表达，优先级高于你的自由发挥；用户补充的信息必须体现。',
+    '【三份输入，先读】',
+    '1. get_segment：完整分镜（镜头/台词/时长/settings）；',
+    '2. get_prompt_context：本段绑定与令牌表（名称/保留项/文件），编号照抄；',
+    '3. 文末用户改过的片段稿：用户意图优先。需要时 read_skill h3-prompt-spec。',
     '',
-    '【怎么写】',
-    '4. 先 read_skill h3-ref2va-official 或 h3-prompt-spec 核对结构，再动笔。',
-    '5. 六段齐全：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music。',
-    '6. <Subject n> 承载人物与场景身份（写清保留项与排除项）；<Picture n> 只作首帧/关键帧锚点或场景道具依据；编号不得越界。',
-    '7. 台词逐条放 <d>[Chinese] …</d>，与分镜原文一致；[Shot 1] 不带时间戳，其后用 [Shot N] At 00:0X.XXX。',
-    '8. 结尾保留禁字幕/水印句。目标：这份终稿要能被模型直接理解并使用，不是片段稿的扩写。',
+    '【写法】',
+    '六段齐全：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music。',
+    '<Subject n> 承载人物与场景身份（保留项+排除项）；<Picture n> 只作帧锚点或场景道具；编号不得越界。',
+    '台词逐条 <d>[Chinese] …</d>，与分镜一致；[Shot 1] 不带时间戳；结尾禁字幕句。',
+    '目标：模型能直接理解使用，不是片段稿的扩写。',
     '',
-    '【收尾】',
-    '9. 只写最终提示词（write_prompt target=final），不要改片段提示词；若返回 needs_revision，按 problems 自己改一次再写，不要用 auto_align 绕过。',
-    `10. 写回该段 ${variant}，把终稿贴在对话里，并报告令牌统计与校验结果。`,
+    '【禁区】',
+    '不改片段稿；不扩展范围；不编造分镜里没有的镜头/台词。',
+    '返回 needs_revision 时按 problems 改一次再写，不要 force/auto_align 绕过。',
     '',
-    '片段提示词如下（--------- 之间，用户已编辑）：',
+    '片段稿：',
     '---------',
-    String(activePrompt ?? '').trim() || '（空，请按分镜脚本与资源定义补全）',
+    String(activePrompt ?? '').trim() || '（空，按分镜与绑定补全）',
     '---------',
   ].join('\n')
   if (!registry.__easyMediaAgentAsk) return false
