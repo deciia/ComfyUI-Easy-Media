@@ -4021,21 +4021,31 @@ export function AgentRail({
             })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 6000) })
             writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
-            // 空转检测：写操作清零；连续只读先提醒，次数很多才中止（避免打断长任务）
-            const writeTool = /^(set_|patch_|apply_|save_|update_|bind_|sync_|generate_|plan_|revise_|create_|remove_|delete_|run_|memorize)/.test(call.name)
-            if (writeTool && result && !result.error) {
+            // 空转检测：以"是否真的产生修改"为准，而不是工具名前缀（fix_/retoken_/promote_ 都是写操作）
+            const READ_ONLY_TOOL = /^(list_|get_|validate_|audit_|explain_|read_|inspect_|dump_|resolve_|search_)/.test(call.name)
+            const payload = (result ?? {}) as Record<string, unknown>
+            const producedChange = Boolean(
+              payload.changed || payload.updated || payload.applied
+              || payload.task_track_updated || payload.fixed || payload.synced
+              || payload.deleted || payload.restored || payload.bound
+              || (payload.saved === true) || Array.isArray(payload.applied),
+            )
+            const isNeutral = call.name === 'ask_user' || call.name === 'get_prompt_context'
+            if (!result?.error && (!READ_ONLY_TOOL || producedChange)) {
               idleReadOnlySteps = 0
+            } else if (isNeutral) {
+              // 读上下文/提问不算空转，也不清零，避免把正常交互当打转
             } else {
               idleReadOnlySteps += 1
               if (idleReadOnlySteps === 10) {
                 chatMessages.push({
                   role: 'user',
-                  text: '[系统] 已连续 10 次只读、没有产生任何修改。不要再查同类信息；要么立刻执行写操作，要么直接用已有信息收尾回答。',
+                  text: '[系统] 已连续 10 次只读、没有产生任何修改。不要再查同类信息；立即执行写操作（写提示词/修收尾句/重排编号/落轨），或直接用已有信息收尾回答。',
                 })
-              } else if (idleReadOnlySteps >= 18) {
+              } else if (idleReadOnlySteps >= 24) {
                 haltRequested = true
                 endedByNoCalls = true
-                appendText('\n[系统] 连续多次只读且无写入，已中止本轮。')
+                appendText('\n[系统] 连续多次只读且无写入，已中止本轮。可换成更具体的指令，例如“直接重写第 1 段并写入”。')
                 break
               }
             }
