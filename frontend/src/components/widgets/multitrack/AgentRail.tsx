@@ -125,6 +125,8 @@ export function AgentRail({
     }
   }, [])
   const [model, setModel] = useState('')
+  const [apiProfiles, setApiProfiles] = useState<Array<{ id: string; name: string; provider: string; model: string }>>([])
+  const [activeProfileId, setActiveProfileId] = useState('')
   const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
   const progressRef = useRef<((text: string) => void) | null>(null)
@@ -144,6 +146,21 @@ export function AgentRail({
         .then((response) => response.json())
         .then((data) => {
           if (!cancelled && data?.ok) setModel(String(data.model || ''))
+        })
+        .catch(() => undefined)
+      fetch('/easy-media/prompt-studio/config')
+        .then((response) => response.json())
+        .then((data) => {
+          if (cancelled) return
+          const cfg = (data && (data.config ?? data)) as Record<string, unknown>
+          const list = Array.isArray(cfg.profiles) ? (cfg.profiles as Array<Record<string, unknown>>) : []
+          setApiProfiles(list.map((item) => ({
+            id: String(item.id ?? ''),
+            name: String(item.name ?? item.provider ?? ''),
+            provider: String(item.provider ?? ''),
+            model: String(item.model ?? ''),
+          })))
+          setActiveProfileId(String(cfg.active_profile ?? ''))
         })
         .catch(() => undefined)
     }
@@ -2215,7 +2232,36 @@ export function AgentRail({
       <div className="flex items-center gap-2">
         <span className="text-[12px] font-medium">AI 助手</span>
         <span className="text-[9px] text-muted-foreground" title="界面版本标记">v2</span>
-        {model ? (
+        {apiProfiles.length > 0 ? (
+          <select
+            className="max-w-[200px] truncate rounded-full px-1.5 text-[10px]"
+            style={{ border: `1px solid ${BORDER}`, background: 'transparent', color: '#cfcfcf' }}
+            value={activeProfileId || apiProfiles[0]?.id || ''}
+            title="切换 API 配置（立即生效）"
+            onChange={async (event) => {
+              const id = event.target.value
+              setActiveProfileId(id)
+              try {
+                const response = await fetch('/easy-media/prompt-studio/active', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id }),
+                })
+                const data = await response.json().catch(() => ({}))
+                if (data?.ok) {
+                  setModel(String(data.model || ''))
+                  globalThis.dispatchEvent(new CustomEvent('easy-media-api-changed'))
+                }
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            {apiProfiles.map((item) => (
+              <option key={item.id} value={item.id}>{item.name} · {item.model}</option>
+            ))}
+          </select>
+        ) : model ? (
           <span className="rounded-full px-1.5 text-[10px] text-muted-foreground" style={{ border: `1px solid ${BORDER}` }}>
             {model}
           </span>

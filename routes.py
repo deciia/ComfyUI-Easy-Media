@@ -1038,6 +1038,41 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Failed to save config: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/prompt-studio/active")
+async def handle_prompt_studio_active(request: web.Request) -> web.Response:
+    """切换当前生效的 API 配置档（只改 active_profile，不动其它字段）。"""
+    try:
+        payload = await request.json()
+        target = str((payload or {}).get("id") or "").strip()
+        if not target:
+            return web.json_response({"ok": False, "error": "缺少配置 id"}, status=400)
+        from .utils.prompt_enhancer import normalize_profiles
+
+        current = load_prompt_enhancer_config()
+        profiles, _ = normalize_profiles(current)
+        if not any(item["id"] == target for item in profiles):
+            return web.json_response({"ok": False, "error": f"配置不存在：{target}"}, status=404)
+        merged = dict(current)
+        merged["profiles"] = profiles
+        merged["active_profile"] = target
+        chosen = next(item for item in profiles if item["id"] == target)
+        merged["provider"] = chosen.get("provider", "")
+        merged["model"] = chosen.get("model", "")
+        merged["base_url"] = chosen.get("base_url", "")
+        path = save_prompt_enhancer_config(merged)
+        return web.json_response({
+            "ok": True,
+            "path": str(path),
+            "active_profile": target,
+            "model": chosen.get("model", ""),
+            "provider": chosen.get("provider", ""),
+            "config": mask_prompt_enhancer_config(merged),
+        })
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/prompt-studio/generate")
 async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
     """生成规范提示词；失败不覆盖原文，校验不过也原样返回失败项。"""
