@@ -607,6 +607,7 @@ export function AgentRail({
             text: { type: 'string', description: '完整提示词正文' },
             variant: { type: 'string', enum: ['a', 'b'], description: '写 A 还是 B（默认 a）' },
             target: { type: 'string', enum: ['final', 'fragment'], description: 'final=最终提示词（默认）；fragment=片段提示词' },
+            auto_align: { type: 'boolean', description: '默认 false：发现令牌编号与绑定不符时退回让你自己改；true 则由工具直接对齐编号（不改文字）' },
             to_task_track: { type: 'boolean', description: '同时写入任务轨（默认 false）' },
             force: { type: 'boolean', description: '忽略校验错误强写（默认 false）' },
           },
@@ -2467,9 +2468,17 @@ export function AgentRail({
       const index = Number(args.index ?? 0)
       const rawText = String(args.text ?? '')
       if (!rawText.trim()) return { error: 'text 不能为空' }
-      // 编号按真实绑定自动对齐（只改编号，不动文字），改动会随结果回报
+      const autoAlign = args.auto_align === true
       const alignedResult = alignTokenNumbers(index - 1, rawText)
-      const text = alignedResult.text
+      if (!autoAlign && alignedResult.fixes.length) {
+        return {
+          ok: false,
+          needs_revision: true,
+          problems: alignedResult.fixes.map((fix) => `${fix.from} 应为 ${fix.to}（${fix.name}）`),
+          instruction: '令牌编号与本段绑定不一致。请只改编号（文字不要动），改完再调用 write_prompt 写一次；确实想按原样写入可传 auto_align=true。',
+        }
+      }
+      const text = autoAlign ? alignedResult.text : rawText
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
       const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
@@ -2481,7 +2490,13 @@ export function AgentRail({
         !isFragmentWrite || /编号到|None|undefined/.test(String(item.message ?? ''))
       )).filter((item) => item.level === 'error')
       if (errors.length && args.force !== true) {
-        return { error: '校验未通过，未写入（可修好后重试，或 force=true）', audit, hint: '可用 fix_prompts 自动修 None/收尾句，retoken_prompts 重排编号。' }
+        return {
+          ok: false,
+          needs_revision: true,
+          problems: errors.map((item) => String(item.message ?? '')),
+          audit,
+          instruction: '上面这些是事实性错误（编号越界/占位符/缺收尾句等）。请按提示改一次，再调用 write_prompt；确实要按原样写入可传 force=true。',
+        }
       }
       const nextSegments = planSegments.map((item, i) => (
         i === index - 1
@@ -2522,7 +2537,7 @@ export function AgentRail({
         length: text.length,
         audit,
         aligned_tokens: alignedResult.fixes.length ? alignedResult.fixes : undefined,
-        aligned_note: alignedResult.fixes.length
+        aligned_note: autoAlign && alignedResult.fixes.length
           ? `已按绑定表把 ${alignedResult.fixes.length} 处令牌编号对齐（文字未改）：` +
             alignedResult.fixes.map((f) => `${f.from}→${f.to}（${f.name}）`).join('、')
           : undefined,
