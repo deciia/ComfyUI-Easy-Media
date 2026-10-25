@@ -1519,6 +1519,7 @@ async def handle_agent_step_stream(request: web.Request) -> web.StreamResponse:
     tools = payload.get("tools") if isinstance(payload.get("tools"), list) else None
     config = payload.get("config") if isinstance(payload.get("config"), dict) else None
     system_extra = str(payload.get("system_extra") or "")
+    summarize = bool(payload.get("summarize"))
 
     from .utils.agent import stream_agent_step
 
@@ -1531,7 +1532,7 @@ async def handle_agent_step_stream(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
-        async for chunk in stream_agent_step(messages, context, tools, config, system_extra):
+        async for chunk in stream_agent_step(messages, context, tools, config, system_extra, summarize):
             await response.write(chunk.encode("utf-8"))
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
@@ -1565,8 +1566,9 @@ async def handle_agent_compact(request: web.Request) -> web.Response:
         payload = await request.json()
         messages = payload.get("messages") if isinstance(payload, dict) else None
         config = payload.get("config") if isinstance(payload, dict) else None
-        text = await compact_messages(messages or [], config if isinstance(config, dict) else None)
-        return web.json_response({"ok": True, "text": text})
+        result = await compact_messages(messages or [], config if isinstance(config, dict) else None)
+        payload_out = result if isinstance(result, dict) else {"text": str(result or ""), "memories": []}
+        return web.json_response({"ok": True, **payload_out})
     except Exception as error:  # noqa: BLE001
         traceback.print_exc()
         return web.json_response({"ok": False, "error": str(error)}, status=400)
@@ -1585,6 +1587,7 @@ async def handle_agent_step(request: web.Request) -> web.Response:
             payload.get("tools") if isinstance(payload.get("tools"), list) else None,
             None,
             str(payload.get("system_extra") or ""),
+            bool(payload.get("summarize")),
         )
         return web.json_response({"ok": True, **result})
     except Exception as error:  # noqa: BLE001

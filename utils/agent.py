@@ -101,6 +101,18 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
 直接开始干活，不要解释你有哪些工具。"""
 
 
+AGENT_SUMMARY_PROMPT = """你是 EasyMedia「导演工作台」的助手。一轮任务刚执行完毕，工具调用与结果都在对话里。
+
+请面向用户输出**最终总结**（中文、简洁、可直接分点）：
+1) 完成了什么：改了哪些段/主体/资源/绑定/提示词，给出数量与关键字段变化；
+2) 执行结果：成功/失败/跳过了什么，失败的原因一句话；
+3) 遗留事项与建议的下一步（没有就写"无"）。
+
+直接输出总结正文；不要输出 JSON，不要调用任何工具，不要逐条复述工具原始输出。
+若对话里没有任何已执行的工具，就基于用户请求说明当前状态与建议。
+"""
+
+
 def _compact_context(context: dict | None) -> dict:
     context = context or {}
     segments = []
@@ -165,6 +177,16 @@ def _compact_context(context: dict | None) -> dict:
             str(key)[:60]: str(value)[:400]
             for key, value in list((context.get("notes") or {}).items())[:20]
         },
+        "memories": [
+            {
+                "type": str(item.get("type") or ""),
+                "title": str(item.get("title") or "")[:60],
+                "content": str(item.get("content") or "")[:220],
+                "importance": item.get("importance"),
+            }
+            for item in (context.get("memories") or [])[:15]
+            if isinstance(item, dict)
+        ],
         "mentions": [
             {
                 "name": str(item.get("name") or "")[:60],
@@ -406,14 +428,19 @@ async def stream_agent_step(
     tools: list[dict] | None,
     config: dict | None,
     system_extra: str = "",
+    summarize: bool = False,
 ):
-    """流式单步：逐段 yield SSE 文本；结束时给出组装好的 tool_calls。"""
+    """流式单步：逐段 yield SSE 文本；结束时给出组装好的 tool_calls。summarize=True 时只生成总结。"""
     import aiohttp
 
     from .prompt_enhancer import PromptEnhancerError, resolve_settings
 
     settings = resolve_settings(config)
-    base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
+    if summarize:
+        tools = None
+        base_prompt = AGENT_SUMMARY_PROMPT
+    else:
+        base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = base_prompt + _skills_hint() + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
@@ -543,18 +570,23 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
         text = str(message.get("text") or message.get("content") or "").strip()
         if not text:
             continue
-        lines.append(f"[{role}] {text[:1200]}")
+        lines.append(f"[{role}] {text[:2000]}")
     if not lines:
         return ""
     system = (
-        "你是对话压缩器。把下面这段导演台助手与用户的对话压缩成不超过 400 字的要点备忘。"
-        "必须保留：用户目标、已完成动作与关键参数、未完成事项、用户偏好与禁忌。不要复述细节，不要编造。"
+        "你是对话压缩器，同时负责从对话里提炼跨会话仍有价值的长期记忆。"
+        "只输出一个 JSON 对象（不要 Markdown 代码块、不要多余文字）："
+        '{"memo": "不超过 600 字的结构化备忘：①用户目标与当前进度；②已完成动作与关键参数'
+        '（段号/资源名/绑定关系/任务类型/文件路径/时长）；③未完成事项与下一步；④用户偏好与禁忌",'
+        '"memories": [{"type": "preference|project|decision|constraint|pitfall", '
+        '"title": "短标题（同标题视为同一条）", "content": "一句话事实，含结论与原因", "importance": 1}]}'
+        "。memories 最多 3 条，只放跨会话仍有价值的事实；没有就给空数组。不要复述工具原始输出，不要编造。"
     )
     body = {
         "model": settings.model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": "\n".join(lines)[:24000]},
+            {"role": "user", "content": "\n".join(lines)[:60000]},
         ],
         "temperature": 0.2,
         "stream": False,
@@ -569,8 +601,35 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
             data = json.loads(raw)
     choices = data.get("choices") or []
     if not choices:
-        return ""
-    return str((choices[0].get("message") or {}).get("content") or "").strip()
+        return {"text": "", "memories": []}
+    raw = str((choices[0].get("message") or {}).get("content") or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:]
+    try:
+        parsed = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
+    except (ValueError, json.JSONDecodeError):
+        return {"text": raw, "memories": []}
+    if not isinstance(parsed, dict):
+        return {"text": raw, "memories": []}
+    memo = str(parsed.get("memo") or "").strip()
+    mems = parsed.get("memories") if isinstance(parsed.get("memories"), list) else []
+    clean = []
+    for item in mems[:3]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()[:80]
+        content = str(item.get("content") or "").strip()[:500]
+        if not title or not content:
+            continue
+        clean.append({
+            "type": str(item.get("type") or "project"),
+            "title": title,
+            "content": content,
+            "importance": max(1, min(5, int(item.get("importance") or 3))),
+        })
+    return {"text": memo or raw, "memories": clean}
 
 
 def _agent_debug_dir() -> Path:
@@ -627,15 +686,20 @@ async def run_agent_step(
     tools: list[dict] | None = None,
     config: dict | None = None,
     system_extra: str = "",
+    summarize: bool = False,
 ) -> dict:
-    """单步工具调用：一次 LLM 请求，返回 {text, tool_calls, thinking}。
+    """单步工具调用：一次 LLM 请求，返回 {text, tool_calls, thinking}。summarize=True 时只生成总结。
 
     工具执行在前端（项目数据在 localStorage），后端只负责构造请求与解析 tool_calls。
     """
     from .prompt_enhancer import PromptEnhancerError, resolve_settings
 
     settings = resolve_settings(config)
-    base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
+    if summarize:
+        tools = None
+        base_prompt = AGENT_SUMMARY_PROMPT
+    else:
+        base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = (
         base_prompt
         + _skills_hint()

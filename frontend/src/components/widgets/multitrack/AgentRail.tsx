@@ -393,6 +393,39 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'memorize',
+        description: '把跨会话仍有价值的事实写入项目长期记忆（用户偏好/项目决策/工程约束/踩坑）。同标题覆盖更新；importance>=4 的条目每轮对话都会自动注入',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['preference', 'project', 'decision', 'constraint', 'pitfall'], description: '记忆类型' },
+            title: { type: 'string', description: '短标题，同标题视为同一条记忆（覆盖更新）' },
+            content: { type: 'string', description: '一句话事实，含结论与原因' },
+            importance: { type: 'number', description: '1-5，5 最高' },
+          },
+          required: ['type', 'title', 'content'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'recall_memories',
+        description: '检索项目长期记忆（关键词匹配标题/内容，可按类型过滤）；不传 query 返回高权重全部',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '关键词，留空列出全部' },
+            type: { type: 'string', description: '按类型过滤：preference/project/decision/constraint/pitfall' },
+            limit: { type: 'number', description: '最多返回条数，默认 10' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'verify_project',
         description: '自检项目一致性：脚本段 vs 任务轨、A稿/终稿缺失、资源缺文件、主体无子资源、绑定缺失',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1376,6 +1409,38 @@ export function AgentRail({
         .map(([key, value]) => ({ key, value }))
       return { count: entries.length, notes: entries }
     }
+    if (name === 'memorize') {
+      const allowed = ['preference', 'project', 'decision', 'constraint', 'pitfall']
+      const rawType = String(args.type ?? 'project').trim()
+      const mt = allowed.includes(rawType) ? rawType : 'project'
+      const title = String(args.title ?? '').trim().slice(0, 80)
+      const content = String(args.content ?? '').trim().slice(0, 500)
+      if (!title || !content) return { error: 'title 与 content 必填' }
+      const importance = Math.max(1, Math.min(5, Number(args.importance ?? 3) || 3))
+      const list = ((readWorkspace(projectKey).memories ?? []) as Array<Record<string, unknown>>).slice()
+      const record = { type: mt, title, content, importance, updatedAt: Date.now() }
+      const idx = list.findIndex((item) => String(item.title ?? '') === title)
+      if (idx >= 0) list[idx] = { ...list[idx], ...record }
+      else list.push({ id: `mem-${Date.now().toString(36)}`, createdAt: Date.now(), ...record })
+      list.sort((a, b) => Number(b.importance ?? 0) - Number(a.importance ?? 0))
+      writeWorkspace(projectKey, { memories: list.slice(0, 60) } as never)
+      return { ok: true, type: mt, title, importance, merged: idx >= 0, total: Math.min(list.length, 60) }
+    }
+    if (name === 'recall_memories') {
+      const list = ((readWorkspace(projectKey).memories ?? []) as Array<Record<string, unknown>>)
+      const query = String(args.query ?? '').trim().toLowerCase()
+      const typeFilter = String(args.type ?? '').trim()
+      const limit = Math.max(1, Math.min(30, Number(args.limit ?? 10) || 10))
+      const items = list
+        .filter((item) => (!typeFilter || String(item.type ?? '') === typeFilter))
+        .filter((item) => !query
+          || String(item.title ?? '').toLowerCase().includes(query)
+          || String(item.content ?? '').toLowerCase().includes(query))
+        .sort((a, b) => Number(b.importance ?? 0) - Number(a.importance ?? 0))
+        .slice(0, limit)
+        .map((item) => ({ type: item.type, title: item.title, content: item.content, importance: item.importance }))
+      return { count: items.length, memories: items }
+    }
     if (name === 'verify_project') {
       const planNow2 = readPlan() as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
       const scriptSegments = planNow2?.segments ?? []
@@ -2277,9 +2342,15 @@ export function AgentRail({
     const resolve = askResolveRef.current
     askResolveRef.current = null
     if (!resolve) {
-      // 没有等待者：说明提问的那一轮已经不在了（中断/重挂载丢引用）。
-      // 把选择记为排队指令，下一步会被消费；绝不再当成"插话"文本乱发。
-      writeWorkspace(projectKey, { pendingInject: `（我已选择）${answer}` } as never)
+      // 没有等待者：提问的那一轮已经结束（中断/重挂载丢引用/自然收尾后点历史选项）。
+      // 空闲 → 直接以该选择为新指令发起一轮（历史选项点击不再死等"下一步"）；
+      // 仍在运行 → 记为排队指令，由下一步消费；绝不当成"插话"文本乱发。
+      const stillBusy = busy || Boolean((readWorkspace(projectKey) as { agentBusy?: boolean }).agentBusy)
+      if (stillBusy) {
+        writeWorkspace(projectKey, { pendingInject: `（我已选择）${answer}` } as never)
+      } else {
+        void sendStepLoop(`（我已选择）${answer}`)
+      }
       patchWorkspaceMessages(projectKey, (current) => [
         ...current,
         { id: `u-choice-${Date.now()}`, role: 'user', text: `（选择）${answer}` },
@@ -2452,7 +2523,22 @@ export function AgentRail({
       if (todos.length) {
         context.todos = todos.slice(0, 24).map((item) => ({ text: String(item.text ?? ''), status: String(item.status ?? 'pending') }))
       }
-      const noteEntries = Object.entries(notes).slice(0, 20)
+      const memoryList = ((workspaceNow.memories ?? []) as Array<Record<string, unknown>>)
+        .slice()
+        .sort((a, b) => Number(b.importance ?? 0) - Number(a.importance ?? 0))
+        .slice(0, 15)
+        .map((item) => ({
+          type: item.type,
+          title: String(item.title ?? '').slice(0, 60),
+          content: String(item.content ?? '').slice(0, 220),
+          importance: item.importance,
+        }))
+      if (memoryList.length) {
+        context.memories = memoryList
+      }
+      const noteEntries = Object.entries(notes)
+        .sort((a, b) => (a[0] === 'agent_memo' ? -1 : b[0] === 'agent_memo' ? 1 : 0))
+        .slice(0, 20)
       if (noteEntries.length) {
         context.notes = Object.fromEntries(noteEntries)
       }
@@ -2479,8 +2565,18 @@ export function AgentRail({
       ? [...resumedRun, { role: 'user', text }]
       : [...fallbackHistory]
     let stepCount = 0
+    let producedText = false
+    let endedByNoCalls = false
+    // 步数策略（对标 dsh/hermes）：软上限每 40 步询问模型「继续还是收尾」，硬上限 200 才强制总结
+    const HARD_STEP_LIMIT = 200
+    const SOFT_STEP_INTERVAL = 40
+    // 上下文预算（字符数近似 token）：达到触发压缩，压缩后保留近期原文，更早的转备忘并入项目记忆
+    const AUTO_COMPACT_CHARS = 600000
+    const KEEP_TAIL_CHARS = 120000
+    const KEEP_MIN_MESSAGES = 12
+    let idleReadOnlySteps = 0
     try {
-      for (let step = 0; step < 40; step += 1) {
+      for (let step = 0; step < HARD_STEP_LIMIT; step += 1) {
         if (controller.signal.aborted) break
         stepCount = step + 1
         update({ steps: [{ label: `第 ${stepCount} 步`, status: 'running' }] })
@@ -2491,20 +2587,73 @@ export function AgentRail({
           appendText(`\n[收到插话] ${pendingInject}\n`)
           writeWorkspace(projectKey, { pendingInject: '' } as never)
         }
-        // 上下文压缩：过长时把旧段压成备忘
-        if (chatMessages.length > 34) {
+        // 软上限询问：每 40 步把「继续还是收尾」的决定权交给模型，而不是硬断
+        if ((step + 1) % SOFT_STEP_INTERVAL === 0 && step + 1 < HARD_STEP_LIMIT) {
+          chatMessages.push({ role: 'user', text: `[系统] 已连续执行 ${step + 1} 步。若任务尚未完成，请继续调用工具（执行环境会持续提供）；若已完成，请不要再调用工具，直接输出面向用户的总结。` })
+          appendText(`
+[进度] 已执行 ${step + 1} 步，继续中…`)
+        }
+        // 上下文压缩（预算制，对标 dsh/hermes）：按字符预算触发，保留足够长的近期原文，
+        // 更早部分压成结构化备忘并写入项目记忆（每轮 system 都带上，刷新/重挂载不丢）
+        const msgChars = (m: Record<string, unknown>) => String(m.text ?? m.content ?? '').length
+        const totalChars = chatMessages.reduce((n, m) => n + msgChars(m), 0)
+        if (totalChars > AUTO_COMPACT_CHARS && chatMessages.length > KEEP_MIN_MESSAGES + 4) {
           try {
-            const compactResponse = await fetch('/easy-media/agent/compact', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ messages: chatMessages.slice(0, chatMessages.length - 8) }),
-            })
-            const compactData = await compactResponse.json().catch(() => ({}))
-            const memo = String(compactData?.text || '').trim()
-            if (compactResponse.ok && memo) {
-              const tail = chatMessages.slice(-8)
-              chatMessages.length = 0
-              chatMessages.push({ role: 'assistant', text: `【前情提要】${memo}` }, ...tail)
+            let keep = 0
+            let acc = 0
+            for (let i = chatMessages.length - 1; i >= 0; i -= 1) {
+              acc += msgChars(chatMessages[i])
+              keep += 1
+              if (keep >= KEEP_MIN_MESSAGES && acc >= KEEP_TAIL_CHARS) break
+            }
+            const cutoff = Math.max(0, chatMessages.length - keep)
+            const older = chatMessages.slice(0, cutoff)
+            if (older.length >= 4) {
+              const compactResponse = await fetch('/easy-media/agent/compact', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: older }),
+              })
+              const compactData = await compactResponse.json().catch(() => ({}))
+              const memo = String(compactData?.text || '').trim()
+              const extracted = Array.isArray(compactData?.memories) ? (compactData.memories as Array<Record<string, unknown>>) : []
+              if (compactResponse.ok && memo) {
+                const tail = chatMessages.slice(cutoff)
+                chatMessages.length = 0
+                chatMessages.push({ role: 'assistant', text: `【前情提要】${memo}` }, ...tail)
+                try {
+                  const notesNow = { ...((readWorkspace(projectKey).notes ?? {}) as Record<string, string>) }
+                  notesNow.agent_memo = memo
+                  writeWorkspace(projectKey, { notes: notesNow } as never)
+                } catch {
+                  /* 记忆写入失败不阻塞 */
+                }
+                if (extracted.length) {
+                  try {
+                    const list = ((readWorkspace(projectKey).memories ?? []) as Array<Record<string, unknown>>).slice()
+                    for (const raw of extracted.slice(0, 5)) {
+                      const title = String(raw?.title ?? '').trim().slice(0, 80)
+                      const content = String(raw?.content ?? '').trim().slice(0, 500)
+                      if (!title || !content) continue
+                      const record = {
+                        type: String(raw?.type ?? 'project'),
+                        title,
+                        content,
+                        importance: Math.max(1, Math.min(5, Number(raw?.importance ?? 3) || 3)),
+                        updatedAt: Date.now(),
+                      }
+                      const hit = list.findIndex((item) => String(item.title ?? '') === title)
+                      if (hit >= 0) list[hit] = { ...list[hit], ...record }
+                      else list.push({ id: `mem-${Date.now().toString(36)}-${list.length}`, createdAt: Date.now(), ...record })
+                    }
+                    list.sort((a, b) => Number(b.importance ?? 0) - Number(a.importance ?? 0))
+                    writeWorkspace(projectKey, { memories: list.slice(0, 60) } as never)
+                  } catch {
+                    /* 记忆写入失败不阻塞 */
+                  }
+                }
+                appendText(`\n[记忆] 已把前 ${older.length} 条对话压成备忘并存入项目记忆${extracted.length ? `，并提炼 ${extracted.length} 条长期记忆` : ''}\n`)
+              }
             }
           } catch {
             /* 压缩失败不影响主流程 */
@@ -2553,6 +2702,7 @@ export function AgentRail({
                     continue
                   }
                   if (event.type === 'text' && typeof event.delta === 'string') {
+                    producedText = true
                     stepStreamed += event.delta
                     appendText(event.delta)
                   } else if (event.type === 'final') {
@@ -2604,6 +2754,7 @@ export function AgentRail({
         if (!data) break
         const replyText = String(data.text || '')
         if (replyText) {
+          producedText = true
           if (stepStreamed && replyText.startsWith(stepStreamed)) {
             const suffix = replyText.slice(stepStreamed.length)
             if (suffix) appendText(suffix)
@@ -2612,7 +2763,10 @@ export function AgentRail({
           }
         }
         const calls = Array.isArray(data.tool_calls) ? data.tool_calls : []
-        if (!calls.length) break
+        if (!calls.length) {
+          endedByNoCalls = true
+          break
+        }
         chatMessages.push({
           role: 'assistant',
           text: replyText,
@@ -2642,12 +2796,64 @@ export function AgentRail({
             })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 6000) })
             writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
+            // 空转检测：连续只读不打转判定
+            if (/^(set_|patch_|apply_|save_|update_|bind_|sync_|generate_|plan_|revise_|create_|remove_|delete_|run_|memorize)/.test(call.name) && result && !result.error) {
+              idleReadOnlySteps = 0
+            } else {
+              idleReadOnlySteps += 1
+              if (idleReadOnlySteps >= 10) {
+                endedByNoCalls = true
+                appendText('\n[系统] 连续多步无有效写操作，自动收尾。')
+                break
+              }
+            }
           } catch (toolError) {
             const message = toolError instanceof Error ? toolError.message : String(toolError)
             upsertToolCall({ id: call.id, name: call.name, args: parsedArgs, status: 'error', result: message })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify({ error: message }) })
           }
         }
+      }
+      // 收尾兜底：跑满步数上限、或模型收尾没有输出文本时，自动补一次总结
+      if (!controller.signal.aborted && (!endedByNoCalls || !producedText)) {
+        update({ steps: [{ label: '生成总结', status: 'running' }] })
+        appendText('')
+        try {
+          const sumResp = await fetch('/easy-media/agent/step/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({ messages: chatMessages, summarize: true }),
+          })
+          if (sumResp.ok && sumResp.body) {
+            const reader2 = sumResp.body.getReader()
+            const dec2 = new TextDecoder()
+            let buf2 = ''
+            let summary = ''
+            for (;;) {
+              const r2 = await reader2.read()
+              if (r2.done) break
+              buf2 += dec2.decode(r2.value, { stream: true })
+              let b2 = buf2.indexOf('\n\n')
+              while (b2 >= 0) {
+                const raw2 = buf2.slice(0, b2)
+                buf2 = buf2.slice(b2 + 2)
+                for (const line of raw2.split('\n')) {
+                  if (!line.startsWith('data:')) continue
+                  let ev: Record<string, unknown>
+                  try { ev = JSON.parse(line.slice(5).trim()) } catch { continue }
+                  if (ev.type === 'text' && typeof ev.delta === 'string') { summary += ev.delta; appendText(ev.delta) }
+                  if (ev.type === 'error') throw new Error(String(ev.error ?? '总结失败'))
+                }
+                b2 = buf2.indexOf('\n\n')
+              }
+            }
+            if (summary.trim()) {
+              chatMessages.push({ role: 'assistant', text: summary })
+              writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
+            }
+          }
+        } catch { /* 总结失败不阻塞收尾 */ }
       }
       update({
         status: controller.signal.aborted ? 'done' : 'done',
