@@ -1913,6 +1913,22 @@ export function AgentRail({
       checkKind('Audio', audios)
       checkKind('Video', videos)
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
+      // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
+      const identityAsPicture = /<Picture\s+\d+>[^\n]{0,80}(四视图|三视图|正脸|侧脸|正面照|全身照|面部特征|发型|五官|人物|角色|主角|男主|女主|技师|司机|店主|工人|老赵|小赵)/.test(prompt)
+        || /(人物|角色|主角|技师|司机|店主|老赵|小赵)[^\n]{0,40}<Picture\s+\d+>/.test(prompt)
+      if (identityAsPicture) {
+        problems.push({
+          level: 'error',
+          message: '用 <Picture> 定义人物身份/四视图；人物必须用 <Subject n> 承载（先升格为主体再引用），这是 H3 结构错误，不是可选项',
+        })
+      }
+      const identityTokensInRetention = (prompt.match(/<Picture\s+\d+>[^\n]{0,40}(完全沿用|面部|发型|服装|体型|容貌)/g) ?? []).length
+      if (identityTokensInRetention >= 2) {
+        problems.push({ level: 'warn', message: `retention_analysis 有 ${identityTokensInRetention} 处用 <Picture> 声明人物保留项，应为 <Subject n>` })
+      }
+      if (!/(^|\n)\s*(?:#+\s*)?\*{0,2}subject_definitions\*{0,2}\s*[:：]/.test(prompt)) {
+        problems.push({ level: 'error', message: '缺 subject_definitions 段（六段式第一段）' })
+      }
       if (!/(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)/.test(prompt)) problems.push({ level: 'warn', message: '缺「不得出现文字/字幕/水印」约束（可自动补）' })
       const head = prompt.split(/\nsummary\s*[:：]/)[0] ?? ''
       if (subjects > 0 && /<Picture\s+\d+>[^\n]{0,20}(老赵|小赵|人物|技师|司机|女人|男人|角色)/.test(head)) {
