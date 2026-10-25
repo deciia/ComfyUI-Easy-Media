@@ -571,6 +571,22 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'delete_segments',
+        description: '删除分镜脚本里的段（按段号）。只改脚本，不动任务轨；删后自动重排各段绑定键。必须 confirm=true，建议先 dry_run=true 预览。删空会拒绝。',
+        parameters: {
+          type: 'object',
+          properties: {
+            indexes: { type: 'array', items: { type: 'number' }, description: '要删除的段号（1 起），可多个' },
+            confirm: { type: 'boolean' },
+            dry_run: { type: 'boolean' },
+          },
+          required: ['indexes'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'delete_resources',
         description: '删除主体或资源（按名称）。会同时：从主体子图关联里移除、从所有段的 A/B 绑定清单里解绑。必须传 confirm=true 才执行；删除前先用 list_resources 确认名称与引用情况。',
         parameters: {
@@ -1806,6 +1822,70 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'delete_segments') {
+      const raw = Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : []
+      const indexes = Array.from(new Set(raw.filter((item) => Number.isFinite(item) && item >= 1))).sort((a, b) => a - b)
+      if (!indexes.length) return { error: 'indexes 不能为空（段号从 1 开始）' }
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '当前项目没有分镜脚本' }
+      const invalid = indexes.filter((index) => index > planSegments.length)
+      if (invalid.length) return { error: `段号超出范围：${invalid.join('、')}（共 ${planSegments.length} 段）` }
+      const removed = indexes.map((index) => ({
+        index,
+        name: String(planSegments[index - 1]?.name ?? ''),
+        seconds: Number(planSegments[index - 1]?.duration_seconds ?? 0),
+      }))
+      const remaining = planSegments.filter((_, i) => !indexes.includes(i + 1))
+      if (!remaining.length) return { error: '不能删空所有段；至少保留 1 段' }
+      const dryRun = args.dry_run === true
+      if (!dryRun && args.confirm !== true) return { error: '删除需要 confirm=true（可先 dry_run=true 预览）' }
+      if (dryRun) {
+        return {
+          ok: true,
+          dry_run: true,
+          would_delete: removed,
+          remaining: remaining.length,
+          total_seconds_after: remaining.reduce((sum, segment) => sum + Number(segment.duration_seconds ?? 0), 0),
+          note: '任务轨不受影响；如需同步请在删后 apply_storyboard。',
+        }
+      }
+
+      // 重排绑定键：旧索引 → 新索引
+      const oldIndexes = planSegments.map((_, i) => i + 1)
+      const keptOld = oldIndexes.filter((index) => !indexes.includes(index))
+      const remap = new Map<number, number>()
+      keptOld.forEach((oldIndex, newIndex) => remap.set(oldIndex, newIndex))
+      const bindings = (readWorkspace(projectKey).bindings ?? {}) as Record<string, string[]>
+      for (const variant of ['a', 'b'] as const) {
+        // 先清空所有旧键，再按新顺序写回
+        for (const oldIndex of oldIndexes) {
+          writeBindings(projectKey, `script-${oldIndex - 1}:${variant}`, [])
+        }
+        for (const [oldIndex, newIndex] of remap.entries()) {
+          const ids = bindings[`script-${oldIndex - 1}:${variant}`] ?? []
+          if (ids.length) writeBindings(projectKey, `script-${newIndex}:${variant}`, ids)
+        }
+      }
+
+      writeWorkspace(projectKey, {
+        plan: {
+          ...(planNow as Record<string, unknown>),
+          segments: remaining,
+          total_seconds: remaining.reduce((sum, segment) => sum + Number(segment.duration_seconds ?? 0), 0),
+        } as never,
+      })
+      const flush = await flushProjectToDisk()
+      return {
+        ok: true,
+        deleted: removed,
+        remaining: remaining.length,
+        saved: flush.saved,
+        save_error: flush.saved ? undefined : flush.reason,
+        note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。',
+      }
+    }
+
     if (name === 'delete_resources') {
       const names = Array.isArray(args.names) ? args.names.map(String).filter(Boolean) : []
       if (!names.length) return { error: 'names 不能为空' }
