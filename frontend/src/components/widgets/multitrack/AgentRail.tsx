@@ -572,7 +572,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'undo_last_delete',
-        description: '撤销上一次删除（资源/主体删除、分镜段删除）。任务轨段删除不可撤销。同一份快照只能用一次。',
+        description: '撤销最近一次删除（资源/主体、分镜段、任务轨段都支持）。可连续撤销最近 5 次，每次撤一步。',
         parameters: { type: 'object', properties: {}, required: [] },
       },
     },
@@ -1706,9 +1706,11 @@ export function AgentRail({
       } as unknown as ProjectResource)
       return { ok: true, created: subjectName }
     }
-    /** 删除前快照，供 undo_last_delete 恢复 */
+    /** 删除前快照，压入撤销栈（保留最近 5 次，可连续撤销） */
     const saveDeleteSnapshot = (snapshot: Record<string, unknown>) => {
-      writeWorkspace(projectKey, { lastDelete: { at: Date.now(), ...snapshot } } as never)
+      const stack = ((readWorkspace(projectKey) as { deleteHistory?: Array<Record<string, unknown>> }).deleteHistory ?? [])
+      const next = [...stack, { at: Date.now(), ...snapshot }].slice(-5)
+      writeWorkspace(projectKey, { deleteHistory: next, lastDelete: next[next.length - 1] } as never)
     }
 
     /** 把当前节点内存里的任务轨写盘（不带 base_updated_at = 覆盖保存） */
@@ -1875,6 +1877,18 @@ export function AgentRail({
         __easyMediaDeleteTaskSegments?: (list: number[]) => { deleted: string[] }
       }).__easyMediaDeleteTaskSegments
       if (!registry) return { error: '任务轨编辑器未就绪（请从多轨编辑器节点打开弹窗）' }
+      // 删除前快照整份任务轨，供撤销
+      const trackDataNow = (globalThis as unknown as {
+        __easyMediaGetTrackData?: () => Record<string, unknown> | null
+      }).__easyMediaGetTrackData?.()
+      const taskTrackNow = ((trackDataNow?.tracks ?? []) as Array<Record<string, unknown>>)
+        .find((track) => track.type === 'task')
+      saveDeleteSnapshot({
+        kind: 'task_segments',
+        taskSegments: (taskTrackNow?.segments ?? []) as Array<Record<string, unknown>>,
+        removedIndexes: indexes,
+      })
+
       const result = registry(indexes)
       const flush = await flushProjectToDisk()
       return {
@@ -1882,8 +1896,8 @@ export function AgentRail({
         deleted: detail,
         saved: flush.saved,
         save_error: flush.saved ? undefined : flush.reason,
-        undo_available: false,
-        note: '任务轨段删除不可撤销（分镜脚本未改动；如需恢复请 apply_storyboard 重新落轨）。',
+        undo_available: true,
+        note: '分镜脚本未改动；撤销用 undo_last_delete，或重新 apply_storyboard。',
       }
     }
 
@@ -1967,8 +1981,20 @@ export function AgentRail({
     }
 
     if (name === 'undo_last_delete') {
-      const snapshot = (readWorkspace(projectKey) as { lastDelete?: Record<string, unknown> }).lastDelete
+      const workspaceNow = readWorkspace(projectKey) as {
+        deleteHistory?: Array<Record<string, unknown>>
+        lastDelete?: Record<string, unknown>
+      }
+      const stack = [...(workspaceNow.deleteHistory ?? [])]
+      const snapshot = stack.length ? stack[stack.length - 1] : workspaceNow.lastDelete
       if (!snapshot) return { error: '没有可撤销的删除记录' }
+      const popSnapshot = () => {
+        stack.pop()
+        writeWorkspace(projectKey, {
+          deleteHistory: stack,
+          lastDelete: stack.length ? stack[stack.length - 1] : undefined,
+        } as never)
+      }
       const kind = String(snapshot.kind ?? '')
       if (kind === 'resources') {
         const resources = (snapshot.resources ?? []) as ProjectResource[]
@@ -1977,12 +2003,13 @@ export function AgentRail({
         for (const [key, ids] of Object.entries(bindings)) writeBindings(projectKey, key, ids ?? [])
         const links = (snapshot.subjectLinks ?? []) as Array<{ id: string; childResourceIds: string[] }>
         for (const link of links) patchResource(projectKey, link.id, { childResourceIds: link.childResourceIds } as never)
-        writeWorkspace(projectKey, { lastDelete: undefined } as never)
+        popSnapshot()
         return {
           ok: true,
           restored: resources.map((item) => ({ name: item.name, type: item.type })),
           rebound_segments: Object.keys(bindings),
           relinked_subjects: links.map((link) => link.id),
+          remaining_undo: stack.length,
           note: '任务轨里被清掉的 images 需要 sync_task_images 重新写入。',
         }
       }
@@ -1992,9 +2019,21 @@ export function AgentRail({
         writeWorkspace(projectKey, { plan: plan as never })
         const bindings = (snapshot.bindings ?? {}) as Record<string, string[]>
         for (const [key, ids] of Object.entries(bindings)) writeBindings(projectKey, key, ids ?? [])
-        writeWorkspace(projectKey, { lastDelete: undefined } as never)
+        popSnapshot()
         const segments = (plan.segments ?? []) as unknown[]
-        return { ok: true, restored_segments: segments.length, rebound: Object.keys(bindings) }
+        return { ok: true, restored_segments: segments.length, rebound: Object.keys(bindings), remaining_undo: stack.length }
+      }
+      if (kind === 'task_segments') {
+        const segments = (snapshot.taskSegments ?? []) as unknown[]
+        const registry = (globalThis as unknown as {
+          __easyMediaSetTaskTrackSegments?: (list: never[]) => boolean
+        }).__easyMediaSetTaskTrackSegments
+        if (!registry) return { error: '任务轨编辑器未就绪，无法恢复' }
+        const done = registry(segments as never[])
+        if (!done) return { error: '恢复失败：任务轨不存在' }
+        popSnapshot()
+        const flush = await flushProjectToDisk()
+        return { ok: true, restored_segments: segments.length, saved: flush.saved, remaining_undo: stack.length }
       }
       return { error: `不支持撤销删除类型：${kind || '未知'}` }
     }
