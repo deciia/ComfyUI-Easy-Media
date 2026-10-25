@@ -572,6 +572,20 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'plan_assets',
+        description: '从分镜反推资产需求（只读，不建不删）：逐段列出稿内令牌 vs 已绑定、缺素材、缺绑定，并汇总需生成的资产、建议降级/合并的资产。生成任何资源前先用它出表给用户确认。',
+        parameters: {
+          type: 'object',
+          properties: {
+            segments: { type: 'array', items: { type: 'number' }, description: '只看这些段（1 起），留空看全部' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'audit_assets',
         description: '资产体检（只读，不改任何数据）：输出每个主体/资源被哪些段引用（引用矩阵）、零引用资产、只在 1 段出现的主体、稿内令牌缺口、疑似重复命名。用于防资产泛滥与判断该删/该降级/该合并。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -2022,6 +2036,127 @@ export function AgentRail({
         save_error: flush.saved ? undefined : flush.reason,
         undo_available: true,
         note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。撤销用 undo_last_delete。',
+      }
+    }
+
+    if (name === 'plan_assets') {
+      const pool = readResources(projectKey) as ProjectResource[]
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '还没有分镜脚本，无法推导资产需求' }
+      const only = Array.isArray(args.segments) ? args.segments.map((item) => Number(item)) : []
+      const byId = new Map(pool.map((item) => [item.id, item]))
+
+      const rows: Array<Record<string, unknown>> = []
+      const referenced = new Map<string, number[]>()
+      const missingMaterial: Array<Record<string, unknown>> = []
+
+      for (let i = 0; i < planSegments.length; i += 1) {
+        if (only.length && !only.includes(i + 1)) continue
+        const segment = planSegments[i] as Record<string, unknown>
+        const prompt = String(segment.promptA ?? segment.user_prompt ?? '')
+        const boundIds = boundIdsForSegment(i)
+        const expanded: string[] = []
+        for (const id of boundIds) {
+          const item = byId.get(id)
+          if (!item) continue
+          if (!expanded.includes(id)) expanded.push(id)
+          if (item.type === 'Subject') {
+            for (const childId of item.childResourceIds ?? []) {
+              if (!expanded.includes(childId)) expanded.push(childId)
+            }
+          }
+        }
+        for (const id of expanded) {
+          const list = referenced.get(id) ?? []
+          if (!list.includes(i + 1)) list.push(i + 1)
+          referenced.set(id, list)
+        }
+        const boundOf = (type: string) => expanded
+          .map((id) => byId.get(id))
+          .filter((item) => item?.type === type)
+        const count = (kind: string) => (prompt.match(new RegExp(`<${kind} \\d+>`, 'g')) ?? []).length
+        const gaps: string[] = []
+        const need: string[] = []
+        const check = (token: string, boundList: ProjectResource[]) => {
+          const want = count(token)
+          if (!want) return
+          if (boundList.length < want) gaps.push(`${token} ${want} 个令牌，只绑了 ${boundList.length} 个`)
+          for (const item of boundList) {
+            const file = item.imageFile || item.audioFile || item.videoFile
+            if (!file) need.push(`${item.type}:${item.name}（缺文件）`)
+          }
+        }
+        check('Subject', boundOf('Subject'))
+        check('Picture', boundOf('Picture'))
+        check('Audio', boundOf('Audio'))
+        check('Video', boundOf('Video'))
+        for (const item of boundOf('Picture')) {
+          const file = item.imageFile
+          if (!file) missingMaterial.push({ name: item.name, type: 'Picture', segments: [i + 1], reason: '无图片文件' })
+        }
+        rows.push({
+          segment: i + 1,
+          name: String(segment.name ?? ''),
+          seconds: Number(segment.duration_seconds ?? 0),
+          task_type: String(((segment.settings ?? {}) as Record<string, unknown>).taskType ?? ''),
+          context_mode: String(((segment.settings ?? {}) as Record<string, unknown>).contextMode ?? ''),
+          tokens: {
+            subject: count('Subject'),
+            picture: count('Picture'),
+            audio: count('Audio'),
+            video: count('Video'),
+          },
+          bound: expanded.map((id) => {
+            const item = byId.get(id)
+            return item ? `${item.type}:${item.name}` : id
+          }),
+          gaps,
+          need_material: Array.from(new Set(need)),
+        })
+      }
+
+      // 汇总：需生成（被引用但没文件）/ 建议降级 / 建议合并
+      const needGenerate: Array<Record<string, unknown>> = []
+      for (const [id, segments] of referenced.entries()) {
+        const item = byId.get(id)
+        if (!item) continue
+        const file = item.imageFile || item.audioFile || item.videoFile
+        if (!file) {
+          needGenerate.push({
+            name: item.name,
+            type: item.type,
+            segments,
+            suggestion: item.type === 'Picture' ? '生成一张基础图（空景/单体/四视图），不要按某一镜生成' : '补素材或改用其它资源',
+          })
+        }
+      }
+      const singleSegmentSubjects = Array.from(referenced.entries())
+        .map(([id, segments]) => ({ item: byId.get(id), segments }))
+        .filter((row) => row.item?.type === 'Subject' && row.segments.length === 1)
+        .map((row) => ({ name: row.item!.name, only_segment: row.segments[0] }))
+      const zeroReference = pool
+        .filter((item) => !referenced.has(item.id))
+        .map((item) => ({ name: item.name, type: item.type }))
+
+      return {
+        ok: true,
+        read_only: true,
+        rows,
+        summary: {
+          segments: rows.length,
+          assets_referenced: referenced.size,
+          need_generate: needGenerate,
+          zero_reference: zeroReference,
+          single_segment_subjects: singleSegmentSubjects,
+          missing_material: missingMaterial,
+        },
+        next_actions: [
+          needGenerate.length ? `需生成 ${needGenerate.length} 项：先用 generate_resource 出基础板，生成后跑 sync_task_images` : '不用生成新素材',
+          singleSegmentSubjects.length ? `建议把 ${singleSegmentSubjects.length} 个单段主体降为资源（可用 delete_resources + 重新 upsert 资源）` : '主体分布正常',
+          zeroReference.length ? `有 ${zeroReference.length} 个零引用资产，可删除或补绑定` : '无零引用资产',
+        ],
+        note: '此工具只出表，不建不删。用户确认后再执行生成/删除。',
       }
     }
 
