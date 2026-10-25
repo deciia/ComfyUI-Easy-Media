@@ -2072,9 +2072,9 @@ export function AgentRail({
           if (!list.includes(i + 1)) list.push(i + 1)
           referenced.set(id, list)
         }
-        const boundOf = (type: string) => expanded
+        const boundOf = (type: string): ProjectResource[] => expanded
           .map((id) => byId.get(id))
-          .filter((item) => item?.type === type)
+          .filter((item): item is ProjectResource => item !== undefined && item.type === type)
         const count = (kind: string) => (prompt.match(new RegExp(`<${kind} \\d+>`, 'g')) ?? []).length
         const gaps: string[] = []
         const need: string[] = []
