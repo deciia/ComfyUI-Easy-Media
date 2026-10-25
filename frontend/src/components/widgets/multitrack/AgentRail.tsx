@@ -2139,9 +2139,60 @@ export function AgentRail({
   const activeReplyRef = useRef<string>('')
 
   /** D-P1：前端驱动的工具循环（最多 40 步） */
+  /** 直接执行工具：输入框里只写一个工具名时，跳过模型直接运行（排障/脚本化用） */
+  async function runToolDirectly(toolName: string, toolArgs: Record<string, unknown> = {}) {
+    const stamp = Date.now()
+    const replyId = `a-${stamp}`
+    const controller = new AbortController()
+    abortRef.current = controller
+    writeWorkspace(projectKey, { agentBusy: true })
+    setBusy(true)
+    setInput('')
+    patchWorkspaceMessages(projectKey, (current) => [
+      ...current,
+      { id: `u-${stamp}`, role: 'user', text: toolName },
+      { id: replyId, role: 'assistant', text: '', status: 'running', steps: [{ label: toolName, status: 'running' }] },
+    ])
+    activeReplyRef.current = replyId
+    setRailTab('chat')
+    try {
+      const result = await executeAgentTool(toolName, toolArgs)
+      const pretty = JSON.stringify(result, null, 2)
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+        message.id === replyId
+          ? {
+              ...message,
+              status: 'done',
+              text: `${toolName} 结果：\n\`\`\`json\n${pretty.slice(0, 8000)}\n\`\`\``,
+              steps: [{ label: toolName, status: 'done' }],
+              toolCalls: [{ id: `tc-${stamp}`, name: toolName, args: toolArgs, status: 'done', result: pretty.slice(0, 4000) }],
+            }
+          : message
+      )))
+    } catch (error) {
+      patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+        message.id === replyId
+          ? { ...message, status: 'failed', text: `执行失败：${String(error)}` }
+          : message
+      )))
+    } finally {
+      abortRef.current = null
+      writeWorkspace(projectKey, { agentBusy: false })
+      setBusy(false)
+    }
+  }
+
   async function sendStepLoop(textOverride?: string) {
     const text = String(textOverride ?? input).trim()
     if (!text) return
+    // 纯工具名（如 dump_state / list_bindings）→ 直接执行，不经过模型
+    const toolNames = new Set((TOOL_DEFINITIONS as Array<{ function?: { name?: string } }>)
+      .map((item) => String(item?.function?.name ?? ''))
+      .filter(Boolean))
+    if (!busy && toolNames.has(text)) {
+      void runToolDirectly(text)
+      return
+    }
     if (busy) {
       // Toonflow 式 steer：运行中允许插话，循环会在下一步之间插入
       writeWorkspace(projectKey, { pendingInject: text } as never)
