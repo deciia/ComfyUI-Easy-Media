@@ -1248,7 +1248,7 @@ export function AgentRail({
         const params = new URLSearchParams({ filename: fileName, type: root })
         if (subfolder) params.set('subfolder', subfolder)
         const imageUrl = `/view?${params.toString()}`
-        appendText(`\n\n![${targetName || fileName}](${imageUrl})\n✅ 「${targetName || fileName}」完成（${Math.round((Date.now() - startedAt) / 1000)}s，已入库）\n`)
+        pushChatLine(`\n\n![${targetName || fileName}](${imageUrl})\n✅ 「${targetName || fileName}」完成（${Math.round((Date.now() - startedAt) / 1000)}s，已入库）\n`)
       }
       const pool = readResources(projectKey) as ProjectResource[]
       const existing = pool.find((item) => item.name === targetName)
@@ -2727,6 +2727,15 @@ export function AgentRail({
     resolve?.(answer)
   }
   const activeReplyRef = useRef<string>('')
+
+  /** 往当前正在生成的助手回复里追加一行（工具执行过程中用，不等本轮结束） */
+  function pushChatLine(line: string) {
+    const replyId = activeReplyRef.current
+    if (!replyId) return
+    patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
+      message.id === replyId ? { ...message, text: `${message.text}${line}` } : message
+    )))
+  }
 
   /** D-P1：前端驱动的工具循环（最多 40 步） */
   /** 直接执行工具：输入框里只写一个工具名时，跳过模型直接运行（排障/脚本化用） */
