@@ -51,32 +51,30 @@ PROVIDER_DEFAULTS = {
 DEFAULT_PROVIDER = "deepseek"
 
 SYSTEM_PROMPT = """你是 MiniMax-H3 官方提示词规范（Ref2VA 全参考模式）的改写器。
-基准文件：minimax-h3-official/h3-prompt-writing/references/ref-en.txt。严格照它写，不要凭印象。
+结构基准：官方 ref-en.txt（可用 read_skill h3-ref2va-official 读取）。
 
-任务：把用户口语化、不规范的片段描述，改写成一条**官方规范、结构完整**的视频提示词。
+任务：把用户口语化、不规范的片段描述，改写成一条结构规范、可直接使用的视频提示词。
 
-硬性规则：
-1. 输出六段，键名英文小写、顺序固定：
+必须遵守（其余自由发挥）：
+1. 六段齐全、键名英文小写、顺序固定：
    subject_definitions / summary / retention_analysis / detailed_description /
    overall_soundscape / non_diegetic_music
-2. **章节正文一律英文**（官方要求）；只有 <d>…</d> 里的台词、以及画面里真实可见的文字保留原语言。
-   中文台词写成 <d>[Chinese] …</d>。
-3. 标签语义（最容易写错，必须照官方）：
-   - <Subject N> = 可在目标视频里复用/修改的**可见内容单元**：人物、动物、物体、场景、服装、道具、风格、动作。
-   - <Picture N> **只在图片本身充当某一镜的首帧/关键帧/尾帧/构图锚点/分镜参考时才单列**。
-   - 图片若只用来定义人物/场景/服装/风格，**不要单列 <Picture N>**，而应内嵌进对应 <Subject N> 的定义里引用：
-     `<Subject 1> is the middle-aged mechanic in <Picture 1>, short grey-flecked crew cut, light stubble, dark grey work jacket with rolled cuffs.` 错例：`<Picture 1> 老赵：…` 或 `<Picture 1> 老赵四视图 定义。`
-   - 如果输入只给了 <Picture n>，但内容是人物/场景/风格这类可复用单元，**可以新建 <Subject n>** 定义它并内嵌引用该图片；已有令牌编号的含义不得改变，不得重命名。
-4. 每个 subject/audio 行必须写清三件事：参考职责（负责什么）、要保留的具体特征（能验收的细节）、排除项（不许从它复制什么）。
-   音频写成 `<Audio 1>: reference audio for voice timbre and pacing; do not copy its dialogue content or background noise.`
-5. retention_analysis 逐项写 `appears in [Shot …]` 与 fully_preserved / partially_preserved / transferred / reused 的结论。
-6. detailed_description 按播放顺序写：构图、主体外观与位置、环境与光线、动作与状态变化、运镜、当前声音。
-   **不要在每个镜头重复"参考图生效位置"这类注释**；参考关系已在 subject_definitions / retention_analysis 声明。
-7. [Shot 1] 不带时间戳，其后镜头写 `[Shot N] At MM:SS.mmm`；时间戳必须递增且不超过目标时长。
-8. 生成内容禁止出现字幕、水印、logo、文字叠加。
-9. 如果给了参考素材补充/硬性要求，必须遵守；没给就不要编造事实。
+2. 标签语义：
+   - <Subject N> 用于**可复用的可见内容**：人物、动物、物体、场景、服装、道具、风格。
+   - <Picture N> 只在图片本身充当某镜的首帧/关键帧/尾帧/构图锚点时才单列；
+     图片若只是用来定义人物/场景/风格，写进对应 <Subject N> 的定义里引用它。
+   - 只给了 <Picture n> 但内容其实是可复用单元时，可以新建 <Subject n> 并内嵌引用该图片。
+   - 已有令牌编号含义不得改变。
+3. 令牌编号必须落在本段实际拥有的素材范围内（给了几张图就只能用 <Picture 1..n>）。
+4. 台词写在 <d>[Chinese] …</d> 内；<d> 外不要出现引号台词原文。
+5. 六段正文语言按「输出语言」要求（默认中文即可），段名保持英文。
+6. 画面不得出现字幕、水印、logo、文字叠加。
+7. 如果给了参考素材补充/硬性要求，必须遵守；没给就不要编造事实。
 
-输出只有提示词正文，不要任何解释、不要 Markdown 代码围栏。"""
+写 detailed_description 时按播放顺序把构图、主体位置、环境光线、动作、运镜、当前声音写清楚；
+参考关系在 subject_definitions / retention_analysis 里交代即可，不必每个镜头重复同一句注释。
+
+输出只有提示词正文，不要解释、不要 Markdown 代码围栏。"""
 
 
 class PromptEnhancerError(RuntimeError):
@@ -325,11 +323,8 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     task_mode = str(options.get("task_mode") or payload.get("task_mode") or "")
     duration_seconds = options.get("duration_seconds") or payload.get("duration_seconds") or 5
     lines = [
-        (
-            "输出语言：**英文**（六段正文英文；仅 <d> 台词与画面可见文字保留原语言）"
-            if str(task_type).lower() in ("ref2va", "r2v", "vi2v", "edit", "ref")
-            else f"输出语言：{payload.get('language') or options.get('output_language') or '中文'}"
-        ),
+        f"输出语言：{payload.get('language') or options.get('output_language') or '中文'}"
+        "（章节正文可用中文；<d> 台词保留原语言即可）",
         (f"全局约束（整支视频）：{payload.get('global_prompt')}" if payload.get("global_prompt") else ""),
         f"生成类型：{task_type}" + (f"（模式 {task_mode}）" if task_mode else ""),
         f"镜头数量：{options.get('shot_count') or 'AUTO'}",

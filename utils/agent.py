@@ -83,7 +83,13 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
 - 用户说“检查/看看/有什么问题”→ 只读体检类；说“改/重写/修”→ 写入类，写前先读现状、写后自验；说“删除/清理”→ 先 dry_run + ask_user 确认。
 - 同一需求有多种做法时，选能自验、可回退的那条（带 validate / dry_run / undo 的工具优先）。
 
-标准来源（权威顺序）：
+标准来源（权威顺序，需要时用 read_skill 读）：
+- `h3-ref2va-official`：官方 Ref2VA 全参考模式规范原文（六段式、四种标签、各段写法）。
+- `h3-base-official`：官方基础模式规范（T2VA / I2VA / FL2VA / L2VA，三段式）。
+- `h3-prompt-spec`：本站精简版 + 令牌规则 + 反例。
+默认中文输出即可；要保证的是**结构规范**（六段齐全、Subject/Picture 语义正确、编号不越界、台词在 <d> 内），不要额外加措辞限制。
+
+
 1. 官方 Ref2VA 规范：C:/Users/Deciia/.dsh/skills/minimax-h3-official/h3-prompt-writing/references/ref-en.txt（六段式、四种标签、Picture 只在作首帧/关键帧时单列）。
 2. 本站精简版：read_skill h3-prompt-spec。
 3. 现有项目里的提示词**不是**标准；ys-ep6 现稿是反面案例（人物用 <Picture>、单列 Picture 定义人物、编号越界、逐镜重复引用）。

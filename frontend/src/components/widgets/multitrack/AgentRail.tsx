@@ -1922,13 +1922,6 @@ export function AgentRail({
           message: '用 <Picture> 定义人物身份/四视图；人物必须用 <Subject n> 承载（先升格为主体再引用），这是 H3 结构错误，不是可选项',
         })
       }
-      // 官方要求：六段正文英文（仅 <d> 台词与画面可见文字保留原语言）
-      const body = prompt.replace(/<d>[\s\S]*?<\/d>/g, ' ')
-      const cjk = (body.match(/[\u4e00-\u9fff]/g) ?? []).length
-      const latin = (body.match(/[A-Za-z]/g) ?? []).length
-      if (cjk > 200 && cjk > latin * 0.3) {
-        problems.push({ level: 'warn', message: `章节正文以中文为主（中文 ${cjk} 字 / 英文 ${latin} 字符）；官方 Ref2VA 要求正文英文，仅 <d> 台词保留原语言` })
-      }
       const identityTokensInRetention = (prompt.match(/<Picture\s+\d+>[^\n]{0,40}(完全沿用|面部|发型|服装|体型|容貌)/g) ?? []).length
       if (identityTokensInRetention >= 2) {
         problems.push({ level: 'warn', message: `retention_analysis 有 ${identityTokensInRetention} 处用 <Picture> 声明人物保留项，应为 <Subject n>` })
