@@ -442,6 +442,32 @@ export function PromptEnhancerModal({
     )) ?? workspaceSegments[activeScriptIndex]
   })()
   const matchedTrackSegmentId = scriptSegments.length > 0 ? matchedTaskSegment?.id : undefined
+  /** 绑定了图片但任务类型为空 → 落成 r2v，避免下拉显示"未设置"、落轨变 T2V */
+  const ensureRefTaskType = (ids: string[]) => {
+    try {
+      const pool = readResources(bindingProjectKey) as Array<{ id: string; type: string }>
+      const hasPicture = ids.some((id) => pool.find((item) => item.id === id)?.type === 'Picture')
+      if (!hasPicture) return
+      const planNow = readWorkspace(bindingProjectKey).plan as
+        { segments?: Array<Record<string, unknown>>; settings?: Record<string, unknown> } | null
+      if (!planNow?.segments?.length) return
+      const segment = planNow.segments[activeScriptIndex] as Record<string, unknown> | undefined
+      if (!segment) return
+      const segmentSettings = (segment.settings ?? {}) as Record<string, unknown>
+      if (String(segmentSettings.taskType ?? '').trim()) return
+      const planSettings = (planNow.settings ?? {}) as Record<string, unknown>
+      if (String(planSettings.taskType ?? '').trim()) return
+      const segments = planNow.segments.map((item, index) => (
+        index === activeScriptIndex
+          ? { ...item, settings: { ...((item.settings ?? {}) as Record<string, unknown>), taskType: 'r2v' } }
+          : item
+      ))
+      writeWorkspace(bindingProjectKey, { plan: { ...planNow, segments } as never })
+    } catch {
+      /* 忽略：不影响绑定本身 */
+    }
+  }
+
   const bindingKey = `script-${activeScriptIndex}:${previewVariant}`
   const boundIds = readBindings(bindingProjectKey, bindingKey)
 
@@ -2273,7 +2299,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                                     <ReferenceBar
                     resources={resources}
                     boundIds={boundIds}
-                    onChange={(ids) => writeBindings(bindingProjectKey, bindingKey, ids)}
+                    onChange={(ids) => { writeBindings(bindingProjectKey, bindingKey, ids); ensureRefTaskType(ids) }}
                     prompt={finalDraft || finalPrompt}
                     onInsertTokens={(next) => setFinalDraft(next)}
                   />
