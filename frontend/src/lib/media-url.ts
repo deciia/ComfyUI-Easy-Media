@@ -33,9 +33,15 @@ export function mediaContentToViewUrl(content: ViewableMediaContent): string | n
   if (content.url) return content.url
   if (content.local_path) return `file://${content.local_path}`
   if (content.source_type !== 'input' && content.source_type !== 'output') return null
-  if (!content.file_path) return null
 
   const typeParam = content.source_type === 'output' ? 'output' : 'input'
+  // 兼容旧数据：只有 file_name（可能带 subfolder）时也能拼出可访问路径
+  const legacyName = String((content as { file_name?: string }).file_name ?? '').trim()
+  const legacySub = String((content as { subfolder?: string }).subfolder ?? '').trim()
+  if (!content.file_path) {
+    if (!legacyName) return null
+    return mediaPathToViewUrl(legacySub ? `${legacySub}/${legacyName}` : legacyName, typeParam)
+  }
   return mediaPathToViewUrl(content.file_path, typeParam)
 }
 
