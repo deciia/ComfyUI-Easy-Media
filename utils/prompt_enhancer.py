@@ -381,7 +381,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
                 )
             )
     if binding_parts:
-        lines.append("本段绑定素材（编号与参考图顺序一一对应）：\n" + "\n".join(binding_parts))
+        lines.append("本段绑定素材（编号即下表，不要自行重排）：\n" + "\n".join(binding_parts) + "\n说明：主体自带的参考图（如四视图）已算作该主体的来源，不占用 <Picture n> 编号；<Picture n> 只对应下表中的图片。")
     reference_context = str(options.get("reference_context") or "").strip()
     if reference_context:
         lines.append("参考素材补充：" + reference_context)
