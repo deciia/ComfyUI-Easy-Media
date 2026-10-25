@@ -1038,6 +1038,78 @@ async def handle_prompt_studio_config_put(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Failed to save config: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/media/verify")
+async def handle_media_verify(request: web.Request) -> web.Response:
+    """校验一批媒体引用是否真实存在；不存在的按"名称主干"在同一根目录下找回最新文件。"""
+    try:
+        import re as _re
+        from pathlib import Path as _Path
+
+        payload = await request.json()
+        items = (payload or {}).get("items") or []
+        if not isinstance(items, list):
+            return web.json_response({"ok": False, "error": "items must be a list"}, status=400)
+
+        comfy_root = _Path(folder_paths.base_path) if folder_paths else _Path(".")
+
+        def _scan(root: str, subfolder: str) -> dict[str, tuple[str, float]]:
+            base = comfy_root / root
+            if not base.is_dir():
+                return {}
+            found: dict[str, tuple[str, float]] = {}
+            for path in base.rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                rel = path.relative_to(base)
+                sub = str(rel.parent).replace("\\", "/")
+                if sub == ".":
+                    sub = ""
+                if subfolder and sub != subfolder.replace("\\", "/"):
+                    continue
+                key = path.name
+                if key not in found or stat.st_mtime > found[key][1]:
+                    found[key] = (sub, stat.st_mtime)
+            return found
+
+        cache: dict[str, dict[str, tuple[str, float]]] = {}
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            root = str(item.get("root") or "output")
+            if root not in ("input", "output", "temp"):
+                root = "output"
+            subfolder = str(item.get("subfolder") or "")
+            name = str(item.get("name") or "")
+            exists = bool(name) and (comfy_root / root / subfolder / name).is_file()
+            resolved = {"root": root, "subfolder": subfolder, "name": name} if exists else None
+            if not exists and name:
+                stem = _re.sub(r"_\d{10,}_\d+\.(png|jpe?g|webp|mp4|wav|mp3|flac)$", "", name, flags=_re.I)
+                if stem == name:
+                    stem = name.split("_")[0]
+                best = None
+                for try_root in (root, "output", "input", "temp"):
+                    key = try_root
+                    if key not in cache:
+                        cache[key] = _scan(try_root, "")
+                    for found_name, (found_sub, mtime) in cache[key].items():
+                        if not found_name.startswith(stem):
+                            continue
+                        if best is None or mtime > best[2]:
+                            best = (try_root, found_sub, mtime, found_name)
+                if best:
+                    resolved = {"root": best[0], "subfolder": best[1], "name": best[3], "mtime": best[2]}
+            results.append({"requested": {"root": root, "subfolder": subfolder, "name": name}, "exists": exists, "resolved": resolved})
+        return web.json_response({"ok": True, "results": results})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/prompt-studio/active")
 async def handle_prompt_studio_active(request: web.Request) -> web.Response:
     """切换当前生效的 API 配置档（只改 active_profile，不动其它字段）。"""

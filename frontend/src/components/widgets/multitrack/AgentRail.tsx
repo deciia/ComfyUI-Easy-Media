@@ -536,6 +536,20 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'repair_task_images',
+        description: '校验并修复任务轨图片：检查每个绑定图片文件是否真实存在，按名称主干找回真实文件（同名不同时间戳），写回资源后同步到任务轨。用于"图看起来绑了但预览空白/生成找不到文件"。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '只处理该段（1 起），留空处理全部' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'sync_task_images',
         description: '把各段已绑定的图片资源同步写入任务轨对应片段的 images（修复绑定了但任务轨没图）。不传 index 则处理全部段。',
         parameters: {
@@ -1601,6 +1615,93 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'repair_task_images') {
+      const onlyIndex = Number(args.index ?? 0)
+      const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = plan?.segments ?? []
+      const pool = readResources(projectKey) as ProjectResource[]
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const updateSegment = (globalThis as unknown as {
+        __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+      }).__easyMediaUpdateSegment
+
+      // 1) 收集所有被绑定的图片资源
+      const usedIds = new Set<string>()
+      for (let i = 0; i < planSegments.length; i += 1) {
+        if (onlyIndex && onlyIndex !== i + 1) continue
+        for (const id of readBindings(projectKey, `script-${i}:a`)) usedIds.add(String(id))
+      }
+      const pictures = pool.filter((item) => item.type === 'Picture' && usedIds.has(item.id) && String(item.imageFile ?? '').trim())
+      if (!pictures.length) return { error: '没有带文件的已绑定图片资源' }
+
+      // 2) 批量校验存在性
+      const verifyResponse = await fetch('/easy-media/media/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: pictures.map((item) => ({
+            root: item.sharedRoot === 'input' ? 'input' : item.sharedRoot === 'temp' ? 'temp' : 'output',
+            subfolder: item.subfolder ?? '',
+            name: String(item.imageFile ?? ''),
+          })),
+        }),
+      })
+      const verifyData = await verifyResponse.json().catch(() => ({}))
+      const results = Array.isArray(verifyData?.results) ? verifyData.results : []
+      const fixed: Array<Record<string, unknown>> = []
+      const missing: Array<Record<string, unknown>> = []
+      results.forEach((row: Record<string, unknown>, i: number) => {
+        const resource = pictures[i]
+        const requested = (row.requested ?? {}) as Record<string, unknown>
+        const resolved = row.resolved as Record<string, unknown> | null
+        if (!resource) return
+        if (!resolved) {
+          missing.push({ name: resource.name, file: String(resource.imageFile ?? ''), search_root: requested.root })
+          return
+        }
+        const nextName = String(resolved.name ?? '')
+        const nextSub = String(resolved.subfolder ?? '')
+        const nextRoot = String(resolved.root ?? 'output')
+        if (row.exists && nextSub === String(resource.subfolder ?? '') && nextRoot === String(resource.sharedRoot ?? 'output')) return
+        patchResource(projectKey, resource.id, {
+          imageFile: nextName,
+          subfolder: nextSub,
+          sharedRoot: nextRoot === 'input' ? 'input' : nextRoot === 'temp' ? 'temp' : 'output',
+          status: 'ready',
+        } as never)
+        fixed.push({ resource: resource.name, from: String(resource.imageFile ?? ''), to: nextName })
+      })
+
+      // 3) 修复后重新同步任务轨
+      let synced = 0
+      if (updateSegment) {
+        for (let i = 0; i < planSegments.length; i += 1) {
+          if (onlyIndex && onlyIndex !== i + 1) continue
+          const stableKey = String((planSegments[i] as Record<string, unknown>).stable_key ?? '')
+          const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
+            ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
+          if (!matched?.id) continue
+          const images = imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`))
+          if (!images.length) continue
+          if (updateSegment(String(matched.id), { images })) synced += 1
+        }
+      }
+
+      return {
+        ok: fixed.length > 0 || synced > 0,
+        checked: pictures.length,
+        fixed,
+        missing,
+        synced_segments: synced,
+        note: missing.length
+          ? '有文件确实不存在（可能已被清理），需要重新生成或手动指定'
+          : '全部图片文件均存在且已与任务轨同步',
+      }
+    }
+
     if (name === 'sync_task_images') {
       const onlyIndex = Number(args.index ?? 0)
       const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
