@@ -2923,6 +2923,7 @@ export function AgentRail({
     let stepCount = 0
     let producedText = false
     let endedByNoCalls = false
+    let haltRequested = false
     // 步数策略（对标 dsh/hermes）：软上限每 40 步询问模型「继续还是收尾」，硬上限 200 才强制总结
     const HARD_STEP_LIMIT = 200
     const SOFT_STEP_INTERVAL = 40
@@ -3141,8 +3142,21 @@ export function AgentRail({
           } catch {
             parsedArgs = {}
           }
+          const startedAt = Date.now()
+          const heartbeat = window.setInterval(() => {
+            patchWorkspaceMessages(projectKey, (current) => current.map((item) => {
+              if (item.id !== replyId) return item
+              return {
+                ...item,
+                toolCalls: (item.toolCalls ?? []).map((entry) => (
+                  entry.id === call.id ? { ...entry, elapsedMs: Date.now() - startedAt } : entry
+                )),
+              }
+            }))
+          }, 1000)
           try {
             const result = await executeAgentTool(call.name, parsedArgs)
+            window.clearInterval(heartbeat)
             upsertToolCall({
               id: call.id,
               name: call.name,
@@ -3152,23 +3166,32 @@ export function AgentRail({
             })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify(result).slice(0, 6000) })
             writeWorkspace(projectKey, { agentRun: chatMessages.slice(-40) } as never)
-            // 空转检测：连续只读不打转判定
-            if (/^(set_|patch_|apply_|save_|update_|bind_|sync_|generate_|plan_|revise_|create_|remove_|delete_|run_|memorize)/.test(call.name) && result && !result.error) {
+            // 空转检测：写操作清零；连续只读先提醒，次数很多才中止（避免打断长任务）
+            const writeTool = /^(set_|patch_|apply_|save_|update_|bind_|sync_|generate_|plan_|revise_|create_|remove_|delete_|run_|memorize)/.test(call.name)
+            if (writeTool && result && !result.error) {
               idleReadOnlySteps = 0
             } else {
               idleReadOnlySteps += 1
-              if (idleReadOnlySteps >= 10) {
+              if (idleReadOnlySteps === 10) {
+                chatMessages.push({
+                  role: 'user',
+                  text: '[系统] 已连续 10 次只读、没有产生任何修改。不要再查同类信息；要么立刻执行写操作，要么直接用已有信息收尾回答。',
+                })
+              } else if (idleReadOnlySteps >= 18) {
+                haltRequested = true
                 endedByNoCalls = true
-                appendText('\n[系统] 连续多步无有效写操作，自动收尾。')
+                appendText('\n[系统] 连续多次只读且无写入，已中止本轮。')
                 break
               }
             }
           } catch (toolError) {
+            window.clearInterval(heartbeat)
             const message = toolError instanceof Error ? toolError.message : String(toolError)
             upsertToolCall({ id: call.id, name: call.name, args: parsedArgs, status: 'error', result: message })
             chatMessages.push({ role: 'tool', tool_call_id: call.id, text: JSON.stringify({ error: message }) })
           }
         }
+        if (haltRequested) break
       }
       // 收尾兜底：跑满步数上限、或模型收尾没有输出文本时，自动补一次总结
       if (!controller.signal.aborted && (!endedByNoCalls || !producedText)) {
@@ -3398,6 +3421,11 @@ export function AgentRail({
                           </span>
                           {' '}
                           {call.name}
+                          {(call as { elapsedMs?: number }).elapsedMs ? (
+                            <span className="ml-1 text-muted-foreground">
+                              {Math.round(((call as { elapsedMs?: number }).elapsedMs ?? 0) / 1000)}s
+                            </span>
+                          ) : null}
               </summary>
                         <div className="mt-1 whitespace-pre-wrap text-muted-foreground">
                           {call.args ? JSON.stringify(call.args).slice(0, 600) : ''}
