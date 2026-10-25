@@ -32,6 +32,7 @@ import {
   writeWorkspace,
   type ProjectResource,
 } from './agentStore'
+import { ScriptTab } from './ScriptTab'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
@@ -393,7 +394,7 @@ export function PromptEnhancerModal({
   const [draftPrompt, setDraftPrompt] = useState('')
   const [finalA, setFinalA] = useState('')
   const [finalB, setFinalB] = useState('')
-  const [resultTab, setResultTab] = useState<'preview' | 'track' | 'ai'>('preview')
+  const [resultTab, setResultTab] = useState<'preview' | 'script' | 'track' | 'ai'>('preview')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [appearance, setAppearance] = useState(() => {
     const ui = Number(globalThis.localStorage?.getItem('easy-media-ui-scale') || 0)
@@ -2360,7 +2361,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               <div className="flex min-h-0 min-w-0 flex-col gap-1 ">
                 <div className="flex items-center justify-between">
                   <div className="flex gap-1">
-                    {([['preview', '预览'], ['track', '任务轨'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
+                    {([['preview', '预览'], ['script', '分镜'], ['track', '任务轨'], ['ai', 'AI 助手']] as const).map(([key, label]) => (
                       <button
                         key={key}
                         type="button"
@@ -2376,6 +2377,9 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     ))}
                   </div>
                 </div>
+                {resultTab === 'script' ? (
+                  <ScriptTab projectKey={bindingProjectKey} segmentIndex={activeScriptIndex} />
+                ) : null}
                 <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
                   <PromptQualityBar
                     prompt={finalDraft || finalPrompt || (sections.length ? joinSections(sections) : '')}
