@@ -2081,7 +2081,6 @@ export function AgentRail({
       patchWorkspaceMessages(projectKey, (current) => current.map((message) => (
         message.id === activeReplyRef.current
           ? { ...message, question: { id: qid, text: question, options } }
-          } as never)
           : message
       )))
       // 答案可能由别的实例写入 workspace（组件重挂载后仍能取到）
@@ -2166,8 +2165,8 @@ export function AgentRail({
               status: 'done',
               text: `${toolName} 结果：\n\`\`\`json\n${pretty.slice(0, 8000)}\n\`\`\``,
               steps: [{ label: toolName, status: 'done' }],
-              toolCalls: [{ id: `tc-${stamp}`, name: toolName, args: toolArgs, status: 'done', result: pretty.slice(0, 4000) }]],
-            }
+              toolCalls: [{ id: `tc-${stamp}`, name: toolName, args: toolArgs, status: 'done', result: pretty.slice(0, 4000) }],
+            } as never)
           : message
       )))
     } catch (error) {
