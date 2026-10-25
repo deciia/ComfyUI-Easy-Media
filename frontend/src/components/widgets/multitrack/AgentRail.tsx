@@ -571,6 +571,14 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'undo_last_delete',
+        description: '撤销上一次删除（资源/主体删除、分镜段删除）。任务轨段删除不可撤销。同一份快照只能用一次。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'delete_task_segments',
         description: '删除任务轨上的段（按段号，1 起）。会联动删除关联任务；只影响任务轨，不改分镜脚本。需 confirm=true，建议先 dry_run=true。',
         parameters: {
@@ -1698,6 +1706,11 @@ export function AgentRail({
       } as unknown as ProjectResource)
       return { ok: true, created: subjectName }
     }
+    /** 删除前快照，供 undo_last_delete 恢复 */
+    const saveDeleteSnapshot = (snapshot: Record<string, unknown>) => {
+      writeWorkspace(projectKey, { lastDelete: { at: Date.now(), ...snapshot } } as never)
+    }
+
     /** 把当前节点内存里的任务轨写盘（不带 base_updated_at = 覆盖保存） */
     const flushProjectToDisk = async () => {
       const registry = (globalThis as unknown as { __easyMediaGetTrackData?: () => Record<string, unknown> | null }).__easyMediaGetTrackData
@@ -1840,7 +1853,9 @@ export function AgentRail({
     }
     if (name === 'delete_task_segments') {
       const raw = Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : []
-      const indexes = Array.from(new Set(raw.filter((item) => Number.isFinite(item) && item >= 1))).sort((a, b) => a - b)
+      const nonInteger = raw.filter((item) => !Number.isInteger(item))
+      if (nonInteger.length) return { error: `段号必须是整数：${nonInteger.join('、')}` }
+      const indexes = Array.from(new Set(raw.filter((item) => item >= 1))).sort((a, b) => a - b)
       if (!indexes.length) return { error: 'indexes 不能为空（段号从 1 开始）' }
       const summary = (globalThis as unknown as {
         __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
@@ -1867,13 +1882,16 @@ export function AgentRail({
         deleted: detail,
         saved: flush.saved,
         save_error: flush.saved ? undefined : flush.reason,
-        note: '分镜脚本未改动；如需重新落轨请 apply_storyboard。',
+        undo_available: false,
+        note: '任务轨段删除不可撤销（分镜脚本未改动；如需恢复请 apply_storyboard 重新落轨）。',
       }
     }
 
     if (name === 'delete_segments') {
       const raw = Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : []
-      const indexes = Array.from(new Set(raw.filter((item) => Number.isFinite(item) && item >= 1))).sort((a, b) => a - b)
+      const nonInteger = raw.filter((item) => !Number.isInteger(item))
+      if (nonInteger.length) return { error: `段号必须是整数：${nonInteger.join('、')}` }
+      const indexes = Array.from(new Set(raw.filter((item) => item >= 1))).sort((a, b) => a - b)
       if (!indexes.length) return { error: 'indexes 不能为空（段号从 1 开始）' }
       const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
@@ -1917,6 +1935,18 @@ export function AgentRail({
         }
       }
 
+      saveDeleteSnapshot({
+        kind: 'segments',
+        plan: planNow,
+        bindings: Object.fromEntries(
+          oldIndexes.flatMap((oldIndex) => [
+            [`script-${oldIndex - 1}:a`, bindings[`script-${oldIndex - 1}:a`] ?? []],
+            [`script-${oldIndex - 1}:b`, bindings[`script-${oldIndex - 1}:b`] ?? []],
+          ]),
+        ),
+        removedIndexes: indexes,
+      })
+
       writeWorkspace(projectKey, {
         plan: {
           ...(planNow as Record<string, unknown>),
@@ -1931,8 +1961,42 @@ export function AgentRail({
         remaining: remaining.length,
         saved: flush.saved,
         save_error: flush.saved ? undefined : flush.reason,
-        note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。',
+        undo_available: true,
+        note: '绑定已重排；任务轨段若也需要删，请在编辑器里手动处理，或删后 apply_storyboard 覆盖。撤销用 undo_last_delete。',
       }
+    }
+
+    if (name === 'undo_last_delete') {
+      const snapshot = (readWorkspace(projectKey) as { lastDelete?: Record<string, unknown> }).lastDelete
+      if (!snapshot) return { error: '没有可撤销的删除记录' }
+      const kind = String(snapshot.kind ?? '')
+      if (kind === 'resources') {
+        const resources = (snapshot.resources ?? []) as ProjectResource[]
+        for (const item of resources) upsertResource(projectKey, item)
+        const bindings = (snapshot.bindings ?? {}) as Record<string, string[]>
+        for (const [key, ids] of Object.entries(bindings)) writeBindings(projectKey, key, ids ?? [])
+        const links = (snapshot.subjectLinks ?? []) as Array<{ id: string; childResourceIds: string[] }>
+        for (const link of links) patchResource(projectKey, link.id, { childResourceIds: link.childResourceIds } as never)
+        writeWorkspace(projectKey, { lastDelete: undefined } as never)
+        return {
+          ok: true,
+          restored: resources.map((item) => ({ name: item.name, type: item.type })),
+          rebound_segments: Object.keys(bindings),
+          relinked_subjects: links.map((link) => link.id),
+          note: '任务轨里被清掉的 images 需要 sync_task_images 重新写入。',
+        }
+      }
+      if (kind === 'segments') {
+        const plan = snapshot.plan as Record<string, unknown> | null
+        if (!plan) return { error: '快照缺少分镜数据，无法撤销' }
+        writeWorkspace(projectKey, { plan: plan as never })
+        const bindings = (snapshot.bindings ?? {}) as Record<string, string[]>
+        for (const [key, ids] of Object.entries(bindings)) writeBindings(projectKey, key, ids ?? [])
+        writeWorkspace(projectKey, { lastDelete: undefined } as never)
+        const segments = (plan.segments ?? []) as unknown[]
+        return { ok: true, restored_segments: segments.length, rebound: Object.keys(bindings) }
+      }
+      return { error: `不支持撤销删除类型：${kind || '未知'}` }
     }
 
     if (name === 'delete_resources') {
@@ -1941,6 +2005,16 @@ export function AgentRail({
       const dryRun = args.dry_run === true
       if (!dryRun && args.confirm !== true) return { error: '删除需要 confirm=true（可先 dry_run=true 预览）' }
       const pool = readResources(projectKey) as ProjectResource[]
+      // 同名跨类型（Subject / Picture 等）拒绝，避免误删
+      const ambiguous = names
+        .map((name) => ({ name, types: Array.from(new Set(pool.filter((item) => item.name === name).map((item) => item.type))) }))
+        .filter((entry) => entry.types.length > 1)
+      if (ambiguous.length) {
+        return {
+          error: '存在同名但不同类型的条目，请先说清删哪一种（本工具按名称删除，无法区分）',
+          ambiguous: ambiguous.map((entry) => ({ name: entry.name, types: entry.types })),
+        }
+      }
       const targets = pool.filter((item) => names.includes(item.name))
       const missing = names.filter((name) => !pool.some((item) => item.name === name))
       if (!targets.length) return { error: `没有找到：${names.join('、')}`, missing }
@@ -1957,6 +2031,26 @@ export function AgentRail({
       const affectedSubjects = pool
         .filter((item) => item.type === 'Subject' && (item.childResourceIds ?? []).some((id) => targetIds.has(id)))
         .map((item) => item.name)
+      // 令牌错位警告：解绑后段内 <Picture n>/<Subject n> 编号会重排
+      const planForTokens = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const tokenWarnings: Array<Record<string, unknown>> = []
+      for (const row of affectedBindings) {
+        const key = String(row.binding)
+        const match = key.match(/^script-(\d+):/)
+        const index = match ? Number(match[1]) : -1
+        if (index < 0) continue
+        const segment = planForTokens?.segments?.[index] as Record<string, unknown> | undefined
+        const prompt = String(segment?.promptA ?? segment?.user_prompt ?? '')
+        const tokens = Array.from(new Set(prompt.match(/<(?:Subject|Picture|Audio|Video) \d+>/g) ?? []))
+        if (tokens.length) {
+          tokenWarnings.push({
+            segment: index + 1,
+            binding: key,
+            tokens,
+            warning: '解绑后该段令牌编号会重排，稿内旧编号可能指向别的资源，需要重新生成或校对提示词',
+          })
+        }
+      }
 
       if (dryRun) {
         return {
@@ -1965,9 +2059,21 @@ export function AgentRail({
           would_delete: targets.map((item) => ({ name: item.name, type: item.type, status: item.status, file: item.imageFile ?? item.audioFile ?? item.videoFile ?? null })),
           would_unbind_from: affectedBindings,
           would_remove_from_subjects: affectedSubjects,
+          token_warnings: tokenWarnings,
+          persisted_in: '浏览器 localStorage（与资源池一致；刷新不丢，换浏览器/清缓存会丢）',
           missing,
         }
       }
+
+      // 0) 删除前快照（供撤销）
+      saveDeleteSnapshot({
+        kind: 'resources',
+        resources: targets.map((item) => ({ ...item })),
+        bindings: Object.fromEntries(affectedBindings.map((row) => [String(row.binding), bindings[String(row.binding)] ?? []])),
+        subjectLinks: pool
+          .filter((item) => item.type === 'Subject' && (item.childResourceIds ?? []).some((id) => targetIds.has(id)))
+          .map((item) => ({ id: item.id, childResourceIds: [...(item.childResourceIds ?? [])] })),
+      })
 
       // 1) 从主体子图关联里摘除
       for (const subject of pool.filter((item) => item.type === 'Subject')) {
@@ -1987,12 +2093,15 @@ export function AgentRail({
       const flush = await flushProjectToDisk()
       return {
         ok: true,
-        deleted: targets.map((item) => item.name),
+        deleted: targets.map((item) => ({ name: item.name, type: item.type })),
         unbound_from: affectedBindings,
         removed_from_subjects: affectedSubjects,
+        token_warnings: tokenWarnings,
         missing,
-        saved: flush.saved,
-        note: '任务轨已写入的 images 不会自动清除；如需同步请再执行 sync_task_images。',
+        timeline_saved: flush.saved,
+        persisted_in: '浏览器 localStorage（资源池不在 timeline.json 里）',
+        undo_available: true,
+        note: '任务轨已写入的 images 不会自动清除；如需同步请再执行 sync_task_images。撤销用 undo_last_delete。',
       }
     }
 
