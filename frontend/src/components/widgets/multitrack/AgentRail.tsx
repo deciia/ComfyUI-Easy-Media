@@ -1540,6 +1540,18 @@ export function AgentRail({
       } as unknown as ProjectResource)
       return { ok: true, created: subjectName }
     }
+    /** 段绑定 id 并集：A 版优先，再补 B 版（避免"绑在 B 版却同步不到"） */
+    const boundIdsForSegment = (segmentIndex: number) => {
+      const merged: string[] = []
+      for (const variant of ['a', 'b'] as const) {
+        for (const id of readBindings(projectKey, `script-${segmentIndex}:${variant}`)) {
+          const key = String(id)
+          if (!merged.includes(key)) merged.push(key)
+        }
+      }
+      return merged
+    }
+
     /** 绑定清单 → 任务轨 images（主体展开其子图；仅图片，带实际根目录） */
     const imagesFromBoundIds = (ids: string[]) => {
       const pool = readResources(projectKey) as ProjectResource[]
@@ -1635,7 +1647,7 @@ export function AgentRail({
       const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
       const rows = planSegments.map((segment, i) => {
         const stableKey = String(segment.stable_key ?? '')
-        const ids = readBindings(projectKey, `script-${i}:a`)
+        const ids = boundIdsForSegment(i)
         const names = ids.map((id) => pool.find((item) => item.id === id)?.name ?? id)
         const images = imagesFromBoundIds(ids)
         const prompt = String(segment.promptA ?? segment.user_prompt ?? '')
@@ -1676,7 +1688,7 @@ export function AgentRail({
       const usedIds = new Set<string>()
       for (let i = 0; i < planSegments.length; i += 1) {
         if (onlyIndex && onlyIndex !== i + 1) continue
-        for (const id of readBindings(projectKey, `script-${i}:a`)) usedIds.add(String(id))
+        for (const id of boundIdsForSegment(i)) usedIds.add(String(id))
       }
       const pictures = pool.filter((item) => item.type === 'Picture' && usedIds.has(item.id) && String(item.imageFile ?? '').trim())
       if (!pictures.length) return { error: '没有带文件的已绑定图片资源' }
@@ -1728,17 +1740,28 @@ export function AgentRail({
           const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
             ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
           if (!matched?.id) continue
-          const images = imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`))
+          const images = imagesFromBoundIds(boundIdsForSegment(i))
           if (!images.length) continue
           if (updateSegment(String(matched.id), { images })) synced += 1
         }
       }
 
+      const perSegment = planSegments.map((_, i) => {
+        if (onlyIndex && onlyIndex !== i + 1) return null
+        const ids = boundIdsForSegment(i)
+        const imgs = imagesFromBoundIds(ids)
+        return {
+          index: i + 1,
+          bound_count: ids.length,
+          images: imgs.map((item) => item.name),
+        }
+      }).filter(Boolean)
       return {
         ok: fixed.length > 0 || synced > 0,
         checked: pictures.length,
         fixed,
         missing,
+        per_segment: perSegment,
         synced_segments: synced,
         note: missing.length
           ? '有文件确实不存在（可能已被清理），需要重新生成或手动指定'
@@ -1920,7 +1943,7 @@ export function AgentRail({
           continuityMode: (settings.contextMode as string | undefined) || undefined,
           refImageSize: (settings.refImageSize as string | undefined) || undefined,
           stableKey: String((segment as Record<string, unknown>).stable_key ?? `sk-${i + 1}`),
-          images: imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`)),
+          images: imagesFromBoundIds(boundIdsForSegment(i)),
         }
       })
       if (!mappedItems.length) return { error: '分镜脚本没有段可应用' }
