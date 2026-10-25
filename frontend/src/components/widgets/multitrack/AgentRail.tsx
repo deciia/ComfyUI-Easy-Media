@@ -2517,6 +2517,14 @@ export function AgentRail({
       const audit = auditPrompt(index - 1, text)
       const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
       if (isFragmentWrite) {
+        if (/^\s*第\s*\d+\s*段/m.test(text) || /^\s*第\s*\d+\s*段\s*[｜|]/m.test(text)) {
+          return {
+            ok: false,
+            needs_revision: true,
+            problems: ['片段稿出现了「第 N 段」这类标题行'],
+            instruction: '终稿没有标题，标题行会误导。请删掉，把时长与画幅写进概述第一句（如「9:16 竖屏，10 秒」），然后重写。',
+          }
+        }
         if (/\.(png|jpe?g|webp|wav|mp3|mp4)\b/i.test(text)) {
           return {
             ok: false,

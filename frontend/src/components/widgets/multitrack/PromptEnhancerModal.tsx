@@ -1271,6 +1271,7 @@ export function PromptEnhancerModal({
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
     const tokenRows = editorResources.filter((item) => item.type === 'subject' || item.type === 'image' || item.type === 'audio')
     const bindingTable = tokenRows.map((item) => `${item.token}=${item.label}`).join('｜')
+    const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
     const subjectCount = editorResources.filter((item) => item.type === 'subject').length
     const pictureCount = editorResources.filter((item) => item.type === 'image').length
     const audioCount = editorResources.filter((item) => item.type === 'audio').length
@@ -1280,11 +1281,12 @@ export function PromptEnhancerModal({
       '',
       '【事实】',
       `本段令牌表：${bindingTable || '（无绑定）'}`,
-      `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒`,
+      `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}`,
+      '**时长与画幅不要写成标题**：放进概述第一句（如「9:16 竖屏，10 秒，维修车间内景」）。',
       '',
       '【写法】',
-      '从「概述」开始，不写段号/段名标题。',
-      '概述（2–4 句）：在哪儿、谁在场、什么基调（光线/景深/风格）、观众该看什么。',
+      '第一句就是「概述：」，不要写「第 N 段｜段名（10s）」这类标题行——终稿没有标题，标题会误导。',
+      '概述（2–4 句）：第一句带时长与画幅；再写在哪儿、谁在场、什么基调（光线/景深/风格）、观众该看什么。',
       '[Shot N] 约 Xs｜景别：只写镜头与画面实现（机位/构图/动作/节奏/切换）；概述说过的不要重复。',
       '台词：<d>[Chinese] 原文</d>；声音：现场声。',
       '优先用主体：已建 <Subject n> 的（人物/场景/道具）就用主体，没建主体的才用 <Picture n>；只想借构图时写「仅借构图」。',
@@ -1304,7 +1306,7 @@ export function PromptEnhancerModal({
       '声音：口播 + 台面闷响，车间底噪持续；无独立配乐。',
       '',
       '【禁区】',
-      '不写文件名（.jpg/.png/.wav）；不列「可用素材」清单；不写六段键名或禁字幕句；不扩展范围。',
+      '不写标题行（第 N 段｜段名｜时长）；不写文件名（.jpg/.png/.wav）；不列「可用素材」清单；不写六段键名或禁字幕句；不扩展范围。',
     ].join('\n'))
     return true
   }
