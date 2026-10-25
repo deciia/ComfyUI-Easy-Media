@@ -1991,6 +1991,34 @@ export function AgentRail({
           })
         }
       }
+      // 建议：该用主体却用了图片（允许「仅借构图」例外，不拦写入）
+      const subjectNameSet = new Set(pool.filter((item) => item.type === 'Subject').map((item) => item.name))
+      const childToSubject = new Map<string, string>()
+      for (const item of pool) {
+        if (item.type !== 'Subject') continue
+        for (const childId of item.childResourceIds ?? []) childToSubject.set(childId, item.name)
+      }
+      const pictureTokenToResource = new Map<string, ProjectResource>()
+      let pictureSeq = 0
+      for (const item of topLevel) {
+        if (item.type !== 'Picture') continue
+        pictureSeq += 1
+        pictureTokenToResource.set(`<Picture ${pictureSeq}>`, item)
+      }
+      for (const match of prompt.matchAll(/<Picture\s+(\d+)>\s*[（(]([^）)]{1,40})[）)]/g)) {
+        const token = `<Picture ${match[1]}>`
+        const inner = String(match[2])
+        if (/仅借|只借|仅参考构图|只参考构图/.test(inner)) continue
+        const resource = pictureTokenToResource.get(token)
+        const ownerSubject = resource ? childToSubject.get(resource.id) : undefined
+        const namedSubject = Array.from(subjectNameSet).find((name) => name && inner.includes(name))
+        if (namedSubject || ownerSubject) {
+          problems.push({
+            level: 'advice',
+            message: `${token}（${inner.slice(0, 16)}）指向的内容已建成主体${namedSubject ? `「${namedSubject}」` : `「${ownerSubject}」`}，优先改用 <Subject n>；若这段只想借这张图的构图，请加「仅借构图」`,
+          })
+        }
+      }
       const identityTokensInRetention = (prompt.match(/<Picture\s+\d+>[^\n]{0,40}(完全沿用|面部|发型|服装|体型|容貌)/g) ?? []).length
       if (identityTokensInRetention >= 2) {
         problems.push({ level: 'warn', message: `retention_analysis 有 ${identityTokensInRetention} 处用 <Picture> 声明人物保留项，应为 <Subject n>` })
@@ -2536,6 +2564,7 @@ export function AgentRail({
         variant,
         length: text.length,
         audit,
+        advice: audit.problems.filter((item) => item.level === 'advice').map((item) => String(item.message ?? '')),
         aligned_tokens: alignedResult.fixes.length ? alignedResult.fixes : undefined,
         aligned_note: autoAlign && alignedResult.fixes.length
           ? `已按绑定表把 ${alignedResult.fixes.length} 处令牌编号对齐（文字未改）：` +
