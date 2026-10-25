@@ -536,6 +536,20 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'sync_task_images',
+        description: '把各段已绑定的图片资源同步写入任务轨对应片段的 images（修复绑定了但任务轨没图）。不传 index 则处理全部段。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '只同步该段（1 起），留空同步全部' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'generate_prompt',
         description: '为该段调用提示词生成接口，产出标准提示词并写入 finalA/finalB',
         parameters: {
@@ -1504,6 +1518,35 @@ export function AgentRail({
       } as unknown as ProjectResource)
       return { ok: true, created: subjectName }
     }
+    /** 绑定清单 → 任务轨 images（主体展开其子图；仅图片，带实际根目录） */
+    const imagesFromBoundIds = (ids: string[]) => {
+      const pool = readResources(projectKey) as ProjectResource[]
+      const pictures: Array<{ name: string; subfolder?: string; sourceType: 'input' | 'output' | 'temp' }> = []
+      const push = (resource: ProjectResource) => {
+        if (resource.type !== 'Picture') return
+        const fileName = String(resource.imageFile ?? '').trim()
+        if (!fileName) return
+        pictures.push({
+          name: fileName,
+          subfolder: resource.subfolder ?? '',
+          sourceType: resource.sharedRoot === 'output' ? 'output' : resource.sharedRoot === 'temp' ? 'temp' : 'input',
+        })
+      }
+      for (const id of ids) {
+        const resource = pool.find((item) => item.id === id)
+        if (!resource) continue
+        if (resource.type === 'Subject') {
+          for (const childId of resource.childResourceIds ?? []) {
+            const child = pool.find((item) => item.id === childId)
+            if (child) push(child)
+          }
+        } else {
+          push(resource)
+        }
+      }
+      return pictures
+    }
+
     if (name === 'bind_resources') {
       const index1 = Number(args.index ?? 0)
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
@@ -1517,8 +1560,81 @@ export function AgentRail({
       if (!ids.length) return { error: '没有匹配到资源，请先用 list_resources 确认名称' }
       const key = `script-${index1 - 1}:${variant}`
       writeBindings(projectKey, key, ids)
-      return { ok: true, bound: ids.length, names: names.filter((resourceName) => pool.some((item) => item.name === resourceName)) }
+
+      // 关键：把绑定清单里的图片同步到已落地的任务轨片段（否则任务轨 images 永远为空）
+      const images = imagesFromBoundIds(ids)
+      let syncedTaskIndex = 0
+      let syncedImages = 0
+      try {
+        const summary = (globalThis as unknown as {
+          __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+        }).__easyMediaTimelineSummary
+        const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+        const planSegment = plan?.segments?.[index1 - 1] as Record<string, unknown> | undefined
+        const stableKey = String(planSegment?.stable_key ?? '')
+        const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+        const matchedTask = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
+          ?? tasks.find((task) => Number(task.index ?? 0) === index1)
+        const updateSegment = (globalThis as unknown as {
+          __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+        }).__easyMediaUpdateSegment
+        if (matchedTask?.id && updateSegment && images.length) {
+          const done = updateSegment(String(matchedTask.id), { images })
+          if (done) {
+            syncedTaskIndex = Number(matchedTask.index ?? index1)
+            syncedImages = images.length
+          }
+        }
+      } catch {
+        /* 同步失败不影响绑定结果，下面如实汇报 */
+      }
+      return {
+        ok: true,
+        bound: ids.length,
+        names: names.filter((resourceName) => pool.some((item) => item.name === resourceName)),
+        images: images.map((item) => item.name),
+        synced_to_task_track: syncedImages > 0,
+        synced_task_index: syncedTaskIndex || undefined,
+        synced_images: syncedImages || undefined,
+        note: syncedImages > 0
+          ? `已同时把 ${syncedImages} 张图片写入任务轨第 ${syncedTaskIndex} 段`
+          : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
+      }
     }
+    if (name === 'sync_task_images') {
+      const onlyIndex = Number(args.index ?? 0)
+      const plan = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = plan?.segments ?? []
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { tasks?: Array<Record<string, unknown>> }
+      }).__easyMediaTimelineSummary
+      const tasks = (summary?.().tasks ?? []) as Array<Record<string, unknown>>
+      const updateSegment = (globalThis as unknown as {
+        __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+      }).__easyMediaUpdateSegment
+      if (!updateSegment) return { error: '任务轨编辑器未就绪，无法同步' }
+      const results: Array<Record<string, unknown>> = []
+      for (let i = 0; i < planSegments.length; i += 1) {
+        if (onlyIndex && onlyIndex !== i + 1) continue
+        const stableKey = String((planSegments[i] as Record<string, unknown>).stable_key ?? '')
+        const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
+          ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
+        if (!matched?.id) {
+          results.push({ index: i + 1, ok: false, reason: '该段未落地任务轨' })
+          continue
+        }
+        const images = imagesFromBoundIds(readBindings(projectKey, script-:a))
+        if (!images.length) {
+          results.push({ index: i + 1, ok: false, reason: '无已绑定且带文件的图片' })
+          continue
+        }
+        const done = updateSegment(String(matched.id), { images })
+        results.push({ index: i + 1, ok: done, images: images.map((item) => item.name) })
+      }
+      const synced = results.filter((item) => item.ok).length
+      return { ok: synced > 0, synced_segments: synced, detail: results }
+    }
+
     if (name === 'generate_prompt') {
       const index1 = Number(args.index ?? 0)
       const segment = segments[index1 - 1]
@@ -1659,6 +1775,7 @@ export function AgentRail({
           continuityMode: (settings.contextMode as string | undefined) || undefined,
           refImageSize: (settings.refImageSize as string | undefined) || undefined,
           stableKey: String((segment as Record<string, unknown>).stable_key ?? `sk-${i + 1}`),
+          images: imagesFromBoundIds(readBindings(projectKey, `script-${i}:a`)),
         }
       })
       if (!mappedItems.length) return { error: '分镜脚本没有段可应用' }

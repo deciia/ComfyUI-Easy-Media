@@ -1300,10 +1300,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       tasks: (data.tracks.find((track) => track.type === 'task')?.segments ?? []).map((segment, index) => {
         const content = (segment.content ?? {}) as unknown as Record<string, unknown>
         return {
+          id: segment.id,
           index: index + 1,
           start_frame: segment.start_frame,
           end_frame: segment.end_frame,
           stable_key: content.stable_key ?? '',
+          images_count: Array.isArray(content.images) ? (content.images as unknown[]).length : 0,
           task_mode: content.task_mode ?? '',
           has_prompt: Boolean(String(content.user_prompt ?? '').trim()),
           prompt_len: String(content.user_prompt ?? '').length,
@@ -1348,6 +1350,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       continuityMode?: string
       refImageSize?: string
       stableKey?: string
+      images?: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }>
     }>) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
       if (!taskTrack || items.length === 0) return false
@@ -1383,6 +1386,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             task_mode: (item.taskMode as never) ?? (previous.task_mode as never) ?? 'default',
             continuity_mode: (item.continuityMode as never) ?? (previous.continuity_mode as never) ?? undefined,
             ref_image_size: (item.refImageSize as never) ?? (previous.ref_image_size as never) ?? undefined,
+            ...(item.images && item.images.length
+              ? {
+                  images: item.images.map((image, imageIndex) => ({
+                    id: `img-${stamp}-${index + 1}-${imageIndex + 1}`,
+                    source_type: image.sourceType ?? 'input',
+                    file_name: image.name,
+                    subfolder: image.subfolder ?? '',
+                  })),
+                }
+              : {}),
             user_brief: item.brief,
             user_prompt: strategy === 'fill-missing' && String(previous.user_prompt ?? '').trim()
               ? String(previous.user_prompt ?? '')
@@ -1459,7 +1472,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         const stamp = Date.now()
         patch.images = payload.images.map((item, index) => ({
           id: `img-${stamp}-${index + 1}`,
-          source_type: 'input',
+          source_type: item.sourceType ?? 'input',
           file_name: item.name,
           subfolder: item.subfolder ?? '',
         }))
