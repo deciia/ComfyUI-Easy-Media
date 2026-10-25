@@ -586,6 +586,22 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'retoken_prompts',
+        description: '按当前绑定重排提示词令牌：读取 subject_definitions 里"令牌 → 名称"的对应，重建为当前绑定顺序的编号；已被升格为主体的图片改写成 <Subject n>，越界的幽灵编号整条移除。默认 dry_run 只给逐行 diff，confirm=true 才写回。',
+        parameters: {
+          type: 'object',
+          properties: {
+            indexes: { type: 'array', items: { type: 'number' }, description: '只处理这些段' },
+            dry_run: { type: 'boolean', description: '默认 true（只看 diff）' },
+            confirm: { type: 'boolean', description: '确认写回' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'validate_prompts',
         description: '校验各段提示词结构（只读）：令牌编号是否超出绑定数量、重复引用是否过多、是否含 None、是否缺"禁止文字/字幕/水印"、人物是否该用 Subject。返回逐段问题清单。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -2240,6 +2256,115 @@ export function AgentRail({
           zeroReference.length ? `有 ${zeroReference.length} 个零引用资产，可删除或补绑定` : '无零引用资产',
         ],
         note: '此工具只出表，不建不删。用户确认后再执行生成/删除。',
+      }
+    }
+
+    if (name === 'retoken_prompts') {
+      const only = Array.isArray(args.indexes) ? args.indexes.map(Number) : []
+      const dryRun = args.dry_run !== false
+      if (!dryRun && args.confirm !== true) return { error: '写回需要 confirm=true（先 dry_run 看 diff）' }
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '没有分镜脚本' }
+      const pool = readResources(projectKey) as ProjectResource[]
+
+      const report: Array<Record<string, unknown>> = []
+      const nextSegments = planSegments.map((segment, i) => {
+        if (only.length && !only.includes(i + 1)) return segment
+        const raw = String(segment.promptA ?? segment.finalA ?? segment.user_prompt ?? '')
+        if (!raw.trim()) return segment
+
+        // 1) 当前绑定 → 新令牌表：主体按顺序 <Subject k>，图片（含主体子图）按顺序 <Picture m>
+        const ids = boundIdsForSegment(i)
+        const bound: ProjectResource[] = []
+        for (const id of ids) {
+          const item = pool.find((entry) => entry.id === id)
+          if (!item) continue
+          if (!bound.includes(item)) bound.push(item)
+          if (item.type === 'Subject') {
+            for (const childId of item.childResourceIds ?? []) {
+              const child = pool.find((entry) => entry.id === childId)
+              if (child && !bound.includes(child)) bound.push(child)
+            }
+          }
+        }
+        const tokenOf = new Map<string, string>()   // resource id → <Subject k>/<Picture m>
+        let subjectNo = 0
+        let pictureNo = 0
+        for (const item of bound) {
+          if (item.type === 'Subject') { subjectNo += 1; tokenOf.set(item.id, `<Subject ${subjectNo}>`) }
+          else if (item.type === 'Picture') { pictureNo += 1; tokenOf.set(item.id, `<Picture ${pictureNo}>`) }
+        }
+
+        // 2) 旧令牌 → 名称（来自 subject_definitions 的 "令牌 名称：..." 行）
+        const defsBlock = raw.split(/\nsummary\s*[:：]/)[0] ?? ''
+        const oldTokenToName = new Map<string, string>()
+        for (const line of defsBlock.split('\n')) {
+          const match = line.match(/^\s*<(?<kind>Subject|Picture|Audio|Video)\s+(?<num>\d+)>\s*(?<name>[^：:\n]{1,40}?)\s*[：:]/)
+          if (!match || !match.groups) continue
+          oldTokenToName.set(`<${match.groups.kind} ${match.groups.num}>`, match.groups.name.trim())
+        }
+        if (!oldTokenToName.size) {
+          report.push({ segment: i + 1, skipped: true, reason: 'subject_definitions 里没有可解析的「令牌 名称：」行' })
+          return segment
+        }
+
+        // 3) 名称 → 新令牌（按名称精确匹配绑定资源，主体优先；也允许名称是主体名+后缀）
+        const nameToToken = new Map<string, string>()
+        for (const item of bound) {
+          const token = tokenOf.get(item.id)
+          if (token) nameToToken.set(item.name, token)
+        }
+        const resolveNew = (name: string): string | null => {
+          if (nameToToken.has(name)) return nameToToken.get(name) ?? null
+          // 名称包含关系：如 "老赵四视图" → 主体/图片名 "老赵四视图"
+          for (const [resourceName, token] of nameToToken.entries()) {
+            if (name.includes(resourceName) || resourceName.includes(name)) return token
+          }
+          return null
+        }
+
+        const tokenMap = new Map<string, string | null>()  // 旧令牌 → 新令牌 / null=幽灵
+        for (const [oldToken, name] of oldTokenToName.entries()) {
+          tokenMap.set(oldToken, resolveNew(name))
+        }
+
+        // 4) 逐行改写 + diff
+        const changes: Array<Record<string, string>> = []
+        const lines = raw.split('\n').map((line) => {
+          if (!line.includes('<')) return line
+          let next = line
+          for (const [oldToken, replacement] of tokenMap.entries()) {
+            if (!next.includes(oldToken)) continue
+            if (replacement) {
+              next = next.split(oldToken).join(replacement)
+            } else {
+              // 幽灵：删掉引用括注或整条定义/保留行
+              next = next.replace(new RegExp(`[（(][^）)]*${oldToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^）)]*[）)]`, 'g'), '')
+              if (/^\s*[-*]?\s*$/.test(next)) next = ''
+              else next = next.split(oldToken).join('')
+            }
+          }
+          if (next !== line && next.trim()) changes.push({ before: line.slice(0, 120), after: next.slice(0, 120) })
+          return next
+        })
+        const text = lines.filter((line, index) => line !== '' || raw.split('\n')[index] === '').join('\n')
+        if (!changes.length) return segment
+        report.push({ segment: i + 1, changes: changes.slice(0, 20), total_changes: changes.length })
+        return dryRun ? segment : { ...segment, promptA: text }
+      })
+
+      if (!dryRun) {
+        const changedCount = report.filter((row) => !row.skipped).length
+        if (changedCount) {
+          writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
+        }
+      }
+      return {
+        ok: true,
+        dry_run: dryRun,
+        segments: report,
+        note: dryRun ? '这是预览。确认后传 dry_run=false & confirm=true 写回，再跑 validate_prompts 复查。' : '已写回。请跑 validate_prompts 复查。',
       }
     }
 
