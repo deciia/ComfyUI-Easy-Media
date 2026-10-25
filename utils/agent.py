@@ -73,6 +73,8 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
 - inspect_images 失败（没有视觉模型/图片不存在）时如实说明并给用户补救办法，不要假装看过。
 
 任务类型判断（每次落轨或改素材后必须做，不要留空）：
+- 判断前先 read_skill task-modes 读取完整决策表（六种模式吃什么素材/守住什么/适用场景/常见错误），不要凭印象选。
+
 - 先把该段素材与稿内令牌列出来（list_bindings / list_resources），再判断：
   · 有参考图、参考视频或参考音频被当作主体外观、场景、风格、音色依据 → R2V（task_mode=ref）
   · 只提供了尾帧或末帧图像 → L2V（task_mode=l2v）

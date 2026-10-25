@@ -2522,6 +2522,7 @@ export function AgentRail({
 
       const applied: Array<Record<string, unknown>> = []
       const rejected: Array<Record<string, unknown>> = []
+      const modePatches: Array<{ segmentId: string; taskMode?: string; continuityMode?: string }> = []
       const nextSegments = planSegments.map((segment, i) => {
         const hit = items.find((item) => Number(item.index ?? 0) === i + 1)
         if (!hit) return segment
@@ -2550,8 +2551,9 @@ export function AgentRail({
         const stableKey = String(segment.stable_key ?? '')
         const matched = tasks.find((task) => stableKey && String(task.stable_key ?? '') === stableKey)
           ?? tasks.find((task) => Number(task.index ?? 0) === i + 1)
-        if (matched?.id && updateSegment) {
-          updateSegment(String(matched.id), {
+        if (matched?.id) {
+          modePatches.push({
+            segmentId: String(matched.id),
             taskMode: mode,
             ...(validContext ? { continuityMode: validContext } : {}),
           })
@@ -2560,9 +2562,22 @@ export function AgentRail({
         if (validContext) nextSettings.contextMode = validContext
         return { ...segment, settings: nextSettings }
       })
+      // 一次性批量写任务轨（逐段单次提交会互相覆盖，只剩最后一段）
+      if (modePatches.length) {
+        const bulk = (globalThis as unknown as {
+          __easyMediaUpdateSegmentModes?: (items: typeof modePatches) => boolean
+        }).__easyMediaUpdateSegmentModes
+        if (bulk) bulk(modePatches)
+        else if (updateSegment) for (const patch of modePatches) {
+          updateSegment(patch.segmentId, {
+            taskMode: patch.taskMode,
+            ...(patch.continuityMode ? { continuityMode: patch.continuityMode } : {}),
+          })
+        }
+      }
       writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
       const flush = await flushProjectToDisk()
-      return { ok: applied.length > 0, applied, rejected, saved: flush.saved, save_error: flush.saved ? undefined : flush.reason }
+      return { ok: applied.length > 0, applied, rejected, task_track_updated: modePatches.length, saved: flush.saved, save_error: flush.saved ? undefined : flush.reason }
     }
 
     if (name === 'dump_state') {

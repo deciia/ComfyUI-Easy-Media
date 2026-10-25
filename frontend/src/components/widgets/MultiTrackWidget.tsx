@@ -1526,6 +1526,44 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       return true
     }
 
+    /** 批量写任务段的 task_mode / continuity_mode（单次提交，避免逐段覆盖） */
+    const updateSegmentModesBulk = (
+      patches: Array<{ segmentId: string; taskMode?: string; continuityMode?: string }>,
+    ) => {
+      const live = dataRef.current ?? data
+      const taskTrack = live.tracks.find((track) => track.type === 'task')
+      if (!taskTrack || !patches.length) return false
+      const byId = new Map(patches.map((item) => [item.segmentId, item]))
+      let touched = 0
+      const updatedTracks = live.tracks.map((track) => (
+        track.id !== taskTrack.id
+          ? track
+          : {
+              ...track,
+              segments: track.segments.map((segment) => {
+                const patch = byId.get(segment.id)
+                if (!patch) return segment
+                touched += 1
+                return {
+                  ...segment,
+                  content: {
+                    ...segment.content,
+                    ...(patch.taskMode ? { task_mode: patch.taskMode } : {}),
+                    ...(patch.continuityMode ? { continuity_mode: patch.continuityMode } : {}),
+                  } as MultiTrackSegment['content'],
+                }
+              }),
+            }
+      ))
+      if (!touched) return false
+      commitNormalizedTrackChange({
+        ...live,
+        tracks: updatedTracks,
+        total_length: calculateTotalLength(updatedTracks, live.frame_rate),
+      })
+      return true
+    }
+
     /** 批量删除任务轨段（含联动任务），单次提交 */
     const deleteTaskSegmentsByIndex = (indexes: number[]) => {
       const live = dataRef.current ?? data
@@ -1567,11 +1605,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       __easyMediaUpdateSegments?: typeof updateSegmentsBulk
       __easyMediaDeleteTaskSegments?: typeof deleteTaskSegmentsByIndex
       __easyMediaSetTaskTrackSegments?: typeof setTaskTrackSegments
+      __easyMediaUpdateSegmentModes?: typeof updateSegmentModesBulk
     }
     registry.__easyMediaUpdateSegment = updateSegment
     registry.__easyMediaUpdateSegments = updateSegmentsBulk
     registry.__easyMediaDeleteTaskSegments = deleteTaskSegmentsByIndex
     registry.__easyMediaSetTaskTrackSegments = setTaskTrackSegments
+    registry.__easyMediaUpdateSegmentModes = updateSegmentModesBulk
     return () => {
       if (registry.__easyMediaUpdateSegment === updateSegment) {
         delete registry.__easyMediaUpdateSegment
@@ -1584,6 +1624,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
       if (registry.__easyMediaSetTaskTrackSegments === setTaskTrackSegments) {
         delete registry.__easyMediaSetTaskTrackSegments
+      }
+      if (registry.__easyMediaUpdateSegmentModes === updateSegmentModesBulk) {
+        delete registry.__easyMediaUpdateSegmentModes
       }
     }
   })
