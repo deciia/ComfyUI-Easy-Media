@@ -1707,6 +1707,18 @@ export function AgentRail({
       )))
     })
   }
+  useEffect(() => {
+    const registry = globalThis as unknown as { __easyMediaAnswerQuestion?: (answer: string) => boolean }
+    registry.__easyMediaAnswerQuestion = (answer: string) => {
+      if (!askResolveRef.current) return false
+      answerQuestion(answer)
+      return true
+    }
+    return () => {
+      if (registry.__easyMediaAnswerQuestion) delete registry.__easyMediaAnswerQuestion
+    }
+  })
+
   function answerQuestion(answer: string) {
     const resolve = askResolveRef.current
     askResolveRef.current = null
@@ -2406,7 +2418,23 @@ export function AgentRail({
                             color: message.question?.answer === option ? PRIMARY : undefined,
                           }}
                           disabled={Boolean(message.question?.answer)}
-                          onClick={() => answerQuestion(option)}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            event.preventDefault()
+                            // 1) 本实例的等待中 Promise
+                            if (askResolveRef.current) {
+                              answerQuestion(option)
+                              return
+                            }
+                            // 2) 其它实例注册的应答器（弹窗重挂载后仍可用）
+                            const registry = globalThis as unknown as {
+                              __easyMediaAnswerQuestion?: (answer: string) => boolean
+                            }
+                            if (registry.__easyMediaAnswerQuestion?.(option)) return
+                            // 3) 无人等待：把选项当新消息发出去，至少不会"点了没动静"
+                            void sendStepLoop(option)
+                          }}
                         >
                           {option}
                         </button>
