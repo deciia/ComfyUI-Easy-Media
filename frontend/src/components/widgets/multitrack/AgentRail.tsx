@@ -586,6 +586,47 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'validate_prompts',
+        description: '校验各段提示词结构（只读）：令牌编号是否超出绑定数量、重复引用是否过多、是否含 None、是否缺"禁止文字/字幕/水印"、人物是否该用 Subject。返回逐段问题清单。',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'fix_prompts',
+        description: '按规则自动修正提示词：把 None/N/A/undefined 换成「无」、缺失的"不得出现文字/字幕/水印"补一行。越界令牌只报告不擅自改（需重写）。',
+        parameters: {
+          type: 'object',
+          properties: {
+            indexes: { type: 'array', items: { type: 'number' }, description: '只处理这些段，留空处理全部' },
+            dry_run: { type: 'boolean' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'promote_pictures_to_subject',
+        description: '把若干图片资源升格为一个主体（Subject）：创建主体、把图片挂为其子图、并把各段绑定里的这些图片替换成该主体。用于"人物/招牌车被当成普通图片"的情况。',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '主体名，如 老赵' },
+            children: { type: 'array', items: { type: 'string' }, description: '作为子图的图片资源名（四视图等）' },
+            description: { type: 'string', description: '主体描述（外观/服装/身份）' },
+            retention: { type: 'array', items: { type: 'string' }, description: '保留项，如 面部特征/服装/发型' },
+            drop_pictures: { type: 'boolean', description: '是否把这些图片从资源池顶层移除（默认 false，保留为子图）' },
+          },
+          required: ['name', 'children'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'audit_assets',
         description: '资产体检（只读，不改任何数据）：输出每个主体/资源被哪些段引用（引用矩阵）、零引用资产、只在 1 段出现的主体、稿内令牌缺口、疑似重复命名。用于防资产泛滥与判断该删/该降级/该合并。',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -1791,6 +1832,48 @@ export function AgentRail({
       }
     }
 
+    /** 提示词结构校验：返回问题列表（空=通过） */
+    const auditPrompt = (segmentIndex: number, prompt: string) => {
+      const ids = boundIdsForSegment(segmentIndex)
+      const pool = readResources(projectKey) as ProjectResource[]
+      const expanded: ProjectResource[] = []
+      for (const id of ids) {
+        const item = pool.find((entry) => entry.id === id)
+        if (!item) continue
+        if (!expanded.includes(item)) expanded.push(item)
+        if (item.type === 'Subject') {
+          for (const childId of item.childResourceIds ?? []) {
+            const child = pool.find((entry) => entry.id === childId)
+            if (child && !expanded.includes(child)) expanded.push(child)
+          }
+        }
+      }
+      const pictures = expanded.filter((item) => item.type === 'Picture').length
+      const subjects = expanded.filter((item) => item.type === 'Subject').length
+      const audios = expanded.filter((item) => item.type === 'Audio').length
+      const videos = expanded.filter((item) => item.type === 'Video').length
+      const problems: Array<Record<string, unknown>> = []
+      const maxOf = (kind: string) => Math.max(0, ...Array.from(prompt.matchAll(new RegExp(`<${kind} \\d+>`, 'g'))).map((m) => Number(String(m[0]).replace(/\\D/g, ''))))
+      const countOf = (kind: string) => (prompt.match(new RegExp(`<${kind} \\d+>`, 'g')) ?? []).length
+      const checkKind = (kind: string, bound: number) => {
+        const max = maxOf(kind)
+        const count = countOf(kind)
+        if (max > bound) problems.push({ level: 'error', kind, message: `${kind} 编号到 ${max}，但本段只绑了 ${bound} 个` })
+        if (bound > 0 && count > bound * 3) problems.push({ level: 'warn', kind, message: `${kind} 重复引用 ${count} 次 / ${bound} 个资源（建议声明处引一次、关键镜次再点一次）` })
+      }
+      checkKind('Picture', pictures)
+      checkKind('Subject', subjects)
+      checkKind('Audio', audios)
+      checkKind('Video', videos)
+      if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
+      if (!/(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)/.test(prompt)) problems.push({ level: 'warn', message: '缺「不得出现文字/字幕/水印」约束（可自动补）' })
+      const head = prompt.split(/\nsummary\s*[:：]/)[0] ?? ''
+      if (subjects > 0 && /<Picture\s+\d+>[^\n]{0,20}(老赵|小赵|人物|技师|司机|女人|男人|角色)/.test(head)) {
+        problems.push({ level: 'warn', message: 'subject_definitions 用 <Picture> 定义人物，但本段已绑 Subject，应改用 <Subject n>' })
+      }
+      return { segment: segmentIndex + 1, pictures, subjects, audios, videos, problems }
+    }
+
     /** 段绑定 id 并集：A 版优先，再补 B 版（避免"绑在 B 版却同步不到"） */
     const boundIdsForSegment = (segmentIndex: number) => {
       const merged: string[] = []
@@ -2157,6 +2240,108 @@ export function AgentRail({
           zeroReference.length ? `有 ${zeroReference.length} 个零引用资产，可删除或补绑定` : '无零引用资产',
         ],
         note: '此工具只出表，不建不删。用户确认后再执行生成/删除。',
+      }
+    }
+
+    if (name === 'validate_prompts') {
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '没有分镜脚本' }
+      const rows = planSegments.map((segment, i) => {
+        const prompt = String(segment.promptA ?? segment.finalA ?? segment.user_prompt ?? '')
+        const result = auditPrompt(i, prompt)
+        return { ...result, name: String(segment.name ?? ''), length: prompt.length }
+      })
+      const errors = rows.reduce((sum, row) => sum + row.problems.filter((item) => item.level === 'error').length, 0)
+      const warns = rows.reduce((sum, row) => sum + row.problems.filter((item) => item.level === 'warn').length, 0)
+      return { ok: errors === 0, errors, warns, rows, note: 'error 必须修，warn 建议修；修完再 validate_prompts 复查。' }
+    }
+
+    if (name === 'fix_prompts') {
+      const only = Array.isArray(args.indexes) ? args.indexes.map(Number) : []
+      const dryRun = args.dry_run === true
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+      if (!planSegments.length) return { error: '没有分镜脚本' }
+      const changed: Array<Record<string, unknown>> = []
+      const next = planSegments.map((segment, i) => {
+        if (only.length && !only.includes(i + 1)) return segment
+        const raw = String(segment.promptA ?? segment.finalA ?? segment.user_prompt ?? '')
+        if (!raw.trim()) return segment
+        let text = raw
+        const actions: string[] = []
+        const before = text
+        text = text.replace(/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/g, (_m, a, _w, b) => { actions.push('None→无'); return `${a}无${b}` })
+        if (!/(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)/.test(text)) {
+          text = `${text.trimEnd()}\n全片画面不得出现任何文字、字幕、logo 或水印叠加。`
+          actions.push('补禁字幕句')
+        }
+        if (text !== before) {
+          changed.push({ segment: i + 1, actions })
+          return { ...segment, promptA: text }
+        }
+        return segment
+      })
+      if (!dryRun && changed.length) {
+        writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: next } as never })
+      }
+      return { ok: true, dry_run: dryRun, changed, note: '越界令牌未自动改（可能需重写对应段）。' }
+    }
+
+    if (name === 'promote_pictures_to_subject') {
+      const subjectName = String(args.name ?? '').trim()
+      const children = Array.isArray(args.children) ? args.children.map(String).filter(Boolean) : []
+      if (!subjectName || !children.length) return { error: 'name 与 children 必填' }
+      const pool = readResources(projectKey) as ProjectResource[]
+      const childResources = children
+        .map((childName) => pool.find((item) => item.name === childName))
+        .filter((item): item is ProjectResource => Boolean(item))
+      if (!childResources.length) return { error: `没找到这些图片：${children.join('、')}` }
+      const existing = pool.find((item) => item.type === 'Subject' && item.name === subjectName)
+      const subjectId = existing?.id ?? `res-${Date.now().toString(36)}-subj`
+      const subject: ProjectResource = {
+        ...(existing ?? {
+          id: subjectId,
+          type: 'Subject',
+          name: subjectName,
+          relationship: 'manual',
+          description: '',
+          retention: [],
+          status: 'ready',
+          childResourceIds: [],
+          source: 'manual',
+        }),
+        type: 'Subject',
+        name: subjectName,
+        description: String(args.description ?? existing?.description ?? ''),
+        retention: Array.isArray(args.retention) ? args.retention.map(String) : (existing?.retention ?? []),
+        childResourceIds: Array.from(new Set([...(existing?.childResourceIds ?? []), ...childResources.map((item) => item.id)])),
+        status: 'ready',
+      } as unknown as ProjectResource
+      upsertResource(projectKey, subject)
+      // 把绑定里的图片替换成主体
+      const childIds = new Set(childResources.map((item) => item.id))
+      const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const count = planNow?.segments?.length ?? 0
+      const touched: number[] = []
+      for (let i = 0; i < count; i += 1) {
+        for (const variant of ['a', 'b'] as const) {
+          const ids = readBindings(projectKey, `script-${i}:${variant}`)
+          if (!ids.some((id) => childIds.has(id))) continue
+          const rest = ids.filter((id) => !childIds.has(id))
+          const nextIds = [subjectId, ...rest.filter((id) => id !== subjectId)]
+          writeBindings(projectKey, `script-${i}:${variant}`, nextIds)
+          if (!touched.includes(i + 1)) touched.push(i + 1)
+        }
+      }
+      if (args.drop_pictures === true) {
+        for (const item of childResources) removeResource(projectKey, item.id)
+      }
+      return {
+        ok: true,
+        subject: { id: subjectId, name: subjectName, children: childResources.map((item) => item.name), dropped: args.drop_pictures === true },
+        rebound_segments: touched.sort((a, b) => a - b),
+        note: '建议随后让助手重写这些段的 subject_definitions，把 <Picture n> 人物定义改成 <Subject n>。',
       }
     }
 
