@@ -1247,24 +1247,50 @@ async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
                 max_shots=payload.get("max_shots"),
             )
 
-        failures = _validate(result.get("prompt", ""))
-        # 结构校验未过：带失败项自动重试一次，仍失败则原样返回失败清单
-        if failures:
+        from .utils.prompt_enhancer import autofix_prompt
+
+        def _fix(text: str) -> tuple[str, list[str]]:
+            return autofix_prompt(text)
+
+        fixed_prompt, fixes = _fix(result.get("prompt", ""))
+        result["prompt"] = fixed_prompt
+        failures = _validate(fixed_prompt)
+
+        # 结构校验未过：带失败项修复重试，最多两轮，逐轮取更优者
+        for attempt in range(2):
+            if not failures:
+                break
             retry_payload = dict(payload)
             retry_options = dict(options)
             retry_options["constraints"] = (
                 str(options.get("constraints") or "")
-                + "\n上次输出未通过结构校验，必须全部修复：" + "；".join(str(item) for item in failures[:6])
+                + f"\n上一版输出仍有 {len(failures)} 个结构问题，必须全部修复："
+                + "；".join(str(item) for item in failures[:8])
+                + "\n只修这些问题，其余内容保持；输出完整终稿。"
             ).strip()
             retry_payload["options"] = retry_options
             try:
                 retry_result = await generate_prompt(retry_payload)
-                retry_failures = _validate(retry_result.get("prompt", ""))
-                if len(retry_failures) < len(failures):
-                    result, failures = retry_result, retry_failures
             except PromptEnhancerError:
-                pass
-        return web.json_response({**result, "failures": failures})
+                break
+            retry_fixed, retry_fixes = _fix(retry_result.get("prompt", ""))
+            retry_result["prompt"] = retry_fixed
+            retry_failures = _validate(retry_fixed)
+            if len(retry_failures) < len(failures):
+                result, failures = retry_result, retry_failures
+                fixes = retry_fixes
+            else:
+                break
+
+        contract = {
+            "ready_for_task_track": not failures,
+            "failures": len(failures),
+            "auto_fixed": fixes,
+            "task_type": task_type,
+            "task_mode": task_mode,
+            "require_sections": require_sections,
+        }
+        return web.json_response({**result, "failures": failures, "contract": contract})
     except PromptEnhancerError as error:
         return web.json_response({"error": str(error)}, status=400)
     except Exception as error:

@@ -635,6 +635,7 @@ export function PromptEnhancerModal({
   const [savingConfig, setSavingConfig] = useState(false)
   const [error, setError] = useState('')
   const [failures, setFailures] = useState<string[]>([])
+  const [autoFixes, setAutoFixes] = useState<string[]>([])
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('storyboard')
   const [assetsRailTab, setAssetsRailTab] = useState<'shared' | 'ai'>('shared')
   const [projectName, setProjectName] = useState(() => {
@@ -1283,6 +1284,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
     setBusy(true)
     setError('')
     setFailures([])
+    setAutoFixes([])
     setResult('')
     setSections([])
     try {
@@ -1292,9 +1294,13 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
         return
       }
       const generated = String(data?.prompt || '')
+      const normalized = normalizeSectionHeadings(generated)
       setResultText(generated)
-      setLastGenerated(normalizeSectionHeadings(generated))
+      setLastGenerated(normalized)
+      // 生成结果直接落进「最终提示词」编辑器：通过校验即可一键写入任务轨
+      setFinalDraft(normalized)
       setFailures(Array.isArray(data?.failures) ? data.failures : [])
+      setAutoFixes(Array.isArray(data?.contract?.auto_fixed) ? (data.contract.auto_fixed as string[]) : [])
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t('multitrack.enhancerFailed'))
     } finally {
@@ -2050,7 +2056,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       variant="secondary"
                       className="h-6 whitespace-nowrap px-2 text-[11px]"
                       disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
+                      onClick={() => { void handleGenerate('English', activePrompt) }}
                     >
                       生成英文➡️
                     </Button>
@@ -2058,7 +2064,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       variant="secondary"
                       className="h-6 whitespace-nowrap px-2 text-[11px]"
                       disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
+                      onClick={() => { void handleGenerate('中文', activePrompt) }}
                     >
                       生成中文➡️
                     </Button>
@@ -2439,6 +2445,11 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 </div>
                 {error ? (
                   <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', background: 'rgba(146,64,14,0.18)', color: '#fbbf24' }}>{error}</div>
+                ) : null}
+                {autoFixes.length > 0 && failures.length === 0 ? (
+                  <div className="rounded p-1.5 text-[10px]" style={{ border: `1px solid ${BORDER}`, color: '#86efac' }}>
+                    已自动修复：{autoFixes.join('、')}
+                  </div>
                 ) : null}
                 {failures.length > 0 ? (
                   <div className="rounded px-2 py-1 text-[11px]" style={{ border: '1px solid #92400e', background: 'rgba(146,64,14,0.18)', color: '#fbbf24' }}>

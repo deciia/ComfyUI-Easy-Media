@@ -459,6 +459,45 @@ def normalize_section_headings(text: str) -> str:
     return result
 
 
+def autofix_prompt(text: str) -> tuple[str, list[str]]:
+    """终稿确定性修复：去代码围栏/加粗标题、补收尾句、清理 None、压缩空行。返回 (新文本, 动作列表)。"""
+    import re as _re
+
+    actions: list[str] = []
+    out = str(text or "")
+    if not out.strip():
+        return out, actions
+
+    if "```" in out:
+        out = _re.sub(r"```[a-zA-Z]*\n?", "", out).replace("```", "")
+        actions.append("去掉代码围栏")
+
+    bold_heads = _re.findall(r"\*\*(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\*\*", out)
+    if bold_heads:
+        out = _re.sub(
+            r"\*\*(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\*\*",
+            r"\1:",
+            out,
+        )
+        actions.append("标题去掉加粗")
+
+    if _re.search(r"(^|[^A-Za-z])(None|N/A|undefined)([^A-Za-z]|$)", out):
+        out = _re.sub(r"None\s*[（(][^）)]*[）)]", "无。", out)
+        out = _re.sub(r"(?<![A-Za-z])(None|N/A|undefined)(?![A-Za-z])", "无", out)
+        actions.append("清理 None/N/A 占位")
+
+    if not _re.search(r"(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)", out):
+        out = out.rstrip() + "\n全片画面不得出现任何文字、字幕、logo 或水印叠加。"
+        actions.append("补禁字幕句")
+
+    squeezed = _re.sub(r"\n{3,}", "\n\n", out).strip() + "\n"
+    if squeezed != out:
+        actions.append("压缩空行")
+        out = squeezed
+
+    return out, actions
+
+
 def localize_tokens(prompt: str, subjects: list[dict]) -> tuple[str, list[str]]:
     """把提示词里的 @名字 换成官方标签（<Picture n> 优先，否则 <Subject N>）。"""
     mapping: dict[str, str] = {}
