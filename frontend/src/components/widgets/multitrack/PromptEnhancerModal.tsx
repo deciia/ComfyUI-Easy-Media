@@ -442,6 +442,16 @@ export function PromptEnhancerModal({
     )) ?? workspaceSegments[activeScriptIndex]
   })()
   const matchedTrackSegmentId = scriptSegments.length > 0 ? matchedTaskSegment?.id : undefined
+  /** 当前段任务类型 → 素材约束用的 mode key */
+  const currentTaskModeKey = (() => {
+    const label = String(taskTypeOfCurrentSegment() || '').trim().toUpperCase()
+    if (label === 'L2V') return 'l2v'
+    if (label === 'R2V') return 'ref'
+    if (label === 'VI2V') return 'edit'
+    if (label === 'PASS' || label === 'PASSTHROUGH') return 'passthrough'
+    return 'default'
+  })()
+
   const bindingKey = `script-${activeScriptIndex}:${previewVariant}`
   const boundIds = readBindings(bindingProjectKey, bindingKey)
 
@@ -2276,6 +2286,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     onChange={(ids) => writeBindings(bindingProjectKey, bindingKey, ids)}
                     prompt={finalDraft || finalPrompt}
                     onInsertTokens={(next) => setFinalDraft(next)}
+                    taskMode={currentTaskModeKey}
                   />
 <span className="text-[11px] text-neutral-400">最终提示词
                   <span className="flex items-center gap-1">

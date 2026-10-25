@@ -30,6 +30,7 @@ import {
   type ProjectResource,
   type StoryboardPlanLike,
 } from './agentStore'
+import { checkTaskModeAssets, maxImagesForTaskMode, TASK_MODE_SPECS } from '@/lib/task-mode-spec'
 
 const PANEL_BG = 'hsl(var(--card, 240 10% 10%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -531,6 +532,14 @@ export function AgentRail({
           },
           required: ['index', 'resource_names'],
         },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'explain_task_modes',
+        description: '列出各任务类型允许的素材种类与数量上限（节点真实规则），用于决策前查表。',
+        parameters: { type: 'object', properties: {}, required: [] },
       },
     },
     {
@@ -1648,6 +1657,28 @@ export function AgentRail({
         .filter((item): item is ProjectResource => Boolean(item))
         .map((item) => item.id)
       if (!ids.length) return { error: '没有匹配到资源，请先用 list_resources 确认名称' }
+
+      // 按该段任务类型校验素材数量（依据节点真实规则）
+      const planForBind = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const bindSegment = planForBind?.segments?.[index1 - 1] as Record<string, unknown> | undefined
+      const bindMode = String(((bindSegment?.settings ?? {}) as Record<string, unknown>).taskType ?? '').trim().toLowerCase()
+      const modeKey = bindMode.includes('l2v') ? 'l2v' : bindMode.includes('r2v') || bindMode.includes('ref') ? 'ref' : bindMode.includes('vi2v') || bindMode.includes('edit') ? 'edit' : 'default'
+      const pictureCount = ids.reduce((total, id) => {
+        const item = pool.find((resource) => resource.id === id)
+        if (!item) return total
+        if (item.type === 'Picture') return total + 1
+        if (item.type === 'Subject') return total + (item.childResourceIds ?? []).filter((childId) => pool.find((child) => child.id === childId)?.type === 'Picture').length
+        return total
+      }, 0)
+      const maxImages = maxImagesForTaskMode(modeKey)
+      if (pictureCount > maxImages) {
+        return {
+          error: `该段任务类型 ${modeKey} 最多只能绑 ${maxImages} 张图片，本次会绑 ${pictureCount} 张。请先改任务类型（set_task_modes）或减少资源。`,
+          task_mode: modeKey,
+          max_images: maxImages,
+          requested_images: pictureCount,
+        }
+      }
       const key = `script-${index1 - 1}:${variant}`
       writeBindings(projectKey, key, ids)
 
@@ -1693,6 +1724,21 @@ export function AgentRail({
           : '该段尚未落地任务轨或没有带文件的图片；先 apply_storyboard 落轨后再绑定，或确认资源已挂文件',
       }
     }
+    if (name === 'explain_task_modes') {
+      return {
+        modes: Object.values(TASK_MODE_SPECS).map((spec) => ({
+          task_mode: spec.key,
+          label: spec.label,
+          resolves_to: spec.resolvesTo,
+          images: `${spec.images.min}–${spec.images.max}`,
+          video: `${spec.video.min}–${spec.video.max}`,
+          audio: `${spec.audio.min}–${spec.audio.max}`,
+          hint: spec.hint,
+        })),
+        note: '绑定超过上限会被拒绝；任务类型选错会导致素材被忽略（例如 T2V 只用首帧甚至不用图）。',
+      }
+    }
+
     if (name === 'set_task_modes') {
       const items = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : []
       if (!items.length) return { error: 'items 不能为空' }
@@ -1722,12 +1768,17 @@ export function AgentRail({
         const taskType = taskTypeByMode[mode] ?? ''
         const contextMode = String(hit.context_mode ?? '').toLowerCase()
         const validContext = ['shot', 'context', 'context_drift'].includes(contextMode) ? contextMode : ''
+        const existingImages = imagesFromBoundIds(boundIdsForSegment(i)).length
+        const compat = checkTaskModeAssets(mode, { images: existingImages, video: 0, audio: 0 })
         applied.push({
           index: i + 1,
           task_mode: mode,
           task_type: taskType,
           context_mode: validContext || undefined,
           reason: String(hit.reason ?? ''),
+          images_bound: existingImages,
+          asset_ok: compat.ok,
+          asset_problems: compat.problems.length ? compat.problems : undefined,
         })
         // 同步写任务轨（若已落轨）
         const stableKey = String(segment.stable_key ?? '')
@@ -1817,9 +1868,15 @@ export function AgentRail({
         const tokens = Array.from(new Set((prompt.match(/<(?:Subject|Picture|Audio|Video) \d+>/g) ?? [])))
         const task = tasks.find((entry) => stableKey && String(entry.stable_key ?? '') === stableKey)
           ?? tasks.find((entry) => Number(entry.index ?? 0) === i + 1)
+        const imagesAll = imagesFromBoundIds(ids)
+        const modeNow = String(((segment.settings ?? {}) as Record<string, unknown>).taskType ?? '').trim().toLowerCase()
+        const modeKey2 = modeNow.includes('l2v') ? 'l2v' : modeNow.includes('r2v') || modeNow.includes('ref') ? 'ref' : modeNow.includes('vi2v') || modeNow.includes('edit') ? 'edit' : 'default'
+        const check = checkTaskModeAssets(modeKey2, { images: imagesAll.length, video: 0, audio: 0 })
         return {
           index: i + 1,
           name: String(segment.name ?? ''),
+          task_mode: modeKey2,
+          asset_check: { ok: check.ok, problems: check.problems, hint: check.spec.hint },
           bound: names,
           bound_images: images.map((item) => item.name),
           tokens_in_prompt: tokens,

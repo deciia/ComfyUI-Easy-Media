@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ProjectResource } from './agentStore'
+import { maxImagesForTaskMode, TASK_MODE_SPECS } from '@/lib/task-mode-spec'
 
 const BORDER = 'hsl(var(--border, 240 6% 25%))'
 const PRIMARY = 'hsl(var(--primary, 199 89% 48%))'
@@ -12,14 +13,17 @@ export function ReferenceBar({
   onChange,
   prompt,
   onInsertTokens,
+  taskMode,
 }: {
   resources: ProjectResource[]
   boundIds: string[]
   onChange: (ids: string[]) => void
   prompt: string
   onInsertTokens: (next: string) => void
+  taskMode?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [limitNote, setLimitNote] = useState('')
   const bound = useMemo(
     () => boundIds.map((id) => resources.find((item) => item.id === id)).filter((item): item is ProjectResource => Boolean(item)),
     [boundIds, resources],
@@ -28,6 +32,18 @@ export function ReferenceBar({
     () => resources.filter((item) => !boundIds.includes(item.id)),
     [resources, boundIds],
   )
+  const modeKey = (String(taskMode ?? 'default').toLowerCase() || 'default')
+  const spec = TASK_MODE_SPECS[modeKey as keyof typeof TASK_MODE_SPECS] ?? TASK_MODE_SPECS.default
+  const maxImages = maxImagesForTaskMode(modeKey)
+  /** 一个资源（含主体展开）会带出多少张图片 */
+  const picturesOf = (item: ProjectResource): number => {
+    if (item.type === 'Picture') return 1
+    if (item.type !== 'Subject') return 0
+    return (item.childResourceIds ?? [])
+      .map((childId) => resources.find((entry) => entry.id === childId))
+      .filter((child) => child?.type === 'Picture').length
+  }
+  const currentPictures = bound.reduce((total, item) => total + picturesOf(item), 0)
 
   const nextIndex = (type: string) => {
     const used = Array.from(prompt.matchAll(new RegExp(`<${type}\\s+(\\d+)>`, 'g'))).map((match) => Number(match[1]))
@@ -63,6 +79,10 @@ export function ReferenceBar({
     <div className="flex flex-col gap-1 rounded p-1.5" style={{ border: `1px solid ${BORDER}` }}>
       <div className="flex flex-wrap items-center gap-1 text-[11px]">
         <span className="text-muted-foreground">引用（本段）</span>
+        <span className="text-[9px] text-muted-foreground" title={spec.hint}>
+          {spec.label} · 图片 {currentPictures}/{maxImages}
+        </span>
+        {limitNote ? <span className="text-[9px]" style={{ color: '#fbbf24' }}>{limitNote}</span> : null}
         {bound.length === 0 ? <span className="text-[10px] text-muted-foreground">还没绑定主体/资源</span> : null}
         {bound.map((item) => (
           <span
@@ -124,6 +144,12 @@ export function ReferenceBar({
               type="button"
               className="flex w-full items-center gap-2 px-1 py-0.5 text-left text-[11px] hover:bg-white/10"
               onClick={() => {
+                const add = picturesOf(item)
+                if (currentPictures + add > maxImages) {
+                  setLimitNote(`超出上限：${spec.label} 最多 ${maxImages} 张图（当前 ${currentPictures}，再加 ${add}）`)
+                  return
+                }
+                setLimitNote('')
                 onChange([...boundIds, item.id])
                 setOpen(false)
               }}

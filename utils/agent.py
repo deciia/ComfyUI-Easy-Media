@@ -67,6 +67,14 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
   · 完全没有参考素材，纯描述生成 → T2V（task_mode=default）
   · 明确要求直通不生成 → Pass（task_mode=passthrough）
 - 判断结果用 set_task_modes 一次性写入（可附 reason 说明依据），不要靠界面默认值，也不要写死规则。
+- 素材数量硬约束（节点真实规则，超出会被拒绝或忽略）：
+  · T2V(default)：0 张图（传 1 张会变成 i2v 首帧，多传的图被忽略）
+  · R2V(ref)：1–9 张参考图，另可 1 段参考视频、1 段参考音频
+  · VI2V(edit)：1–9 张图，另可 1 段视频、1 段音频
+  · L2V(l2v)：恰好 1 张图（作尾帧）
+  · FMLF2V：首帧+尾帧各 1 张（走多帧参考）
+  · Pass：不需要任何素材
+  绑定前用 explain_task_modes 查表，绑定后用 list_bindings 里的 asset_check 复核。
 - 同时判断衔接模式 context_mode：
   · shot = 本段独立切镜，不与上一段画面连续
   · context = 承接上一段末帧继续演（同场景同机位延续、动作接续）
