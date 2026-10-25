@@ -1929,6 +1929,20 @@ export function AgentRail({
       if (!/(^|\n)\s*(?:#+\s*)?\*{0,2}subject_definitions\*{0,2}\s*[:：]/.test(prompt)) {
         problems.push({ level: 'error', message: '缺 subject_definitions 段（六段式第一段）' })
       }
+      // 官方 Ref2VA：<Picture N> 只在"本身作为首帧/关键帧/尾帧/构图锚点"时单列；
+      // 若只是用来定义人物/场景/服装/风格，必须内嵌进 <Subject N> 定义里引用，不能单列。
+      const standalonePictureLines = (prompt.split(/\nsummary\s*[:：]/)[0] ?? '')
+        .split('\n')
+        .filter((line) => /^\s*<Picture\s+\d+>/.test(line))
+      for (const line of standalonePictureLines) {
+        const isFrameAnchor = /(首帧|第一帧|起始帧|尾帧|末帧|结束帧|关键帧|构图锚点|分镜参考|storyboard)/.test(line)
+        if (isFrameAnchor) continue
+        const isCharacter = /(四视图|三视图|正脸|侧脸|全身照|面部|发型|五官|人物|角色|主角|技师|司机|店主|工人|老赵|小赵)/.test(line)
+        problems.push({
+          level: isCharacter ? 'error' : 'warn',
+          message: `subject_definitions 单列了「${line.trim().slice(0, 28)}…」：图片只用来定义人物/场景/风格时应写进 <Subject n> 定义并内嵌引用，单列 <Picture n> 仅限作首帧/关键帧/构图锚点`,
+        })
+      }
       if (!/(禁止|不得|不要)[^\n]{0,24}(文字|字幕|logo|水印)/.test(prompt)) problems.push({ level: 'warn', message: '缺「不得出现文字/字幕/水印」约束（可自动补）' })
       const head = prompt.split(/\nsummary\s*[:：]/)[0] ?? ''
       if (subjects > 0 && /<Picture\s+\d+>[^\n]{0,20}(老赵|小赵|人物|技师|司机|女人|男人|角色)/.test(head)) {
