@@ -143,6 +143,7 @@ export interface WorkspaceCache {
   /** 运行中插话：排队等待注入的用户消息 */
   pendingInject?: string
   agentAnswer?: { id: string; answer: string }
+  memories?: Array<Record<string, unknown>>
 }
 
 const cache = new Map<string, WorkspaceCache>()
