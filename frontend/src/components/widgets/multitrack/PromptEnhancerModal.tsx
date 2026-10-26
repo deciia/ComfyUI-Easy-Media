@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
+import { Check, Copy, Eraser, ListPlus, Save, Settings, Sparkles, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
@@ -649,6 +649,37 @@ export function PromptEnhancerModal({
     if (index === activeScriptIndex) return
     patchScriptSegment({ promptA: brief, promptB: draftPrompt, finalA, finalB })
     setActiveScriptIndex(index)
+  }
+
+  /** 清空全部段的提示词，kind=fragment 清 A/B 片段稿，final 清 A/B 终稿 */
+  const clearAllPrompts = (kind: 'fragment' | 'final') => {
+    const planNow = readWorkspace(bindingProjectKey).plan as
+      | { segments?: Array<Record<string, unknown>> }
+      | null
+    const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
+    if (!segments.length) return
+    const label = kind === 'fragment' ? '片段提示词（A/B 稿）' : '最终提示词（A/B 终稿）'
+    const count = segments.filter((segment) => kind === 'fragment'
+      ? String(segment.promptA ?? '').trim() || String(segment.promptB ?? '').trim()
+      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim()).length
+    if (!count) return
+    if (!window.confirm(`将清空 ${count} 段的${label}，清空后需要重新生成。继续？`)) return
+    const next = segments.map((segment) => (kind === 'fragment'
+      ? { ...segment, promptA: '', promptB: '' }
+      : { ...segment, finalA: '', finalB: '' }))
+    writeWorkspace(bindingProjectKey, { plan: { ...(planNow as Record<string, unknown>), segments: next } as never })
+    if (kind === 'fragment') {
+      setBrief('')
+      setDraftPrompt('')
+      lastPushedRef.current = { ...lastPushedRef.current, promptA: '', promptB: '' }
+    } else {
+      setFinalA('')
+      setFinalB('')
+      setResult('')
+      setSections(splitSections(''))
+      setLastGenerated('')
+      lastPushedRef.current = { ...lastPushedRef.current, finalA: '', finalB: '' }
+    }
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
@@ -1640,6 +1671,26 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
             )}
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="清空所有片段提示词（A/B 稿）"
+              className="h-7 w-7"
+              onClick={() => clearAllPrompts('fragment')}
+            >
+              <Eraser className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="清空所有最终提示词（A/B 终稿）"
+              className="h-7 w-7"
+              onClick={() => clearAllPrompts('final')}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
             <Button
               type="button"
               variant="ghost"
