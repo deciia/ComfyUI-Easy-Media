@@ -1644,7 +1644,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               type="button"
               variant="ghost"
               size="icon"
-              title="保存到任务轨（先检测完善度）"
+              title="整项目保存到任务轨（含各段终稿提示词）"
               className="h-7 w-7"
               onClick={() => setSaveCheckOpen((value) => !value)}
             >
@@ -1714,7 +1714,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               { ok: true, text: `资源需求：${planned} 项（匹配情况见「项目资源」页）` },
             ]
             const registry = (globalThis as unknown as {
-              __easyMediaApplyStoryboard?: (items: Array<{ name: string; durationFrames: number; brief: string }>) => boolean
+              __easyMediaApplyStoryboard?: (items: Array<Record<string, unknown>>) => boolean
             }).__easyMediaApplyStoryboard
             return (
               <div
@@ -1754,7 +1754,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   </div>
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  本次将写入：提示词 {abTab.toUpperCase()} 版 1 条
+                  本次将把全部 {segs.length} 段写入任务轨（逐段带终稿提示词、绑定参考图与任务类型）
                   {directorSettings.save.writeImages ? ` · 参考图 ${(() => {
                     const pictures = boundIds.flatMap((id) => {
                       const resource = resources.find((item) => item.id === id)
@@ -1830,11 +1830,38 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                         setReplaceArmed(true)
                         return
                       }
-                      registry(plan.segments.map((segment) => ({
-                        name: segment.name,
-                        durationFrames: segment.duration_frames,
-                        brief: formatPlanSegmentBrief(segment as never),
-                      })))
+                      registry(plan.segments.map((segment, index) => {
+                        const settings = ((segment as { settings?: Record<string, unknown> }).settings ?? {}) as Record<string, unknown>
+                        const segIds: string[] = []
+                        for (const variant of ['a', 'b'] as const) {
+                          for (const id of readBindings(bindingProjectKey, `script-${index}:${variant}`)) {
+                            if (!segIds.includes(String(id))) segIds.push(String(id))
+                          }
+                        }
+                        const images = resolveBoundTokens(segIds, resources)
+                          .filter((entry) => entry.type === 'Picture')
+                          .map((entry) => ({
+                            name: String(entry.resource.imageFile ?? entry.resource.name),
+                            subfolder: entry.resource.subfolder,
+                            sourceType: (entry.resource.sharedRoot === 'output' ? 'output'
+                              : entry.resource.sharedRoot === 'temp' ? 'temp' : 'input') as 'input' | 'output' | 'temp',
+                          }))
+                          .filter((image) => Boolean(image.name))
+                        const prompt = String((segment as { finalA?: string }).finalA ?? '')
+                          || String((segment as { finalB?: string }).finalB ?? '')
+                          || String((segment as { promptA?: string }).promptA ?? '')
+                        return {
+                          name: segment.name,
+                          durationFrames: segment.duration_frames,
+                          brief: formatPlanSegmentBrief(segment as never),
+                          prompt,
+                          stableKey: String((segment as { stable_key?: string }).stable_key ?? ''),
+                          taskMode: String(settings.taskType ?? '') || undefined,
+                          continuityMode: String(settings.contextMode ?? '') || undefined,
+                          refImageSize: String(settings.refImageSize ?? '') || undefined,
+                          images,
+                        }
+                      }))
                       setReplaceArmed(false)
                       setSaveCheckOpen(false)
                     }}
