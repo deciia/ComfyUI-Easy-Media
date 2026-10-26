@@ -84,6 +84,8 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
        · `<Subject n>`：必须用文字把外观写全（五官/发型/体型/服装/颜色/材质/布局/光线），不许只写「按参考图」「取自四视图」；外观若来自本段绑定的图，用 `<Picture n>` 令牌点明（whose identity, facial structure, hairstyle, body proportions and wardrobe come from `<Picture n>`）；没有 `<Picture n>` 令牌时一律纯文字，禁止无令牌的「参考图」。
        · `<Picture n>`：只在充当首帧/关键帧/尾帧/构图锚点时单列，并写明 it is not a mandatory first frame.
        · `<Audio n>`：角色按该资源自己的定义写，不要一律当音色——绑在主体上、作为说话人音色 → is the voice-timbre reference for `<Subject n> (Sx)`；作为独立音频（BGM / 环境 / 音效 / 台词素材）→ 按定义写它的作用（music style / ambience / sound-effect texture / dialogue content / rhythm / fully_copy）。
+       · 每个 `<Subject n>` 一行里必须同时写「保留什么」与「排除什么（不复制…）」两部分，缺一不可。
+       · `<Audio n>` 行按官方句式：`<Audio n> is the voice-timbre reference for <Subject n> (Sx).`——令牌后直接空格接英文句子，不要加中文冒号；中文解释另起一句。
      · summary：以方括号任务类型前缀开头（`[reference generation]`，有音色参考则 `[reference generation + audio reference]`），并写明 `[时长]-second` 与画幅；不引入新令牌。
      · retention_analysis：只列本段出现过、且在 subject_definitions 定义过的令牌，一令牌一行，照官方样例的**半角**格式写：
        `<Subject 1> (appears in [Shot 1], [Shot 3]): fully_preserved - …`；
@@ -91,6 +93,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
        `<Audio 1>: reference - the target speaker follows <Audio 1>'s voice timbre and measured delivery without copying the original signal.`
        标记只在这几个固定值里选：画面 `fully_preserved`（定义的角色全部保留）/ `partially_preserved`（仍在使用，但部分特征被改动或只保留一部分）/ `attribute_transfer`（把参考特征转移到**另一个**目标主体）/ `weak_reference`（只保留大类、风格、构图或氛围级别的相似）；音频 `fully_copy` / `partially_copy` / `reference` / `weak_reference`。
        同一个主体不能同时写两个标记；不得把本段新加的动作、背景、情节当成参考保真度损失。
+       标记必须与事实一致：本段若改动了机位/构图/动作轨迹/版式，就不能写 fully_preserved，改用 partially_preserved；只保留同类相似时用 weak_reference。
        retention_analysis 里出现的「参考图」「四视图」必须能对应到某个已定义令牌，否则删掉或改成文字描述。
      · detailed_description：逐镜写七要素——构图、主体外观与位置、环境与光线、动作与状态变化、镜头运动、当前声音、参考内容在这镜哪里生效；不要退化成剧情摘要或参考关系清单。
      · [Shot 1] 无时间戳；其后 `[Shot N] At MM:SS.mmm, …`，时间戳递增且小于总时长。
