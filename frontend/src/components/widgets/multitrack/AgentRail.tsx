@@ -866,8 +866,15 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'apply_storyboard',
-        description: '把当前分镜脚本应用到任务轨（需要用户在编辑器可用时执行）',
-        parameters: { type: 'object', properties: {}, required: [] },
+        description: '把当前分镜脚本应用到任务轨。默认只替换结构（段名/时长/brief/任务类型/参考图），不动任务轨里已有的提示词；只有用户明确要求写入提示词时才传 with_prompts=true',
+        parameters: {
+          type: 'object',
+          properties: {
+            with_prompts: { type: 'boolean', description: '是否把脚本里的终稿/A 稿一并写入任务轨（默认 false）' },
+            force: { type: 'boolean', description: '提示词校验不通过时仍强制写入（默认 false）' },
+          },
+          required: [],
+        },
       },
     },
     {
@@ -3594,8 +3601,9 @@ export function AgentRail({
       return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
     }
     if (name === 'apply_storyboard') {
-      // 落轨前置校验：令牌越界/占位符直接拦下，避免脏提示词进任务轨
-      {
+      const withPrompts = args.with_prompts === true
+      // 落轨前置校验：只在「确实要写提示词」时校验，纯结构替换不应该被旧提示词挡住
+      if (withPrompts) {
         const planForGate = readPlan() as { segments?: Array<Record<string, unknown>> } | null
         const gateSegments = (planForGate?.segments ?? []) as Array<Record<string, unknown>>
         const gateErrors: Array<Record<string, unknown>> = []
@@ -3626,7 +3634,9 @@ export function AgentRail({
           name: String(segment.name ?? `段 ${i + 1}`),
           durationFrames: Number(segment.duration_frames ?? Math.round(duration * fps)) || Math.round(duration * fps),
           brief: formatPlanSegmentBrief(segment as never),
-          prompt: String(segment.finalA ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? ''),
+          ...(withPrompts
+            ? { prompt: String(segment.finalA ?? segment.promptA ?? (segment as Record<string, unknown>).user_prompt ?? '') }
+            : {}),
           taskMode: (settings.taskType as string | undefined) || undefined,
           continuityMode: (settings.contextMode as string | undefined) || undefined,
           refImageSize: (settings.refImageSize as string | undefined) || undefined,
