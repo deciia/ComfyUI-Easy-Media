@@ -611,6 +611,7 @@ export function PromptEnhancerModal({
     if (!activeScriptSegment) return
     const timer = window.setTimeout(() => {
       patchScriptSegment({ promptA: brief, promptB: draftPrompt })
+      lastPushedRef.current = { ...lastPushedRef.current, promptA: brief, promptB: draftPrompt }
     }, 600)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -620,10 +621,41 @@ export function PromptEnhancerModal({
     if (!activeScriptSegment) return
     const timer = window.setTimeout(() => {
       patchScriptSegment({ finalA, finalB })
+      lastPushedRef.current = { ...lastPushedRef.current, finalA, finalB }
     }, 600)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finalA, finalB, activeScriptIndex])
+  // 外部写入（助手 write_prompt / 其它视图）→ 只读同步进编辑缓冲；这里绝不回写
+  useEffect(() => {
+    const planNow = readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null
+    const seg = planNow?.segments?.[activeScriptIndex] as Record<string, unknown> | undefined
+    if (!seg) return
+    const stored = {
+      promptA: String(seg.promptA ?? ''),
+      promptB: String(seg.promptB ?? ''),
+      finalA: String(seg.finalA ?? ''),
+      finalB: String(seg.finalB ?? ''),
+    }
+    const pushed = lastPushedRef.current
+    if (stored.promptA && stored.promptA !== pushed.promptA) {
+      pushed.promptA = stored.promptA
+      setBrief(repairSpacing(stored.promptA))
+    }
+    if (stored.promptB && stored.promptB !== pushed.promptB) {
+      pushed.promptB = stored.promptB
+      setDraftPrompt(stored.promptB)
+    }
+    if (stored.finalA !== pushed.finalA) {
+      pushed.finalA = stored.finalA
+      setFinalA(normalizeSectionHeadings(stored.finalA))
+    }
+    if (stored.finalB !== pushed.finalB) {
+      pushed.finalB = stored.finalB
+      setFinalB(stored.finalB)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceStoreVersion])
   // 脚本段减少时把选中夹回有效范围
   useEffect(() => {
     if (scriptSegments.length === 0) {
@@ -702,7 +734,7 @@ export function PromptEnhancerModal({
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
   // 主体/资源统一走「项目资源」表（含迁移）：关弹窗、刷新都不丢
   const workspaceKey = projectName || 'default'
-  const [, setWorkspaceStoreVersion] = useState(0)
+  const [workspaceStoreVersion, setWorkspaceStoreVersion] = useState(0)
   useEffect(() => {
     ensureHydrated(workspaceKey)
     const cached = readWorkspace(workspaceKey)
@@ -882,6 +914,8 @@ export function PromptEnhancerModal({
   const [lastGenerated, setLastGenerated] = useState(initialResult)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const skipAutosaveRef = useRef(true)
+  /** 记录本地已写回的值，用于区分「外部写入」与「自己刚写的」 */
+  const lastPushedRef = useRef({ promptA: '', promptB: '', finalA: '', finalB: '' })
   const [mentionPos, setMentionPos] = useState<{ top: number; left: number } | null>(null)
 
   const candidates = useMemo(() => {
@@ -988,6 +1022,12 @@ export function PromptEnhancerModal({
     setDraftPrompt(String(seg?.promptB ?? trackContent.user_prompt_b ?? ''))
     setFinalA(normalizeSectionHeadings(String(seg?.finalA ?? '')))
     setFinalB(String(seg?.finalB ?? ''))
+    lastPushedRef.current = {
+      promptA: String(seg?.promptA ?? ''),
+      promptB: String(seg?.promptB ?? ''),
+      finalA: String(seg?.finalA ?? ''),
+      finalB: String(seg?.finalB ?? ''),
+    }
     const fixedResult = repairSpacing(initialResult)
     setResult(fixedResult)
     setSections(splitSections(fixedResult))
