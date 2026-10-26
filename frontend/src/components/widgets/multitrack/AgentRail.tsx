@@ -235,7 +235,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'add_segment',
-        description: '在分镜脚本中新增一段（可指定插在哪个段之后）',
+        description: '在分镜脚本中新增一段（可指定插在哪个段之后）。结构变更后只报告受影响的段与已过期的提示词，不要自动重写片段稿/终稿。',
         parameters: {
           type: 'object',
           properties: {
@@ -253,7 +253,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'delete_segment',
-        description: '删除分镜脚本中的某一段',
+        description: '删除分镜脚本中的某一段。结构变更后只报告受影响的段与已过期的提示词，不要自动重写片段稿/终稿。',
         parameters: {
           type: 'object',
           properties: { index: { type: 'number', description: '段序号，从 1 开始' } },
@@ -265,7 +265,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'update_segment',
-        description: '修改某段的元信息（名称/时长/beat/摘要/导演说明/镜头表），不动提示词',
+        description: '修改某段的元信息（名称/时长/beat/摘要/导演说明/镜头表），不动提示词。结构变更后只报告受影响的段与已过期的提示词，不要自动重写片段稿/终稿。',
         parameters: {
           type: 'object',
           properties: {
@@ -285,7 +285,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'split_segment',
-        description: '把某段对半拆成两段（时长各半，提示词清空待重写）',
+        description: '把某段对半拆成两段（时长各半，提示词清空待重写）。结构变更后只报告受影响的段与已过期的提示词，不要自动重写片段稿/终稿。',
         parameters: {
           type: 'object',
           properties: { index: { type: 'number' }, first_name: { type: 'string' }, second_name: { type: 'string' } },
@@ -297,7 +297,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'merge_segments',
-        description: '把某段与它后面一段合并（时长相加，镜头表拼接）',
+        description: '把某段与它后面一段合并（时长相加，镜头表拼接）。结构变更后只报告受影响的段与已过期的提示词，不要自动重写片段稿/终稿。',
         parameters: {
           type: 'object',
           properties: { index: { type: 'number', description: '合并这一段的下一段' } },
