@@ -1415,7 +1415,6 @@ function askAgentGenerate(language: '中文' | 'English') {
     '结尾固定加一行禁字幕/水印句。',
     '',
     '【禁区】',
-    '**本次只产终稿**：只调用一次 write_prompt(target=final)。不得调用 target=fragment，不得改片段稿、不得改其它段——用户没要求就不要生成片段提示词。',
     '不扩展范围；不编造分镜里没有的镜头/台词/动作。',
     '单镜出现的道具不要升格成 `<Subject n>`（跨段一致才建主体），用 `<Picture n>` 或句内描述；编号不得越界。',
     '返回 needs_revision 时按 problems 改一次再写，不要 force/auto_align 绕过。',
