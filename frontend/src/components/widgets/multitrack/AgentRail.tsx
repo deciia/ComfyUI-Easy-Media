@@ -33,6 +33,7 @@ import {
 } from './agentStore'
 import { AgentMarkdown } from './AgentMarkdown'
 import { checkTaskModeAssets, maxImagesForTaskMode, TASK_MODE_SPECS } from '@/lib/task-mode-spec'
+import { resolveBoundTokens } from './segmentTokens'
 
 const PANEL_BG = 'hsl(var(--card, 240 10% 10%))'
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -2427,45 +2428,30 @@ export function AgentRail({
       if (!segment) return { error: `段 ${index} 不存在（共 ${planSegments.length} 段）` }
       const ids = boundIdsForSegment(index - 1)
       const pool = readResources(projectKey) as ProjectResource[]
-      const table: Array<Record<string, unknown>> = []
-      let subjectNo = 0
-      let pictureNo = 0
-      let audioNo = 0
-      let videoNo = 0
-      const push = (item: ProjectResource, via?: string) => {
-        let token = ''
-        if (item.type === 'Subject') { subjectNo += 1; token = `<Subject ${subjectNo}>` }
-        else if (item.type === 'Picture') { pictureNo += 1; token = `<Picture ${pictureNo}>` }
-        else if (item.type === 'Audio') { audioNo += 1; token = `<Audio ${audioNo}>` }
-        else if (item.type === 'Video') { videoNo += 1; token = `<Video ${videoNo}>` }
-        table.push({
-          token,
-          type: item.type,
-          name: item.name,
-          status: item.status,
-          file: item.imageFile ?? item.audioFile ?? item.videoFile ?? null,
-          via: via ?? 'direct',
-          retention: item.retention ?? [],
-        })
-      }
-      for (const id of ids) {
-        const item = pool.find((entry) => entry.id === id)
-        if (!item) continue
-        push(item)
-        if (item.type === 'Subject') {
-          const childNames: string[] = []
-          for (const childId of item.childResourceIds ?? []) {
-            const child = pool.find((entry) => entry.id === childId)
-            if (!child) continue
-            childNames.push(child.name)
-            // 子图同时占 <Picture n>（顺序与 imagesFromBoundIds 提交给工作流的顺序一致）
-            if (child.type === 'Picture') push(child, item.name)
-          }
-          if (childNames.length) {
-            table[table.length - 1] = { ...table[table.length - 1], source_images: childNames }
-          }
-        }
-      }
+      // 令牌解析走共享实现（与前端派单同一套编号，顺序 = 提交给工作流的 images 顺序）
+      const resolved = resolveBoundTokens(ids, pool)
+      const subjectNo = resolved.filter((entry) => entry.type === 'Subject').length
+      const pictureNo = resolved.filter((entry) => entry.type === 'Picture').length
+      const audioNo = resolved.filter((entry) => entry.type === 'Audio').length
+      const videoNo = resolved.filter((entry) => entry.type === 'Video').length
+      const childNamesOf = (subjectId: string) => resolved
+        .filter((entry) => entry.via && entry.resource.type === 'Picture'
+          && pool.find((item) => item.id === subjectId)?.childResourceIds?.includes(entry.id))
+        .map((entry) => entry.name)
+      const table: Array<Record<string, unknown>> = resolved.map((entry) => ({
+        token: entry.token,
+        type: entry.type,
+        name: entry.name,
+        status: entry.resource.status,
+        file: entry.resource.imageFile ?? entry.resource.audioFile ?? entry.resource.videoFile ?? null,
+        via: entry.via ?? 'direct',
+        retention: entry.resource.retention ?? [],
+        relationship: entry.resource.relationship ?? '',
+        description: entry.resource.description ?? '',
+        ...(entry.type === 'Subject' && childNamesOf(entry.id).length
+          ? { source_images: childNamesOf(entry.id) }
+          : {}),
+      }))
       const settings = (segment.settings ?? {}) as Record<string, unknown>
       return {
         segment: index,

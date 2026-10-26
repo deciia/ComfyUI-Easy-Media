@@ -37,6 +37,7 @@ import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
+import { resolveBoundTokens } from './segmentTokens'
 
 /**
  * 提示词增强器（模态窗）。
@@ -460,30 +461,7 @@ export function PromptEnhancerModal({
   /** 段内令牌编号契约：绑定清单顺序展开（主体→自身+子图），同类型按出现顺序编号 */
   const computeBindingTokens = (ids: string[]): Map<string, string> => {
     const map = new Map<string, string>()
-    const counters: Record<string, number> = { Subject: 0, Picture: 0, Audio: 0, Video: 0 }
-    const bump = (kind: string) => {
-      counters[kind] = (counters[kind] ?? 0) + 1
-      return `<${kind} ${counters[kind]}>`
-    }
-    for (const id of ids) {
-      const resource = resources.find((item) => item.id === id)
-      if (!resource) continue
-      if (resource.type === 'Subject') {
-        // 主体承载身份；它的子图同时占 <Picture n> 编号（顺序与提交给工作流的 images 一致）
-        map.set(resource.id, bump('Subject'))
-        for (const childId of resource.childResourceIds ?? []) {
-          const child = resources.find((item) => item.id === childId)
-          if (!child) continue
-          if (child.type === 'Picture') map.set(child.id, bump('Picture'))
-          else if (child.type === 'Audio') map.set(child.id, bump('Audio'))
-          else if (child.type === 'Video') map.set(child.id, bump('Video'))
-        }
-        continue
-      }
-      if (resource.type === 'Picture') map.set(resource.id, bump('Picture'))
-      else if (resource.type === 'Audio') map.set(resource.id, bump('Audio'))
-      else if (resource.type === 'Video') map.set(resource.id, bump('Video'))
-    }
+    for (const entry of resolveBoundTokens(ids, resources)) map.set(entry.id, entry.token)
     return map
   }
   /** 当前段任务类型：段级 settings > 脚本级 plan.settings > 任务轨 task_mode > 默认 */
@@ -1190,25 +1168,13 @@ export function PromptEnhancerModal({
         thumbnailUrl: viewOf(resource),
       })
     }
-    // 1) 绑定清单顺序展开（编号契约，不再置顶重排——就是绑定顺序本身）
-    for (const id of boundIds) {
-      const resource = resources.find((item) => item.id === id)
-      if (!resource) continue
-      if (resource.type === 'Subject') {
-        pushWithToken(resource, resource.name, tokens.get(resource.id))
-        for (const childId of resource.childResourceIds ?? []) {
-          const child = resources.find((item) => item.id === childId)
-          if (!child || child.type !== 'Picture') continue
-          const childToken = tokens.get(child.id)
-          if (!childToken) continue
-          pushWithToken(child, `${resource.name}·${child.name}`, childToken)
-        }
-      } else {
-        pushWithToken(resource, resource.name, tokens.get(resource.id))
-      }
+    // 1) 绑定清单顺序展开（编号契约：主体先出，其子资源紧随，顺序 = 提交给工作流的 images）
+    const resolved = resolveBoundTokens(boundIds, resources)
+    for (const entry of resolved) {
+      pushWithToken(entry.resource, entry.via ? `${entry.via}·${entry.name}` : entry.name, entry.token)
     }
     // 2) 未绑定资源池：续号（主体优先）
-    const seen = new Set(boundIds)
+    const seen = new Set<string>([...boundIds, ...resolved.map((entry) => entry.resource.id)])
     for (const resource of resources) {
       if (resource.type === 'Subject' && !seen.has(resource.id)) pushWithToken(resource, resource.name)
     }
