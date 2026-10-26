@@ -999,7 +999,7 @@ export function PromptEnhancerModal({
     }, 300)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segmentId, activeScriptIndex, bindingProjectKey, scriptPlan])
+  }, [segmentId, activeScriptIndex, bindingProjectKey])
 
   useEffect(() => {
     let cancelled = false
