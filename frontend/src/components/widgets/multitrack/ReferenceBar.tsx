@@ -44,6 +44,17 @@ export function ReferenceBar({
       .filter((child) => child?.type === 'Picture').length
   }
   const currentPictures = bound.reduce((total, item) => total + picturesOf(item), 0)
+  /** 只绑了图、没绑它所属主体：提示改绑主体（文字提示，不拦操作） */
+  const suggestSubjectNames = useMemo(() => {
+    const names: string[] = []
+    for (const item of bound) {
+      if (item.type !== 'Picture') continue
+      const parent = resources.find((entry) => entry.type === 'Subject' && (entry.childResourceIds ?? []).includes(item.id))
+      if (!parent || boundIds.includes(parent.id)) continue
+      if (!names.includes(parent.name)) names.push(parent.name)
+    }
+    return names
+  }, [bound, resources, boundIds])
 
   const nextIndex = (type: string) => {
     const used = Array.from(prompt.matchAll(new RegExp(`<${type}\\s+(\\d+)>`, 'g'))).map((match) => Number(match[1]))
@@ -134,6 +145,12 @@ export function ReferenceBar({
           ＋ 引用
         </button>
       </div>
+      {suggestSubjectNames.length ? (
+        <div className="px-1 text-[10px] text-muted-foreground">
+          {suggestSubjectNames.map((name) => `「${name}」`).join('、')}
+          已建成主体并挂了图，本段只绑了它的图片；改绑主体后提示词才能用 &lt;Subject n&gt; 承载，图片仍会随主体提交。
+        </div>
+      ) : null}
       {open ? (
         <div className="max-h-40 overflow-auto rounded" style={{ border: `1px solid ${BORDER}`, background: FIELD_BG }}>
           {candidates.length === 0 ? (
