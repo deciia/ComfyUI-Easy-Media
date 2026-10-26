@@ -651,19 +651,28 @@ export function PromptEnhancerModal({
     setActiveScriptIndex(index)
   }
 
-  /** 清空全部段的提示词，kind=fragment 清 A/B 片段稿，final 清 A/B 终稿 */
+  /** 清空全部段的提示词，kind=fragment 清 A/B 片段稿，final 清 A/B 终稿（两步确认，不用 confirm 弹窗） */
   const clearAllPrompts = (kind: 'fragment' | 'final') => {
     const planNow = readWorkspace(bindingProjectKey).plan as
       | { segments?: Array<Record<string, unknown>> }
       | null
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
-    if (!segments.length) return
-    const label = kind === 'fragment' ? '片段提示词（A/B 稿）' : '最终提示词（A/B 终稿）'
+    const label = kind === 'fragment' ? '片段提示词' : '最终提示词'
     const count = segments.filter((segment) => kind === 'fragment'
       ? String(segment.promptA ?? '').trim() || String(segment.promptB ?? '').trim()
       : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim()).length
-    if (!count) return
-    if (!window.confirm(`将清空 ${count} 段的${label}，清空后需要重新生成。继续？`)) return
+    if (!count) {
+      setClearArmed('')
+      setClearNotice(`全部 ${segments.length} 段的${label}都是空的，无需清空`)
+      window.setTimeout(() => setClearNotice(''), 4000)
+      return
+    }
+    if (clearArmed !== kind) {
+      setClearArmed(kind)
+      setClearNotice(`再点一次「确认清空${label}」，将清空全部 ${count} 段`)
+      window.setTimeout(() => setClearArmed(''), 5000)
+      return
+    }
     const next = segments.map((segment) => (kind === 'fragment'
       ? { ...segment, promptA: '', promptB: '' }
       : { ...segment, finalA: '', finalB: '' }))
@@ -680,6 +689,9 @@ export function PromptEnhancerModal({
       setLastGenerated('')
       lastPushedRef.current = { ...lastPushedRef.current, finalA: '', finalB: '' }
     }
+    setClearArmed('')
+    setClearNotice(`已清空全部 ${count} 段的${label}（可用 Ctrl+Z 撤回一次）`)
+    window.setTimeout(() => setClearNotice(''), 5000)
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
@@ -706,6 +718,9 @@ export function PromptEnhancerModal({
   const [creatingProject, setCreatingProject] = useState(false)
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
   const [saveCheckOpen, setSaveCheckOpen] = useState(false)
+  /** 清空按钮的两步确认（不用 window.confirm，桌面端可能被拦） */
+  const [clearArmed, setClearArmed] = useState<'' | 'fragment' | 'final'>('')
+  const [clearNotice, setClearNotice] = useState('')
   const [replaceArmed, setReplaceArmed] = useState(false)
 
   async function confirmCreateProject() {
@@ -2292,8 +2307,29 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     >
                       生成中文➡️
                     </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      style={{ color: clearArmed === 'fragment' ? '#f87171' : '#fbbf24' }}
+                      title="清空全部段的片段提示词（A/B 稿），两步确认"
+                      onClick={() => clearAllPrompts('fragment')}
+                    >
+                      {clearArmed === 'fragment' ? '确认清空片段稿？' : '清空片段稿'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      style={{ color: clearArmed === 'final' ? '#f87171' : '#fbbf24' }}
+                      title="清空全部段的最终提示词（A/B 终稿），两步确认"
+                      onClick={() => clearAllPrompts('final')}
+                    >
+                      {clearArmed === 'final' ? '确认清空终稿？' : '清空终稿'}
+                    </Button>
                   </div>
                 </div>
+                {clearNotice ? (
+                  <div className="text-[11px]" style={{ color: '#fbbf24' }}>{clearNotice}</div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-1">
                   <span className="text-[11px] text-muted-foreground">分镜脚本段</span>
                   <Button
@@ -2414,24 +2450,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       ⤓ 分镜→片段
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="rounded px-1.5 py-0.5 text-[10px]"
-                    style={{ border: `1px solid ${BORDER}`, color: '#fbbf24' }}
-                    title="清空全部段的片段提示词（A/B 稿）"
-                    onClick={() => clearAllPrompts('fragment')}
-                  >
-                    清空片段稿
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded px-1.5 py-0.5 text-[10px]"
-                    style={{ border: `1px solid ${BORDER}`, color: '#fbbf24' }}
-                    title="清空全部段的最终提示词（A/B 终稿）"
-                    onClick={() => clearAllPrompts('final')}
-                  >
-                    清空终稿
-                  </button>
                 </div>
               <div className="text-[11px] text-neutral-500">
                 片段提示词：白话描述即可（分镜脚本 + 主体/资源），不需要六段式；生成终稿时再规范化。
