@@ -1405,7 +1405,7 @@ function askAgentGenerate(language: '中文' | 'English') {
     '【六段怎么写】',
     'subject_definitions：每令牌一行，写成模型能直接使用的事实，不许引用面板或文件名：',
     '· `<Subject n>` 必须用文字把外观写全（五官/发型/体型/服装/颜色/材质/布局/光线），不许只写「按参考图」「取自四视图」；外观来自本段绑定的图时用 `<Picture n>` 令牌点明（whose identity, facial structure, hairstyle, body proportions and wardrobe come from `<Picture n>`）；没有 `<Picture n>` 令牌时一律纯文字，禁止无令牌的「参考图」。',
-    '· `<Subject n>` 定义行是引用参考图的唯一位置，**用中文写**：「`<Subject 1>` 是 `<Picture 1>` 里的 <是什么>，<要跟随的特征>」或「`<Subject 1>` 的外观取自 `<Picture 1>`，<要跟随的特征>」。禁止让 `<Picture n>` 单独成行去定义人物/四视图；`<Picture n>` 只有在自己充当首帧/尾帧/构图锚点时单独成行。被校验退回时只改形状，不要把 `<Picture n>` 全删。',
+    '· `<Subject n>` 定义行是引用参考图的唯一位置，**用中文写一次就够**（两句式二选一，不要两种都写、也不要再追加英文从句）：①「`<Subject 1>` 是 `<Picture 1>` 里的 <是什么>，<要跟随的特征>」；②「`<Subject 1>` 的外观取自 `<Picture 1>`，<要跟随的特征>」。同一行里 `<Picture n>` 只出现一次。禁止让 `<Picture n>` 单独成行去定义人物/四视图；`<Picture n>` 只有在自己充当首帧/尾帧/构图锚点时单独成行。被校验退回时只改形状，不要把 `<Picture n>` 全删。',
     '· `<Picture n>` 只在充当首帧/关键帧/尾帧/构图锚点时单列，并写明 it is not a mandatory first frame。',
     '· `<Audio n>` 的角色按该资源自己的定义写，不要一律当音色：绑在主体上作说话人音色 → is the voice-timbre reference for `<Subject n> (Sx)`；独立音频（BGM/环境/音效/台词素材）→ 按定义写作用（music style / ambience / sound-effect texture / dialogue content / rhythm / fully_copy）。',
     '· `<Audio n>` 行按官方句式写：`<Audio n> is the voice-timbre reference for <Subject n> (Sx).`——令牌后直接空格接英文句子，不要加中文冒号；中文解释另起一句。',
