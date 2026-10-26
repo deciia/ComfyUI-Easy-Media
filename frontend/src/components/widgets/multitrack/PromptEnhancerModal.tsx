@@ -469,12 +469,13 @@ export function PromptEnhancerModal({
       const resource = resources.find((item) => item.id === id)
       if (!resource) continue
       if (resource.type === 'Subject') {
-        // 主体承载身份，其子图不单独占 <Picture n> 编号（作为主体来源内嵌引用）
+        // 主体承载身份；它的子图同时占 <Picture n> 编号（顺序与提交给工作流的 images 一致）
         map.set(resource.id, bump('Subject'))
         for (const childId of resource.childResourceIds ?? []) {
           const child = resources.find((item) => item.id === childId)
           if (!child) continue
-          if (child.type === 'Audio') map.set(child.id, bump('Audio'))
+          if (child.type === 'Picture') map.set(child.id, bump('Picture'))
+          else if (child.type === 'Audio') map.set(child.id, bump('Audio'))
           else if (child.type === 'Video') map.set(child.id, bump('Video'))
         }
         continue
@@ -1195,6 +1196,13 @@ export function PromptEnhancerModal({
       if (!resource) continue
       if (resource.type === 'Subject') {
         pushWithToken(resource, resource.name, tokens.get(resource.id))
+        for (const childId of resource.childResourceIds ?? []) {
+          const child = resources.find((item) => item.id === childId)
+          if (!child || child.type !== 'Picture') continue
+          const childToken = tokens.get(child.id)
+          if (!childToken) continue
+          pushWithToken(child, `${resource.name}·${child.name}`, childToken)
+        }
       } else {
         pushWithToken(resource, resource.name, tokens.get(resource.id))
       }
@@ -1431,7 +1439,7 @@ function askAgentGenerate(language: '中文' | 'English') {
     '【六段怎么写】',
     'subject_definitions：每令牌一行，写成模型能直接使用的事实，不许引用面板或文件名：',
     '· `<Subject n>` 必须用文字把外观写全（五官/发型/体型/服装/颜色/材质/布局/光线），不许只写「按参考图」「取自四视图」；外观来自本段绑定的图时用 `<Picture n>` 令牌点明（whose identity, facial structure, hairstyle, body proportions and wardrobe come from `<Picture n>`）；没有 `<Picture n>` 令牌时一律纯文字，禁止无令牌的「参考图」。',
-    '· 同一个 `<Subject n>` 的一行里必须同时写「保留什么」与「排除什么（不复制…）」两部分，缺一不可。',
+    '· `<Subject n>` 定义行按官方句式写：`<Subject n> is <是什么> in <Picture x>, with <要跟随的特征>`（或 whose appearance comes from `<Picture x>`）；该图仅用于定义身份/场景/样式时只在本行内引用、不单独成行；保留与排除写进 retention_analysis。',
     '· `<Picture n>` 只在充当首帧/关键帧/尾帧/构图锚点时单列，并写明 it is not a mandatory first frame。',
     '· `<Audio n>` 的角色按该资源自己的定义写，不要一律当音色：绑在主体上作说话人音色 → is the voice-timbre reference for `<Subject n> (Sx)`；独立音频（BGM/环境/音效/台词素材）→ 按定义写作用（music style / ambience / sound-effect texture / dialogue content / rhythm / fully_copy）。',
     '· `<Audio n>` 行按官方句式写：`<Audio n> is the voice-timbre reference for <Subject n> (Sx).`——令牌后直接空格接英文句子，不要加中文冒号；中文解释另起一句。',

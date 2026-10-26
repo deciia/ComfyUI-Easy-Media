@@ -2453,9 +2453,14 @@ export function AgentRail({
         if (!item) continue
         push(item)
         if (item.type === 'Subject') {
-          const childNames = (item.childResourceIds ?? [])
-            .map((childId) => pool.find((entry) => entry.id === childId)?.name)
-            .filter((name): name is string => Boolean(name))
+          const childNames: string[] = []
+          for (const childId of item.childResourceIds ?? []) {
+            const child = pool.find((entry) => entry.id === childId)
+            if (!child) continue
+            childNames.push(child.name)
+            // 子图同时占 <Picture n>（顺序与 imagesFromBoundIds 提交给工作流的顺序一致）
+            if (child.type === 'Picture') push(child, item.name)
+          }
           if (childNames.length) {
             table[table.length - 1] = { ...table[table.length - 1], source_images: childNames }
           }

@@ -84,7 +84,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
        · `<Subject n>`：必须用文字把外观写全（五官/发型/体型/服装/颜色/材质/布局/光线），不许只写「按参考图」「取自四视图」；外观若来自本段绑定的图，用 `<Picture n>` 令牌点明（whose identity, facial structure, hairstyle, body proportions and wardrobe come from `<Picture n>`）；没有 `<Picture n>` 令牌时一律纯文字，禁止无令牌的「参考图」。
        · `<Picture n>`：只在充当首帧/关键帧/尾帧/构图锚点时单列，并写明 it is not a mandatory first frame.
        · `<Audio n>`：角色按该资源自己的定义写，不要一律当音色——绑在主体上、作为说话人音色 → is the voice-timbre reference for `<Subject n> (Sx)`；作为独立音频（BGM / 环境 / 音效 / 台词素材）→ 按定义写它的作用（music style / ambience / sound-effect texture / dialogue content / rhythm / fully_copy）。
-       · 每个 `<Subject n>` 一行里必须同时写「保留什么」与「排除什么（不复制…）」两部分，缺一不可。
+       · `<Subject n>` 定义行按官方句式写：`<Subject n> is <是什么> in <Picture x>, with <要跟随的特征>`（或 whose appearance comes from `<Picture x>`）；该图仅用于定义身份/场景/样式时只在本行内引用、不单独成行；保留与排除写进 retention_analysis。
        · `<Audio n>` 行按官方句式：`<Audio n> is the voice-timbre reference for <Subject n> (Sx).`——令牌后直接空格接英文句子，不要加中文冒号；中文解释另起一句。
      · summary：以方括号任务类型前缀开头（`[reference generation]`，有音色参考则 `[reference generation + audio reference]`），并写明 `[时长]-second` 与画幅；不引入新令牌。
      · retention_analysis：只列本段出现过、且在 subject_definitions 定义过的令牌，一令牌一行，照官方样例的**半角**格式写：
