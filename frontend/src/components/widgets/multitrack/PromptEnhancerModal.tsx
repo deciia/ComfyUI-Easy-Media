@@ -606,6 +606,7 @@ export function PromptEnhancerModal({
     const index = Number(token.replace(/^<\w+\s+(\d+)>$/, '$1'))
     return { ...resource, token, index }
   }
+  const [workspaceStoreVersion, setWorkspaceStoreVersion] = useState(0)
   // 片段稿缓冲 → 脚本段 promptA/promptB（只有缓冲本身变化才写，终稿更新不得连带写回）
   useEffect(() => {
     if (!activeScriptSegment) return
@@ -671,7 +672,6 @@ export function PromptEnhancerModal({
     setActiveScriptIndex(index)
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
-  const [workspaceStoreVersion, setWorkspaceStoreVersion] = useState(0)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
   const [busy, setBusy] = useState(false)
