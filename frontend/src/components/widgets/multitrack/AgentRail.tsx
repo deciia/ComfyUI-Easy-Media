@@ -90,6 +90,8 @@ export function AgentRail({
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
+  /** ask_user 的自定义回答（选项都不满意时直接写要求） */
+  const [customAnswer, setCustomAnswer] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const mentionOptions = useMemo(() => {
     if (mentionQuery === null) return []
@@ -4538,6 +4540,44 @@ export function AgentRail({
                         </button>
                       ))}
                     </div>
+                    {!message.question.answer ? (
+                      <div className="mt-1 flex items-center gap-1">
+                        <input
+                          value={customAnswer}
+                          onChange={(event) => setCustomAnswer(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key !== 'Enter') return
+                            const text = customAnswer.trim()
+                            if (!text) return
+                            answerQuestion(text)
+                            ;(globalThis as unknown as { __easyMediaAnswerQuestion?: (answer: string) => boolean })
+                              .__easyMediaAnswerQuestion?.(text)
+                            setCustomAnswer('')
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          placeholder="都不满意？直接输入你的要求…"
+                          className="min-w-0 flex-1 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                          style={{ border: `1px solid ${BORDER}`, background: FIELD_BG }}
+                        />
+                        <button
+                          type="button"
+                          className="rounded px-1.5 py-0.5 text-[10px]"
+                          style={{ border: `1px solid ${BORDER}` }}
+                          disabled={!customAnswer.trim()}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            const text = customAnswer.trim()
+                            if (!text) return
+                            answerQuestion(text)
+                            ;(globalThis as unknown as { __easyMediaAnswerQuestion?: (answer: string) => boolean })
+                              .__easyMediaAnswerQuestion?.(text)
+                            setCustomAnswer('')
+                          }}
+                        >
+                          发送
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 {(message.role === 'assistant' && message.text ? Array.from(message.text.matchAll(/```userprompt\s*段(\d+)[^\n]*\n([\s\S]*?)```/g)) : []).map((match, blockIndex) => {
