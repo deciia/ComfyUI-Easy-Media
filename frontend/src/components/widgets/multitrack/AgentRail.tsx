@@ -1949,8 +1949,13 @@ export function AgentRail({
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
       if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
-      const identityAsPicture = /<Picture\s+\d+>[^\n]{0,80}(四视图|三视图|正脸|侧脸|正面照|全身照|面部特征|发型|五官|人物|角色|主角|男主|女主|技师|司机|店主|工人|老赵|小赵)/.test(prompt)
-        || /(人物|角色|主角|技师|司机|店主|老赵|小赵)[^\n]{0,40}<Picture\s+\d+>/.test(prompt)
+      // 只在「<Picture n> 被当成人物定义的主语」时报错；<Subject n> 行内引用来源图是官方写法
+      const identityAsPicture = prompt.split('\n').some((line) => {
+        const trimmed = line.trim()
+        if (/^<Subject\s+\d+>/.test(trimmed)) return false
+        return /<Picture\s+\d+>[^\n]{0,80}(四视图|三视图|正脸|侧脸|正面照|全身照|面部特征|发型|五官|人物|角色|主角|男主|女主|技师|司机|店主|工人|老赵|小赵)/.test(trimmed)
+          || /(人物|角色|主角|技师|司机|店主|老赵|小赵)[^\n]{0,40}<Picture\s+\d+>/.test(trimmed)
+      })
       if (identityAsPicture) {
         problems.push({
           level: 'error',
@@ -2045,10 +2050,14 @@ export function AgentRail({
     const imagesFromBoundIds = (ids: string[]) => {
       const pool = readResources(projectKey) as ProjectResource[]
       const pictures: Array<{ name: string; subfolder?: string; sourceType: 'input' | 'output' | 'temp'; filePath: string }> = []
+      const seenFiles = new Set<string>()
       const push = (resource: ProjectResource) => {
         if (resource.type !== 'Picture') return
         const fileName = String(resource.imageFile ?? '').trim()
         if (!fileName) return
+        const fileKey = `${resource.subfolder ?? ''}/${fileName}`
+        if (seenFiles.has(fileKey)) return
+        seenFiles.add(fileKey)
         const subfolder = String(resource.subfolder ?? '')
         pictures.push({
           name: fileName,

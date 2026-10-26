@@ -29,13 +29,22 @@ export function resolveBoundTokens(boundIds: string[], pool: ProjectResource[]):
     return `<${type} ${counters[type]}>`
   }
   const out: BoundToken[] = []
+  const seen = new Set<string>()
+  /** 同一份媒体（同一文件）或同一资源只编号一次：子图与直接绑定重复时不再占两个号 */
+  const keyOf = (resource: ProjectResource) =>
+    `${resource.type}:${resource.imageFile ?? resource.audioFile ?? resource.videoFile ?? resource.id}`
   const take = (resource: ProjectResource, via?: string) => {
     if (resource.type === 'Subject') {
+      if (seen.has(resource.id)) return
+      seen.add(resource.id)
       out.push({ id: resource.id, type: 'Subject', token: next('Subject'), name: resource.name, resource })
       return
     }
     if (resource.type !== 'Picture' && resource.type !== 'Audio' && resource.type !== 'Video') return
     if (resource.type === 'Picture' && !hasPictureFile(resource)) return
+    const key = keyOf(resource)
+    if (seen.has(key)) return
+    seen.add(key)
     out.push({ id: resource.id, type: resource.type, token: next(resource.type), name: resource.name, via, resource })
   }
 
