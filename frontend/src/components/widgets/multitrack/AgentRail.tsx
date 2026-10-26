@@ -866,7 +866,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'apply_storyboard',
-        description: '把当前分镜脚本应用到任务轨。默认只替换结构（段名/时长/brief/任务类型/参考图），不动任务轨里已有的提示词；只有用户明确要求写入提示词时才传 with_prompts=true',
+        description: '把当前分镜脚本替换到任务轨：按脚本重建/更新任务段（段名、时长、brief、任务类型、衔接模式、参考图）。用户说「替换分镜 / 应用到任务轨 / 把分镜同步过去」时就调用它，这是唯一正确工具——不要用 set_task_modes 或逐段改任务轨来替代。默认只替换结构，不动任务轨里已有的提示词；只有用户明确要求连提示词一起写入时才传 with_prompts=true',
         parameters: {
           type: 'object',
           properties: {
