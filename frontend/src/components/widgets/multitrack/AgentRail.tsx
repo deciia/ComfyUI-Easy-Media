@@ -1927,23 +1927,12 @@ export function AgentRail({
     const auditPrompt = (segmentIndex: number, prompt: string, fragmentMode = false) => {
       const ids = boundIdsForSegment(segmentIndex)
       const pool = readResources(projectKey) as ProjectResource[]
-      const expanded: ProjectResource[] = []
-      for (const id of ids) {
-        const item = pool.find((entry) => entry.id === id)
-        if (!item) continue
-        if (!expanded.includes(item)) expanded.push(item)
-        if (item.type === 'Subject') {
-          for (const childId of item.childResourceIds ?? []) {
-            const child = pool.find((entry) => entry.id === childId)
-            if (child && !expanded.includes(child)) expanded.push(child)
-          }
-        }
-      }
-      const topLevel = ids.map((id) => pool.find((entry) => entry.id === id)).filter((item): item is ProjectResource => Boolean(item))
-      const pictures = topLevel.filter((item) => item.type === 'Picture').length
-      const subjects = topLevel.filter((item) => item.type === 'Subject').length
-      const audios = expanded.filter((item) => item.type === 'Audio').length
-      const videos = expanded.filter((item) => item.type === 'Video').length
+      // 令牌编号与派单/上下文同源（含主体子图）；否则合法 <Picture n> 会被判越界、被模型删掉
+      const resolved = resolveBoundTokens(ids, pool)
+      const pictures = resolved.filter((entry) => entry.type === 'Picture').length
+      const subjects = resolved.filter((entry) => entry.type === 'Subject').length
+      const audios = resolved.filter((entry) => entry.type === 'Audio').length
+      const videos = resolved.filter((entry) => entry.type === 'Video').length
       const problems: Array<Record<string, unknown>> = []
       const maxOf = (kind: string) => Math.max(0, ...Array.from(prompt.matchAll(new RegExp(`<${kind} \\d+>`, 'g'))).map((m) => Number(String(m[0]).replace(/\\D/g, ''))))
       const countOf = (kind: string) => (prompt.match(new RegExp(`<${kind} \\d+>`, 'g')) ?? []).length
@@ -1970,16 +1959,7 @@ export function AgentRail({
       }
       // 令牌与紧随其后的括号内名称必须一致（防止 <Picture 2>（工作台） 但工作台其实是 Picture 1）
       const tokenToName = new Map<string, string>()
-      let subjectIdx = 0
-      let pictureIdx = 0
-      let audioIdx = 0
-      let videoIdx = 0
-      for (const item of topLevel) {
-        if (item.type === 'Subject') { subjectIdx += 1; tokenToName.set(`<Subject ${subjectIdx}>`, item.name) }
-        else if (item.type === 'Picture') { pictureIdx += 1; tokenToName.set(`<Picture ${pictureIdx}>`, item.name) }
-        else if (item.type === 'Audio') { audioIdx += 1; tokenToName.set(`<Audio ${audioIdx}>`, item.name) }
-        else if (item.type === 'Video') { videoIdx += 1; tokenToName.set(`<Video ${videoIdx}>`, item.name) }
-      }
+      for (const entry of resolved) tokenToName.set(entry.token, entry.name)
       for (const match of prompt.matchAll(/<(Subject|Picture|Audio|Video)\s+(\d+)>\s*[（(]([^）)]{1,30})[）)]/g)) {
         const token = `<${match[1]} ${match[2]}>`
         const written = String(match[3]).trim()
@@ -2001,11 +1981,9 @@ export function AgentRail({
         for (const childId of item.childResourceIds ?? []) childToSubject.set(childId, item.name)
       }
       const pictureTokenToResource = new Map<string, ProjectResource>()
-      let pictureSeq = 0
-      for (const item of topLevel) {
-        if (item.type !== 'Picture') continue
-        pictureSeq += 1
-        pictureTokenToResource.set(`<Picture ${pictureSeq}>`, item)
+      for (const entry of resolved) {
+        if (entry.type !== 'Picture') continue
+        pictureTokenToResource.set(entry.token, entry.resource)
       }
       for (const match of prompt.matchAll(/<Picture\s+(\d+)>\s*[（(]([^）)]{1,40})[）)]/g)) {
         const token = `<Picture ${match[1]}>`
