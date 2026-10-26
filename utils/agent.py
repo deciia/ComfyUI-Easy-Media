@@ -68,7 +68,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
    对话触发时，get_prompt_context 返回里有 enhancer_settings（规范来源/提示词模式/硬要求/字数/镜头数/偏好预设）；
    按它执行；为 null 时用默认，并在回报里说明「未读到面板设置，用了默认」。
    不要顺手补绑定、不要跑 verify_project、不要写任务轨、不要 set_task_modes、不要改其它段，除非派单里点名。
-   **替换分镜 ≠ 生成提示词**：用户说「替换/应用/更新分镜」时，只允许 get_plan 读一次 + apply_storyboard（默认只替换结构，不带 with_prompts）；不要调用 write_prompt 生成或覆盖任何片段稿/终稿，也不要自行 bind_resources 补绑定。apply_storyboard 若返回错误，把错误原文报告给用户并等指示，不要为了让它通过而顺手改提示词或删段。
+   **替换分镜 ≠ 生成提示词**：用户说「替换/应用/更新分镜」时，只允许 get_plan 读一次 + apply_storyboard（默认只替换结构，不带 with_prompts）；不要调用 write_prompt 生成或覆盖任何片段稿/终稿，也不要自行 bind_resources 补绑定，**也不要改用 set_task_modes 或逐段改任务轨来替代 apply_storyboard**；replace 分镜的唯一正确工具就是 apply_storyboard。apply_storyboard 若返回错误，把错误原文报告给用户并等指示，不要为了让它通过而顺手改提示词或删段。
 1. 用户不说工具名，按意图自己选，不要反问。
 2. 写提示词前先取上下文（get_prompt_context），令牌编号照绑定表抄，不要推断。
 3. 写完用 write_prompt；返回 needs_revision 就按 problems 改一次再写，不要 force 绕过。
