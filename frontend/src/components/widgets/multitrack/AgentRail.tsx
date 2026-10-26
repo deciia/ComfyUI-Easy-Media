@@ -2490,6 +2490,7 @@ export function AgentRail({
           '每段结尾必须有：全片画面不得出现任何文字、字幕、logo 或水印叠加。',
           '台词用 <d>[Chinese] …</d>；禁止 None / N/A / undefined',
         ],
+        enhancer_settings: (readWorkspace(projectKey) as { enhancerSettings?: unknown }).enhancerSettings ?? null,
         note: '这是上下文包，不是模板。按你的判断自由写，写完用 write_prompt 落库（会自动校验）。',
       }
     }

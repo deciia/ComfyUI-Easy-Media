@@ -672,6 +672,31 @@ export function PromptEnhancerModal({
     setActiveScriptIndex(index)
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
+  // 面板设置落盘：对话触发（不点按钮）时助手也能拿到同一套设置
+  useEffect(() => {
+    writeWorkspace(bindingProjectKey, {
+      enhancerSettings: {
+        official_skill_profile: options.official_skill_profile,
+        prompt_mode: options.prompt_mode,
+        creative_preset: options.creative_preset,
+        rewrite_mode: options.rewrite_mode,
+        description_word_target: options.description_word_target,
+        shot_count: options.shot_count,
+        constraints: options.constraints,
+        presets,
+      },
+    } as never)
+  }, [
+    bindingProjectKey,
+    options.official_skill_profile,
+    options.prompt_mode,
+    options.creative_preset,
+    options.rewrite_mode,
+    options.description_word_target,
+    options.shot_count,
+    options.constraints,
+    presets,
+  ])
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
   const [busy, setBusy] = useState(false)
