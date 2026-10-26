@@ -671,6 +671,7 @@ export function PromptEnhancerModal({
     setActiveScriptIndex(index)
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
+  const [workspaceStoreVersion, setWorkspaceStoreVersion] = useState(0)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
   const [view, setView] = useState<'main' | 'settings'>('main')
   const [busy, setBusy] = useState(false)
@@ -734,7 +735,6 @@ export function PromptEnhancerModal({
   const libraryNames = useMemo(() => readSubjectLibraryNames(), [])
   // 主体/资源统一走「项目资源」表（含迁移）：关弹窗、刷新都不丢
   const workspaceKey = projectName || 'default'
-  const [workspaceStoreVersion, setWorkspaceStoreVersion] = useState(0)
   useEffect(() => {
     ensureHydrated(workspaceKey)
     const cached = readWorkspace(workspaceKey)
