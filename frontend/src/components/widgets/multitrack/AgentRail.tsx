@@ -1959,7 +1959,7 @@ export function AgentRail({
       if (identityAsPicture) {
         problems.push({
           level: 'error',
-          message: '用 <Picture> 定义人物身份/四视图；人物必须用 <Subject n> 承载（先升格为主体再引用），这是 H3 结构错误，不是可选项',
+          message: '用 <Picture> 单独定义人物/四视图属结构错误。改法：把图并入主体行——`<Subject 1> is <是什么> in <Picture 1>, with <要跟随的特征>`；不要因为这条退回就删掉正文里其它合法的 <Picture n> 引用。',
         })
       }
       // 令牌与紧随其后的括号内名称必须一致（防止 <Picture 2>（工作台） 但工作台其实是 Picture 1）
