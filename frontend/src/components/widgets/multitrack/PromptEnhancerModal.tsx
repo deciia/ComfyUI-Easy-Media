@@ -658,9 +658,16 @@ export function PromptEnhancerModal({
       | null
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
     const label = kind === 'fragment' ? '片段提示词' : '最终提示词'
-    const count = segments.filter((segment) => kind === 'fragment'
-      ? String(segment.promptA ?? '').trim() || String(segment.promptB ?? '').trim()
-      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim()).length
+    // 片段稿有四个来源：promptA/promptB + 分镜段自带的 user_prompt（切段时会被物化回 promptA）
+    const fragmentHasText = (segment: Record<string, unknown>) => Boolean(
+      String(segment.promptA ?? '').trim()
+      || String(segment.promptB ?? '').trim()
+      || String(segment.user_prompt ?? '').trim()
+      || String(segment.user_prompt_b ?? '').trim(),
+    )
+    const count = segments.filter((segment) => (kind === 'fragment'
+      ? fragmentHasText(segment)
+      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim())).length
     if (!count) {
       setClearArmed('')
       setClearNotice(`全部 ${segments.length} 段的${label}都是空的，无需清空`)
@@ -674,7 +681,7 @@ export function PromptEnhancerModal({
       return
     }
     const next = segments.map((segment) => (kind === 'fragment'
-      ? { ...segment, promptA: '', promptB: '' }
+      ? { ...segment, promptA: '', promptB: '', user_prompt: '', user_prompt_b: '' }
       : { ...segment, finalA: '', finalB: '' }))
     writeWorkspace(bindingProjectKey, { plan: { ...(planNow as Record<string, unknown>), segments: next } as never })
     if (kind === 'fragment') {
@@ -692,9 +699,9 @@ export function PromptEnhancerModal({
     setClearArmed('')
     // 回读校验：确认真写进去了，并把真实结果报给用户
     const after = (readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null)?.segments ?? []
-    const remaining = after.filter((segment) => kind === 'fragment'
-      ? String(segment.promptA ?? '').trim() || String(segment.promptB ?? '').trim()
-      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim()).length
+    const remaining = after.filter((segment) => (kind === 'fragment'
+      ? fragmentHasText(segment)
+      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim())).length
     setClearNotice(remaining
       ? `已清空 ${count} 段，但回读发现还有 ${remaining} 段非空（写入未完全生效，请刷新后重试）`
       : `已清空全部 ${count} 段的${label}（共 ${after.length} 段，回读确认已空）`)
