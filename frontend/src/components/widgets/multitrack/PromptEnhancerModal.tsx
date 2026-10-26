@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, Eraser, ListPlus, Save, Settings, Sparkles, Trash2, X } from 'lucide-react'
+import { Check, Copy, ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
 import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
@@ -1675,26 +1675,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               type="button"
               variant="ghost"
               size="icon"
-              title="清空所有片段提示词（A/B 稿）"
-              className="h-7 w-7"
-              onClick={() => clearAllPrompts('fragment')}
-            >
-              <Eraser className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              title="清空所有最终提示词（A/B 终稿）"
-              className="h-7 w-7"
-              onClick={() => clearAllPrompts('final')}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
               title="整项目保存到任务轨（含各段终稿提示词）"
               className="h-7 w-7"
               onClick={() => setSaveCheckOpen((value) => !value)}
@@ -2434,6 +2414,24 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       ⤓ 分镜→片段
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="rounded px-1.5 py-0.5 text-[10px]"
+                    style={{ border: `1px solid ${BORDER}`, color: '#fbbf24' }}
+                    title="清空全部段的片段提示词（A/B 稿）"
+                    onClick={() => clearAllPrompts('fragment')}
+                  >
+                    清空片段稿
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded px-1.5 py-0.5 text-[10px]"
+                    style={{ border: `1px solid ${BORDER}`, color: '#fbbf24' }}
+                    title="清空全部段的最终提示词（A/B 终稿）"
+                    onClick={() => clearAllPrompts('final')}
+                  >
+                    清空终稿
+                  </button>
                 </div>
               <div className="text-[11px] text-neutral-500">
                 片段提示词：白话描述即可（分镜脚本 + 主体/资源），不需要六段式；生成终稿时再规范化。
