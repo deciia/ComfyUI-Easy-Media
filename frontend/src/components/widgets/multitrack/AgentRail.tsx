@@ -107,7 +107,7 @@ export function AgentRail({
   const heightDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   useEffect(() => {
     const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
-    registry.__easyMediaAgentAsk = (text: string) => { void sendStepLoop(text) }
+    registry.__easyMediaAgentAsk = (text: string) => { void sendStepLoop(text, true) }
     return () => { delete registry.__easyMediaAgentAsk }
   })
 
@@ -3815,7 +3815,7 @@ export function AgentRail({
     }
   }
 
-  async function sendStepLoop(textOverride?: string) {
+  async function sendStepLoop(textOverride?: string, asTask = false) {
     const text = String(textOverride ?? input).trim()
     if (!text) return
     // 纯工具名（如 dump_state / list_bindings）→ 直接执行，不经过模型
@@ -3827,6 +3827,16 @@ export function AgentRail({
       return
     }
     if (busy) {
+      if (asTask) {
+        // 按钮派单是「新任务」，不是中途插话：排到本轮结束后执行，避免模型只回一句收到
+        writeWorkspace(projectKey, { pendingTask: text } as never)
+        setInput('')
+        patchWorkspaceMessages(projectKey, (current) => [
+          ...current,
+          { id: `u-task-${Date.now()}`, role: 'user', text: `（排队任务：本轮结束后执行）${text}` },
+        ])
+        return
+      }
       // Toonflow 式 steer：运行中允许插话，循环会在下一步之间插入
       writeWorkspace(projectKey, { pendingInject: text } as never)
       setInput('')
@@ -4310,8 +4320,14 @@ export function AgentRail({
     } finally {
       abortRef.current = null
       progressRef.current = null
-      writeWorkspace(projectKey, { agentBusy: false, pendingInject: '' } as never)
+      const queuedTask = String((readWorkspace(projectKey) as { pendingTask?: string }).pendingTask ?? '').trim()
+      writeWorkspace(projectKey, {
+        agentBusy: false,
+        pendingInject: '',
+        ...(queuedTask ? { pendingTask: '' } : {}),
+      } as never)
       setBusy(false)
+      if (queuedTask) window.setTimeout(() => { void sendStepLoop(queuedTask, true) }, 0)
     }
   }
 
