@@ -65,6 +65,8 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
    用户也可能直接在对话里说「生成第 N 段终稿」——这时没有派单，规则不变：先 get_prompt_context 取绑定与保留项，
    再按下面同一套六段写法与 Audio 角色规则写，最后 write_prompt(target=final)。不要因为没派单就写得简略、换格式或省略六段。
    派单只是「本次任务的事实 + 范围」，不是规则本身；规则以本提示与相关技能为准。
+   对话触发时，get_prompt_context 返回里有 enhancer_settings（规范来源/提示词模式/硬要求/字数/镜头数/偏好预设）；
+   按它执行；为 null 时用默认，并在回报里说明「未读到面板设置，用了默认」。
    不要顺手补绑定、不要跑 verify_project、不要写任务轨、不要 set_task_modes、不要改其它段，除非派单里点名。
 1. 用户不说工具名，按意图自己选，不要反问。
 2. 写提示词前先取上下文（get_prompt_context），令牌编号照绑定表抄，不要推断。
