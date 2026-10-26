@@ -690,8 +690,15 @@ export function PromptEnhancerModal({
       lastPushedRef.current = { ...lastPushedRef.current, finalA: '', finalB: '' }
     }
     setClearArmed('')
-    setClearNotice(`已清空全部 ${count} 段的${label}（可用 Ctrl+Z 撤回一次）`)
-    window.setTimeout(() => setClearNotice(''), 5000)
+    // 回读校验：确认真写进去了，并把真实结果报给用户
+    const after = (readWorkspace(bindingProjectKey).plan as { segments?: Array<Record<string, unknown>> } | null)?.segments ?? []
+    const remaining = after.filter((segment) => kind === 'fragment'
+      ? String(segment.promptA ?? '').trim() || String(segment.promptB ?? '').trim()
+      : String(segment.finalA ?? '').trim() || String(segment.finalB ?? '').trim()).length
+    setClearNotice(remaining
+      ? `已清空 ${count} 段，但回读发现还有 ${remaining} 段非空（写入未完全生效，请刷新后重试）`
+      : `已清空全部 ${count} 段的${label}（共 ${after.length} 段，回读确认已空）`)
+    window.setTimeout(() => setClearNotice(''), 8000)
   }
   const [options, setOptions] = useState<EnhancerOptions>(DEFAULT_OPTIONS)
   const [config, setConfig] = useState<ProviderConfig>(DEFAULT_CONFIG)
@@ -2297,7 +2304,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       disabled={busy || translating}
                       onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
                     >
-                      生成英文➡️
+                      英文➡️
                     </Button>
                     <Button
                       variant="secondary"
@@ -2305,16 +2312,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       disabled={busy || translating}
                       onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
                     >
-                      生成中文➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      style={{ color: clearArmed === 'fragment' ? '#f87171' : '#fbbf24' }}
-                      title="清空全部段的片段提示词（A/B 稿），两步确认"
-                      onClick={() => clearAllPrompts('fragment')}
-                    >
-                      {clearArmed === 'fragment' ? '确认清空片段稿？' : '清空片段稿'}
+                      中文➡️
                     </Button>
                     <Button
                       variant="secondary"
@@ -2450,6 +2448,15 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                       ⤓ 分镜→片段
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="rounded px-1.5 py-0.5 text-[10px]"
+                    style={{ border: `1px solid ${BORDER}`, color: clearArmed === 'fragment' ? '#f87171' : '#fbbf24' }}
+                    title="清空全部段的片段提示词（A/B 稿），两步确认"
+                    onClick={() => clearAllPrompts('fragment')}
+                  >
+                    {clearArmed === 'fragment' ? '确认清空片段稿？' : '清空片段稿'}
+                  </button>
                 </div>
               <div className="text-[11px] text-neutral-500">
                 片段提示词：白话描述即可（分镜脚本 + 主体/资源），不需要六段式；生成终稿时再规范化。
