@@ -4703,10 +4703,15 @@ export function AgentRail({
             }
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault()
-              void sendStepLoop()
-            }
+            if (event.key !== 'Enter') return
+            // Shift+Enter 换行；Ctrl/Cmd+Enter 一直可发送
+            if (event.shiftKey) return
+            if (event.nativeEvent.isComposing) return
+            // @ 提及列表展开时，Enter 先不发送，避免误发
+            if (mentionQuery !== null && mentionOptions.length > 0) return
+            if (!event.metaKey && !event.ctrlKey && busy) return
+            event.preventDefault()
+            void sendStepLoop()
           }}
         />
         {mentionQuery !== null && mentionOptions.length > 0 && (
