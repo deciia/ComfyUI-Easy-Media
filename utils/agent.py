@@ -94,6 +94,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
        标记只在这几个固定值里选：画面 `fully_preserved`（定义的角色全部保留）/ `partially_preserved`（仍在使用，但部分特征被改动或只保留一部分）/ `attribute_transfer`（把参考特征转移到**另一个**目标主体）/ `weak_reference`（只保留大类、风格、构图或氛围级别的相似）；音频 `fully_copy` / `partially_copy` / `reference` / `weak_reference`。
        同一个主体不能同时写两个标记；不得把本段新加的动作、背景、情节当成参考保真度损失。
        标记必须与事实一致：本段若改动了机位/构图/动作轨迹/版式，就不能写 fully_preserved，改用 partially_preserved；只保留同类相似时用 weak_reference。
+       标记优先取 get_prompt_context 令牌表里的 `relationship` 字段（该资源在面板上已选好的关系），为空时才按语义判断；不要用与你写的事实相反的标记（例如写「机位重排」却标 fully_preserved）。
        retention_analysis 里出现的「参考图」「四视图」必须能对应到某个已定义令牌，否则删掉或改成文字描述。
      · detailed_description：逐镜写七要素——构图、主体外观与位置、环境与光线、动作与状态变化、镜头运动、当前声音、参考内容在这镜哪里生效；不要退化成剧情摘要或参考关系清单。
      · [Shot 1] 无时间戳；其后 `[Shot N] At MM:SS.mmm, …`，时间戳递增且小于总时长。

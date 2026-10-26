@@ -1413,6 +1413,7 @@ function askAgentGenerate(language: '中文' | 'English') {
     'retention_analysis：只列本段出现过的令牌，一令牌一行，用**半角**格式照官方样例写：`<Subject 1> (appears in [Shot 1], [Shot 3]): fully_preserved - …`；`<Picture 2> ([Shot 1] first frame): fully_preserved - …`；`<Audio 1>: reference - the target speaker follows <Audio 1>\'s voice timbre and measured delivery without copying the original signal.`',
     '标记只能取固定值：画面 fully_preserved（角色全部保留）/ partially_preserved（仍在用但部分特征改动）/ attribute_transfer（特征转移到**另一个**目标主体）/ weak_reference（只保留风格·构图·氛围级相似）；音频 fully_copy / partially_copy / reference / weak_reference。一个令牌只写一个标记；新加的动作与背景不算保真度损失。',
     '标记必须与事实一致：本段若改动了机位/构图/动作轨迹/版式，就**不能**写 fully_preserved，改用 partially_preserved；只保留同类相似时用 weak_reference。',
+    '标记优先取 get_prompt_context 里每个令牌的 relationship 字段（面板上已选好的关系）；为空才按语义判断，且不得与你自己写的事实相反。',
     'detailed_description：逐镜写七要素——构图、主体外观与位置、环境与光线、动作与状态变化、镜头运动、当前声音、参考内容在这镜哪里生效；不要写成剧情摘要或参考关系清单。',
     `detailed_description 时间码：` + '[Shot 1] 无时间戳；其后 `[Shot N] At MM:SS.mmm, …`，递增且小于总时长。',
     '台词只在视觉时间线：`<Subject n> (Sx) says: <d>[Chinese] 原文</d>`；(Sx) 不进定义行、不进 <d>；与分镜一字不改。',
