@@ -1340,7 +1340,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   // 分镜编排：把规划结果落成任务轨片段（只由弹窗「应用到任务轨」调用）
   useEffect(() => {
-    const applyStoryboard = (items: Array<{
+    const VALID_TASK_MODES = new Set(['R2V', 'FMLF2V', 'VI2V', 'L2V', 'Pass'])
+  const applyStoryboard = (items: Array<{
       id?: string
       name: string
       durationFrames: number
@@ -1383,7 +1384,10 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             ...previous,
             media_type: 'none',
             stable_key: stableKey,
-            task_mode: (item.taskMode as never) ?? (previous.task_mode as never) ?? 'default',
+            // 任务类型只写节点认识的值；没有就沿用该段原值，绝不写 'default'
+      task_mode: (VALID_TASK_MODES.has(String(item.taskMode ?? '').trim())
+        ? String(item.taskMode).trim()
+        : (previous.task_mode as never)) as never,
             continuity_mode: (item.continuityMode as never) ?? (previous.continuity_mode as never) ?? undefined,
             ref_image_size: (item.refImageSize as never) ?? (previous.ref_image_size as never) ?? undefined,
             ...(item.images && item.images.length
