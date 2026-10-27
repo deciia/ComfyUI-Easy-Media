@@ -1128,7 +1128,6 @@ export function AgentRail({
       }
       const nextSegments = [...segments.slice(0, after), newSegment, ...segments.slice(after)]
       writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
-      if (expectedTarget) writeWorkspace(projectKey, { pendingWriteTarget: undefined } as never)
       return { ok: true, inserted_at: after + 1, total: nextSegments.length }
     }
     if (name === 'delete_segment') {
@@ -2661,6 +2660,7 @@ export function AgentRail({
           : item
       ))
       writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
+      if (expectedTarget) writeWorkspace(projectKey, { pendingWriteTarget: undefined } as never)
 
       let taskWrite: Record<string, unknown> | null = null
       if (args.to_task_track === true) {
@@ -2686,6 +2686,7 @@ export function AgentRail({
         ok: true,
         segment: index,
         variant,
+        target: rawTarget,
         length: text.length,
         audit,
         advice: audit.problems.filter((item) => item.level === 'advice').map((item) => String(item.message ?? '')),
