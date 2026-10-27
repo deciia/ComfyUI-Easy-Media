@@ -85,6 +85,8 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
      先 plan_assets 读一遍，再按 planned_resources_by_segment / existing_resources / task_track_assets 逐段对照，
      用 revise_storyboard 或 update_segment 只改各段的 resources（已有资源按原名换进去、删掉重复和多余项），
      最后报告「改前 → 改后」。
+     plan_assets 返回 summary.needs_rename 非空时必须逐段调用 update_segment(resources=[...]) 真正改掉再报告；
+     只报告不改、或去动资源池/主体/提示词，都算没完成任务。
      这一类请求下**不得调用 write_prompt**，也不改镜头、台词、时长。
    · 片段稿 → write_prompt(target=fragment)
    · 终稿 → write_prompt(target=final)
