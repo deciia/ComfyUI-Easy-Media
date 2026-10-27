@@ -218,10 +218,33 @@ export function StoryboardTab({
       ) : null}
       {(planSegment.resources ?? []).length > 0 ? (() => {
         const pool = readWorkspace(projectKey).resources ?? []
+        // 名称归一化：去扩展名/空白/标点，小写
+        const norm = (text: string) => String(text ?? '')
+          .replace(/\.[a-z0-9]{2,5}\$/i, '')
+          .replace(/[\s_\-—·、,，.。()（）【】\[\]]/g, '')
+          .toLowerCase()
+        // 双向包含即视为同一个资源：「老赵」↔「老赵四视图」、「油嘴总成」↔「油嘴总成6支」
+        const sameResource = (a: string, b: string) => {
+          if (!a || !b) return false
+          if (a === b) return true
+          const min = Math.min(a.length, b.length)
+          if (min < 2) return false
+          return a.includes(b) || b.includes(a)
+        }
         const statusOf = (name: string) => {
-          const hit = pool.find((item) => item.type !== 'Subject' && item.name === name)
-          if (!hit) return 'absent'
-          return hit.status === 'ready' ? 'ready' : 'need'
+          const target = norm(name)
+          const candidates = pool.filter((item) => item.type !== 'Subject')
+          const exact = candidates.find((item) => norm(item.name) === target)
+          const loose = exact ?? candidates.find((item) => {
+            const poolName = norm(item.name)
+            if (!poolName) return false
+            if (sameResource(poolName, target)) return true
+            // 文件名也参与比对，例如资源名与 picture 文件名不同
+            const file = norm(String(item.imageFile ?? item.audioFile ?? item.videoFile ?? ''))
+            return Boolean(file) && (file.includes(target) || target.includes(file))
+          })
+          if (!loose) return 'absent'
+          return loose.status === 'ready' ? 'ready' : 'need'
         }
         const entries = planSegment.resources as Array<{ kind?: string; name: string }>
         const readyCount = entries.filter((item) => statusOf(item.name) === 'ready').length
