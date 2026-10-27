@@ -595,11 +595,14 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'get_prompt_context',
-        description: '写提示词前先取上下文包：该段脚本要点、时长、任务类型/衔接、绑定资源与可用令牌编号（明确到 1..n）、已有 A/B 稿、写作检查清单。拿它之后再自由写作，不需要按固定模板填。',
+        description: '写提示词前先取上下文包：该段脚本要点、时长、任务类型/衔接、绑定资源与可用令牌编号（明确到 1..n）、已有 A/B 稿，以及**按你要写的稿种**给出的写作检查清单（fragment=片段稿清单，final=终稿六段清单）。拿它之后再自由写作。',
         parameters: {
           type: 'object',
-          properties: { index: { type: 'number', description: '段号，1 起' } },
-          required: ['index'],
+          properties: {
+            index: { type: 'number', description: '段号，1 起' },
+            target: { type: 'string', enum: ['fragment', 'final'], description: '这次要写哪种稿：fragment=片段稿，final=最终提示词。清单会按它给，别混用。' },
+          },
+          required: ['index', 'target'],
         },
       },
     },
@@ -2530,6 +2533,7 @@ export function AgentRail({
 
     if (name === 'get_prompt_context') {
       const index = Number(args.index ?? 0)
+      const wantedKind = String(args.target ?? '').trim() === 'fragment' ? 'fragment' : 'final'
       const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
       const segment = planSegments[index - 1]
@@ -2581,14 +2585,20 @@ export function AgentRail({
           final_a_len: String(segment.finalA ?? '').length,
           final_b_len: String(segment.finalB ?? '').length,
         },
-        checklist: [
-          '六段式键名：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music',
-          '人物与招牌物用 <Subject n> 定义身份；场景/道具用 <Picture n>',
-          `编号不得越界：Subject ≤ ${subjectNo}，Picture ≤ ${pictureNo}，Audio ≤ ${audioNo}，Video ≤ ${videoNo}`,
-          '每个令牌在声明处写一次，detailed_description 只在真正要对齐的镜头点一次（总引用 ≤ 绑定数×2）',
-          '每段结尾必须有：全片画面不得出现任何文字、字幕、logo 或水印叠加。',
-          '台词用 <d>[Chinese] …</d>；禁止 None / N/A / undefined',
-        ],
+        checklist: wantedKind === 'fragment'
+          ? [
+              '片段稿是白话工作稿：概述 / 钩子 / [Shot N] / <d>[Chinese] 台词</d> / 声音，标签与内容同一行',
+              '不要写六段式键名（subject_definitions 等是终稿才需要的）',
+              `编号不得越界：Subject ≤ ${subjectNo}，Picture ≤ ${pictureNo}，Audio ≤ ${audioNo}，Video ≤ ${audioNo}`,
+              '人物与场景按令牌写进句子，不要列素材清单；不写文件名、不写标题行',
+            ]
+          : [
+              '六段式键名：subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music',
+              '人物与招牌物用 <Subject n> 定义身份；场景/道具用 <Picture n>',
+              `编号不得越界：Subject ≤ ${subjectNo}，Picture ≤ ${pictureNo}，Audio ≤ ${audioNo}，Video ≤ ${videoNo}`,
+              'subject_definitions 里每条都要引用它依据的图片令牌；retention 用官方标记',
+              '时间戳写 At MM:SS.mmm，台词用 <d>[Chinese] …</d>，结尾带禁字幕句',
+            ],
         enhancer_settings: (readWorkspace(projectKey) as { enhancerSettings?: unknown }).enhancerSettings ?? null,
         note: '这是上下文包，不是模板。按你的判断自由写，写完用 write_prompt 落库（会自动校验）。',
       }
@@ -2624,18 +2634,6 @@ export function AgentRail({
           instruction: '这次什么都没写入。按用户要求重新调用，带上 target=…（片段稿用 fragment，终稿用 final）。',
         }
       }
-      // 派单意图（片段稿 / 终稿）以数据形式带过来：写错那种稿就退回，什么都不写
-      const expectedTarget = readWorkspace(projectKey).pendingWriteTarget
-      if (expectedTarget && expectedTarget !== rawTarget) {
-        return {
-          ok: false,
-          needs_revision: true,
-          problems: [
-            `本次派单要求写${expectedTarget === 'fragment' ? '片段稿（fragment）' : '最终提示词（final）'}，你传的是 ${rawTarget}`,
-          ],
-          instruction: '这次什么都没写入。按派单要求的 target 重新调用；不要顺手改另一种稿子。',
-        }
-      }
       const isFragmentWrite = rawTarget === 'fragment'
       const errors = audit.problems.filter((item) => (
         !isFragmentWrite || /编号到|None|undefined/.test(String(item.message ?? ''))
@@ -2660,7 +2658,6 @@ export function AgentRail({
           : item
       ))
       writeWorkspace(projectKey, { plan: { ...(planNow as Record<string, unknown>), segments: nextSegments } as never })
-      if (expectedTarget) writeWorkspace(projectKey, { pendingWriteTarget: undefined } as never)
 
       let taskWrite: Record<string, unknown> | null = null
       if (args.to_task_track === true) {
