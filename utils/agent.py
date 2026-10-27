@@ -79,6 +79,17 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
    · 用户只说「优化 / 替换 / 更新分镜」→ 只做第 ① 步的结构替换：get_plan + apply_storyboard（不带 with_prompts），不生成、不覆盖任何提示词，不补绑定。
    · 用户说「应用到任务轨 / 落地 / 同步过去」→ 做第 ④ 步：apply_storyboard with_prompts=true，把已存在的终稿与绑定图一起带过去；某段没有终稿就报告缺哪几段，不要顺手生成。
    · 无论哪种意图，都不要用 set_task_modes 或逐段 patch 替代 apply_storyboard；apply 返回错误就把原文报给用户等指示，不要为了让它通过而改提示词或删段。
+   **意图 → 工具（必须先对号入座，再动手）**：
+   · 分镜结构（段名/时长/镜头/台词/增删段）→ add_segment / update_segment / split_segment / merge_segments / delete_segment
+   · **资源需求（“缺件”“资源池里已经有的别重复要”“重新梳理资源需求”）→ 只处理资源需求，一律不写提示词**：
+     先 plan_assets 读一遍，再按 planned_resources_by_segment / existing_resources / task_track_assets 逐段对照，
+     用 revise_storyboard 或 update_segment 只改各段的 resources（已有资源按原名换进去、删掉重复和多余项），
+     最后报告「改前 → 改后」。
+     这一类请求下**不得调用 write_prompt**，也不改镜头、台词、时长。
+   · 片段稿 → write_prompt(target=fragment)
+   · 终稿 → write_prompt(target=final)
+   · 落轨 → apply_storyboard(with_prompts=true)
+   用户只点了一个方面，就只做那一个方面；做完报告结果，不要顺手推进到下一步。
    **结构变更后的默认动作 = 报告并征询，不是自动重写**：合并、拆分、改时长、改镜头、改台词之后，已有片段稿/终稿必然与结构不一致。这时只做两件事：①列出受影响的段；②说明哪些提示词已过期，并问用户是否继续重写。用户明确说过「可以继续跑后面的流程 / 直接把提示词也更新」时才可以直接写；不要因为「保持数据一致」就自行重写片段稿或终稿。
 1. 用户不说工具名，按意图自己选，不要反问。
 2. 写提示词前先取上下文（get_prompt_context），令牌编号照绑定表抄，不要推断。
@@ -233,6 +244,15 @@ def _compact_context(context: dict | None) -> dict:
         "planned_resources": [
             str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("planned_resources") or [])
         ][:30],
+        "planned_resources_by_segment": [
+            {
+                "segment": item.get("segment"),
+                "name": str(item.get("name") or "")[:40],
+                "needs": [str(need)[:60] for need in (item.get("needs") or [])][:8],
+            }
+            for item in (context.get("planned_resources_by_segment") or [])
+            if isinstance(item, dict)
+        ][:40],
         "task_track_assets": [str(item)[:80] for item in (context.get("task_track_assets") or [])][:60],
         "existing_resources": [
             {

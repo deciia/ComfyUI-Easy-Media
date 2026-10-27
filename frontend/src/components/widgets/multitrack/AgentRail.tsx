@@ -3917,6 +3917,30 @@ export function AgentRail({
       if (agent.includeManualResources) {
         context.planned_resources = resources.map((resource) => resource.name)
       }
+      // 分镜脚本里逐段的资源需求（带段号），便于按段梳理
+      {
+        const planNow = readWorkspace(projectKey).plan as
+          | { segments?: Array<Record<string, unknown>> }
+          | null
+        const rows = (planNow?.segments ?? []).slice(0, 40).map((seg, index) => {
+          const needs = (Array.isArray(seg.resources) ? seg.resources : []) as Array<Record<string, unknown>>
+          return {
+            segment: index + 1,
+            name: String(seg.name ?? ''),
+            needs: needs
+              .map((item) => {
+                const kind = String(item.kind ?? item.type ?? '').trim()
+                const name = String(item.name ?? '').trim()
+                const purpose = String(item.for ?? item.purpose ?? '').trim()
+                if (!name) return ''
+                return `${kind ? `${kind}:` : ''}${name}${purpose ? `（${purpose}）` : ''}`
+              })
+              .filter(Boolean)
+              .slice(0, 8),
+          }
+        })
+        if (rows.some((row) => row.needs.length)) context.planned_resources_by_segment = rows
+      }
       // 任务轨已用到的素材（文件名去重）：同样视为"已有"，不要重复索要
       {
         const used = new Set<string>()
