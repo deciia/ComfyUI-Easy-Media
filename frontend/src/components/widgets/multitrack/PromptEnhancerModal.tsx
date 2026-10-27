@@ -2559,7 +2559,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                           title={`${item.token}${item.unbound ? '（未绑定，仅文本令牌）' : ''}`}
                         >
                           {item.unbound ? '⚠ ' : ''}{item.name || item.token}
-                          {item.name ? <span className="ml-1 text-[9px] uppercase opacity-70">{item.token}</span> : null}
+                          {item.name ? <span className="ml-1 text-[9px] opacity-70">{item.token}</span> : null}
                           {item.unbound ? <span className="ml-1 text-[9px] opacity-70">未绑定</span> : null}
                         </span>
                       )

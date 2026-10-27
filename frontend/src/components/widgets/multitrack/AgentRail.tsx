@@ -614,12 +614,12 @@ export function AgentRail({
             index: { type: 'number', description: '段号，1 起' },
             text: { type: 'string', description: '完整提示词正文' },
             variant: { type: 'string', enum: ['a', 'b'], description: '写 A 还是 B（默认 a）' },
-            target: { type: 'string', enum: ['final', 'fragment'], description: 'final=最终提示词（默认）；fragment=片段提示词' },
+            target: { type: 'string', enum: ['final', 'fragment'], description: '必填：final=最终提示词，fragment=片段提示词。不写会被拒绝，工具不会替你选' },
             auto_align: { type: 'boolean', description: '默认 false：发现令牌编号与绑定不符时退回让你自己改；true 则由工具直接对齐编号（不改文字）' },
             to_task_track: { type: 'boolean', description: '同时写入任务轨（默认 false）' },
             force: { type: 'boolean', description: '忽略校验错误强写（默认 false）' },
           },
-          required: ['index', 'text'],
+          required: ['index', 'text', 'target'],
         },
       },
     },
@@ -2615,7 +2615,16 @@ export function AgentRail({
       const segment = planSegments[index - 1]
       if (!segment) return { error: `段 ${index} 不存在` }
       const audit = auditPrompt(index - 1, text)
-      const isFragmentWrite = String(args.target ?? 'final') === 'fragment'
+      const rawTarget = String(args.target ?? '').trim()
+      if (rawTarget !== 'fragment' && rawTarget !== 'final') {
+        return {
+          ok: false,
+          needs_revision: true,
+          problems: ['缺少 target：必须说明写片段稿（fragment）还是最终提示词（final）'],
+          instruction: '这次什么都没写入。按用户要求重新调用，带上 target=…（片段稿用 fragment，终稿用 final）。',
+        }
+      }
+      const isFragmentWrite = rawTarget === 'fragment'
       const errors = audit.problems.filter((item) => (
         !isFragmentWrite || /编号到|None|undefined/.test(String(item.message ?? ''))
       )).filter((item) => item.level === 'error')
@@ -2632,7 +2641,7 @@ export function AgentRail({
         i === index - 1
           ? {
                 ...item,
-                ...(String(args.target ?? 'final') === 'fragment'
+                ...(isFragmentWrite
                   ? (variant === 'b' ? { promptB: text } : { promptA: text })
                   : (variant === 'b' ? { finalB: text } : { finalA: text })),
               }
