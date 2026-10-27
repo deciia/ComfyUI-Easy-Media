@@ -1916,9 +1916,16 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                           brief: formatPlanSegmentBrief(segment as never),
                           prompt,
                           stableKey: String((segment as { stable_key?: string }).stable_key ?? ''),
-                          taskMode: String(settings.taskType ?? '') || undefined,
-                          continuityMode: String(settings.contextMode ?? '') || undefined,
-                          refImageSize: String(settings.refImageSize ?? '') || undefined,
+                          // 段级覆盖 > 脚本级 plan.settings > 不传（沿用任务轨原值）
+                          taskMode: String(settings.taskType ?? '').trim()
+                            || String(((plan as { settings?: Record<string, unknown> } | null)?.settings?.taskType) ?? '').trim()
+                            || undefined,
+                          continuityMode: String(settings.contextMode ?? '').trim()
+                            || String(((plan as { settings?: Record<string, unknown> } | null)?.settings?.contextMode) ?? '').trim()
+                            || undefined,
+                          refImageSize: String(settings.refImageSize ?? '').trim()
+                            || String(((plan as { settings?: Record<string, unknown> } | null)?.settings?.refImageSize) ?? '').trim()
+                            || undefined,
                           images,
                         }
                       }))
