@@ -103,6 +103,8 @@ export function StoryboardTab({
   const [importedNote, setImportedNote] = useState('')
   const [, setStoreVersion] = useState(0)
   const [planFocus, setPlanFocus] = useState<number | null>(null)
+  /** 分镜脚本详情是否处于编辑态：默认只读，点「编辑」才可改 */
+  const [planEditing, setPlanEditing] = useState(false)
 
   const plan = (readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null
   const busy = Boolean(readWorkspace(projectKey).agentBusy)
@@ -114,6 +116,10 @@ export function StoryboardTab({
       setStoreVersion((value) => value + 1)
     })
   }, [projectKey])
+
+  useEffect(() => {
+    setPlanEditing(false)
+  }, [planFocus])
 
   // 标题栏 💾：草稿已自动持久化，这里给个确认反馈
   useEffect(() => {
@@ -183,158 +189,206 @@ export function StoryboardTab({
   const planDetail = planSegment ? (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[12px] text-muted-foreground">{planSegment.index}.</span>
-        <input
-          defaultValue={planSegment.name}
-          placeholder="段名"
-          className="min-w-32 rounded px-1.5 py-0.5 text-[13px] font-medium outline-none"
-          style={fieldStyle}
-          onBlur={(event) => {
-            if (event.target.value !== planSegment.name) patchPlanSegment(planFocus as number, { name: event.target.value })
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
-          }}
-        />
-        <input
-          defaultValue={planSegment.beat ?? ''}
-          placeholder="钩子/beat"
-          className="w-24 rounded px-1.5 py-0.5 text-[10px] outline-none"
-          style={fieldStyle}
-          onBlur={(event) => {
-            if (event.target.value !== (planSegment.beat ?? '')) patchPlanSegment(planFocus as number, { beat: event.target.value })
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
-          }}
-        />
-        <span className="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
-          <input
-            type="number"
-            step="0.5"
-            min="0.5"
-            defaultValue={planSegment.duration_seconds}
-            className="w-16 rounded px-1 py-0.5 text-[11px] outline-none"
-            style={fieldStyle}
-            onBlur={(event) => {
-              const next = Number(event.target.value)
-              if (Number.isFinite(next) && next > 0 && next !== planSegment.duration_seconds) {
-                patchPlanSegment(planFocus as number, { duration_seconds: next })
-              }
-            }}
-          />
-          s · {planSegment.duration_frames}f · {(planSegment.shots ?? []).length} 镜
+        <span className="text-[13px] font-medium">{planSegment.index}. {planSegment.name}</span>
+        {planSegment.beat ? (
+          <span className="rounded-full px-1.5 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>{planSegment.beat}</span>
+        ) : null}
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {planSegment.duration_seconds}s · {planSegment.duration_frames}f · {(planSegment.shots ?? []).length} 镜
         </span>
         <span className="ml-auto" />
+        <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => setPlanEditing((value) => !value)}>
+          {planEditing ? '完成' : '编辑'}
+        </Button>
         <Button size="sm" variant="secondary" className="h-6 px-2 text-[11px]" onClick={() => setPlanFocus(null)}>
           返回整版
         </Button>
       </div>
-      <textarea
-        defaultValue={planSegment.summary ?? ''}
-        placeholder="本段概述（剧情/情绪/要点）"
-        rows={2}
-        className="w-full resize-y rounded px-1.5 py-1 text-[12px] leading-relaxed outline-none"
-        style={fieldStyle}
-        onBlur={(event) => {
-          if (event.target.value !== (planSegment.summary ?? '')) patchPlanSegment(planFocus as number, { summary: event.target.value })
-        }}
-      />
-      <textarea
-        defaultValue={planSegment.director_note ?? ''}
-        placeholder="导演说明"
-        rows={2}
-        className="w-full resize-y rounded px-1.5 py-1 text-[11px] leading-relaxed outline-none"
-        style={fieldStyle}
-        onBlur={(event) => {
-          if (event.target.value !== (planSegment.director_note ?? '')) patchPlanSegment(planFocus as number, { director_note: event.target.value })
-        }}
-      />
-      <div className="flex flex-col gap-1">
-        {((planSegment.shots ?? []) as unknown as Array<Record<string, unknown>>).map((shotAny, shotIndex) => {
-          const dialogue = (shotAny.dialogue as Array<{ speaker?: string; line?: string }> | undefined) ?? []
-          const commitShot = (key: string) => (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-            const next = event.target.value
-            if (next !== String(shotAny[key] ?? '')) patchShot(planFocus as number, shotIndex, { [key]: next })
-          }
-          const commitLine = (lineIndex: number, key: 'speaker' | 'line') => (event: React.FocusEvent<HTMLInputElement>) => {
-            const next = event.target.value
-            const before = dialogue[lineIndex]?.[key] ?? ''
-            if (next === before) return
-            const nextDialogue = dialogue.map((line, i) => (i === lineIndex ? { ...line, [key]: next } : line))
-            patchShot(planFocus as number, shotIndex, { dialogue: nextDialogue })
-          }
-          return (
-            <div key={shotIndex} className="rounded px-2 py-1 text-[11px] leading-relaxed" style={{ background: FIELD_BG }}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <input
-                  defaultValue={String(shotAny.framing ?? '')}
-                  placeholder="景别"
-                  className="w-20 rounded px-1 py-0.5 text-[10px] outline-none"
-                  style={fieldStyle}
-                  onBlur={commitShot('framing')}
-                />
-                <input
-                  defaultValue={String(shotAny.camera ?? '')}
-                  placeholder="机位/运动"
-                  className="w-32 rounded px-1 py-0.5 text-[10px] outline-none"
-                  style={fieldStyle}
-                  onBlur={commitShot('camera')}
-                />
-              </div>
-              <textarea
-                defaultValue={String(shotAny.action ?? '')}
-                placeholder="画面 / 动作 / 构图"
-                rows={2}
-                className="mt-1 w-full resize-y rounded px-1 py-0.5 text-[11px] leading-relaxed outline-none"
+      {planEditing ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              defaultValue={planSegment.name}
+              placeholder="段名"
+              className="min-w-32 rounded px-1.5 py-0.5 text-[13px] font-medium outline-none"
+              style={fieldStyle}
+              onBlur={(event) => {
+                if (event.target.value !== planSegment.name) patchPlanSegment(planFocus as number, { name: event.target.value })
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+              }}
+            />
+            <input
+              defaultValue={planSegment.beat ?? ''}
+              placeholder="钩子/beat"
+              className="w-24 rounded px-1.5 py-0.5 text-[10px] outline-none"
+              style={fieldStyle}
+              onBlur={(event) => {
+                if (event.target.value !== (planSegment.beat ?? '')) patchPlanSegment(planFocus as number, { beat: event.target.value })
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+              }}
+            />
+            <span className="flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
+              <input
+                type="number"
+                step="0.5"
+                min="0.5"
+                defaultValue={planSegment.duration_seconds}
+                className="w-16 rounded px-1 py-0.5 text-[11px] outline-none"
                 style={fieldStyle}
-                onBlur={commitShot('action')}
+                onBlur={(event) => {
+                  const next = Number(event.target.value)
+                  if (Number.isFinite(next) && next > 0 && next !== planSegment.duration_seconds) {
+                    patchPlanSegment(planFocus as number, { duration_seconds: next })
+                  }
+                }}
               />
-              {dialogue.map((line, lineIndex) => (
-                <div key={lineIndex} className="mt-0.5 flex items-center gap-1">
-                  <input
-                    defaultValue={line.speaker ?? ''}
-                    placeholder="说话人"
-                    className="w-16 rounded px-1 py-0.5 text-[10px] outline-none"
+              秒
+            </span>
+          </div>
+          <textarea
+            defaultValue={planSegment.summary ?? ''}
+            placeholder="本段概述（剧情/情绪/要点）"
+            rows={2}
+            className="w-full resize-y rounded px-1.5 py-1 text-[12px] leading-relaxed outline-none"
+            style={fieldStyle}
+            onBlur={(event) => {
+              if (event.target.value !== (planSegment.summary ?? '')) patchPlanSegment(planFocus as number, { summary: event.target.value })
+            }}
+          />
+          <textarea
+            defaultValue={planSegment.director_note ?? ''}
+            placeholder="导演说明"
+            rows={2}
+            className="w-full resize-y rounded px-1.5 py-1 text-[11px] leading-relaxed outline-none"
+            style={fieldStyle}
+            onBlur={(event) => {
+              if (event.target.value !== (planSegment.director_note ?? '')) patchPlanSegment(planFocus as number, { director_note: event.target.value })
+            }}
+          />
+          <div className="flex flex-col gap-1">
+            {((planSegment.shots ?? []) as unknown as Array<Record<string, unknown>>).map((shotAny, shotIndex) => {
+              const dialogue = (shotAny.dialogue as Array<{ speaker?: string; line?: string }> | undefined) ?? []
+              const commitShot = (key: string) => (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+                const next = event.target.value
+                if (next !== String(shotAny[key] ?? '')) patchShot(planFocus as number, shotIndex, { [key]: next })
+              }
+              const commitLine = (lineIndex: number, key: 'speaker' | 'line') => (event: React.FocusEvent<HTMLInputElement>) => {
+                const next = event.target.value
+                if (next === (dialogue[lineIndex]?.[key] ?? '')) return
+                const nextDialogue = dialogue.map((line, i) => (i === lineIndex ? { ...line, [key]: next } : line))
+                patchShot(planFocus as number, shotIndex, { dialogue: nextDialogue })
+              }
+              return (
+                <div key={shotIndex} className="rounded px-2 py-1 text-[11px] leading-relaxed" style={{ background: FIELD_BG }}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      defaultValue={String(shotAny.framing ?? '')}
+                      placeholder="景别"
+                      className="w-20 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('framing')}
+                    />
+                    <input
+                      defaultValue={String(shotAny.camera ?? '')}
+                      placeholder="机位/运动"
+                      className="w-32 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('camera')}
+                    />
+                  </div>
+                  <textarea
+                    defaultValue={String(shotAny.action ?? '')}
+                    placeholder="画面 / 动作 / 构图"
+                    rows={2}
+                    className="mt-1 w-full resize-y rounded px-1 py-0.5 text-[11px] leading-relaxed outline-none"
                     style={fieldStyle}
-                    onBlur={commitLine(lineIndex, 'speaker')}
+                    onBlur={commitShot('action')}
                   />
-                  <input
-                    defaultValue={line.line ?? ''}
-                    placeholder="台词"
-                    className="min-w-0 flex-1 rounded px-1 py-0.5 text-[11px] outline-none"
-                    style={fieldStyle}
-                    onBlur={commitLine(lineIndex, 'line')}
-                  />
+                  {dialogue.map((line, lineIndex) => (
+                    <div key={lineIndex} className="mt-0.5 flex items-center gap-1">
+                      <input
+                        defaultValue={line.speaker ?? ''}
+                        placeholder="说话人"
+                        className="w-16 rounded px-1 py-0.5 text-[10px] outline-none"
+                        style={fieldStyle}
+                        onBlur={commitLine(lineIndex, 'speaker')}
+                      />
+                      <input
+                        defaultValue={line.line ?? ''}
+                        placeholder="台词"
+                        className="min-w-0 flex-1 rounded px-1 py-0.5 text-[11px] outline-none"
+                        style={fieldStyle}
+                        onBlur={commitLine(lineIndex, 'line')}
+                      />
+                    </div>
+                  ))}
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                    <input
+                      defaultValue={String(shotAny.micro_expression ?? '')}
+                      placeholder="微表情"
+                      className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('micro_expression')}
+                    />
+                    <input
+                      defaultValue={String(shotAny.sound ?? '')}
+                      placeholder="声音"
+                      className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('sound')}
+                    />
+                    <input
+                      defaultValue={String(shotAny.transition ?? '')}
+                      placeholder="衔接"
+                      className="w-24 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('transition')}
+                    />
+                  </div>
                 </div>
-              ))}
-              <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                <input
-                  defaultValue={String(shotAny.micro_expression ?? '')}
-                  placeholder="微表情"
-                  className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
-                  style={fieldStyle}
-                  onBlur={commitShot('micro_expression')}
-                />
-                <input
-                  defaultValue={String(shotAny.sound ?? '')}
-                  placeholder="声音"
-                  className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
-                  style={fieldStyle}
-                  onBlur={commitShot('sound')}
-                />
-                <input
-                  defaultValue={String(shotAny.transition ?? '')}
-                  placeholder="衔接"
-                  className="w-24 rounded px-1 py-0.5 text-[10px] outline-none"
-                  style={fieldStyle}
-                  onBlur={commitShot('transition')}
-                />
-              </div>
-            </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          {planSegment.summary ? <div className="text-[12px] leading-relaxed">{planSegment.summary}</div> : null}
+          {planSegment.director_note ? (
+            <div className="text-[11px] leading-relaxed text-muted-foreground">导演说明：{planSegment.director_note}</div>
+          ) : null}
+          <div className="flex flex-col gap-1">
+            {((planSegment.shots ?? []) as unknown as Array<Record<string, unknown>>).map((shotAny, shotIndex) => {
+              const dialogue = (shotAny.dialogue as Array<{ speaker?: string; line?: string }> | undefined) ?? []
+              return (
+                <div key={shotIndex} className="rounded px-2 py-1 text-[11px] leading-relaxed" style={{ background: FIELD_BG }}>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {shotAny.framing ? <span className="rounded px-1 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>{String(shotAny.framing)}</span> : null}
+                    {shotAny.camera ? <span className="text-[10px] text-muted-foreground">{String(shotAny.camera)}</span> : null}
+                  </div>
+                  {shotAny.action ? <div>{String(shotAny.action)}</div> : null}
+                  {dialogue.length > 0 ? (
+                    <div className="mt-0.5 flex flex-col gap-0.5">
+                      {dialogue.map((line, lineIndex) => (
+                        <div key={lineIndex}>
+                          {line.speaker ? <span className="text-muted-foreground">{line.speaker}：</span> : null}
+                          「{line.line}」
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {shotAny.micro_expression ? <div className="text-[10px] text-muted-foreground">微表情：{String(shotAny.micro_expression)}</div> : null}
+                  {shotAny.sound ? <div className="text-[10px] text-muted-foreground">声音：{String(shotAny.sound)}</div> : null}
+                  {shotAny.transition ? <div className="text-[10px] text-muted-foreground">衔接：{String(shotAny.transition)}</div> : null}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
       {(planSegment.subjects ?? []).length > 0 ? (
         <div className="flex flex-wrap items-center gap-1 text-[10px]">
           <span className="text-muted-foreground">主体：</span>
