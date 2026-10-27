@@ -581,7 +581,7 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'plan_assets',
-        description: '从分镜反推资产需求（只读，不建不删）：逐段列出稿内令牌 vs 已绑定、缺素材、缺绑定，并汇总需生成的资产、建议降级/合并的资产。生成任何资源前先用它出表给用户确认。',
+        description: '从分镜反推资产需求（只读，不建不删）：逐段列出稿内令牌 vs 已绑定、缺素材、缺绑定，并汇总需生成的资产、建议降级/合并的资产；summary.resource_needs 给出「每段资源需求名 ↔ 资源池命中名」，summary.needs_rename 列出需要用 update_segment(resources=...) 改名的条目。生成任何资源、梳理资源需求前先用它出表给用户确认。',
         parameters: {
           type: 'object',
           properties: {
@@ -2425,6 +2425,49 @@ export function AgentRail({
         })
       }
 
+      // 资源需求（plan.segments[i].resources）与资源池的名称对照：与「分镜编排」资源行同一口径
+      const normNeed = (text: string) => String(text ?? '')
+        .replace(/\.[a-z0-9]{2,5}$/i, '')
+        .replace(/[\s_\-—·、,，.。()（）【】\[\]]/g, '')
+        .toLowerCase()
+      const poolAssets = pool.filter((item) => item.type !== 'Subject')
+      const matchPool = (name: string) => {
+        const target = normNeed(name)
+        if (!target) return null
+        const exact = poolAssets.find((item) => normNeed(item.name) === target)
+        if (exact) return exact
+        return poolAssets.find((item) => {
+          const poolName = normNeed(item.name)
+          if (poolName) {
+            const min = Math.min(poolName.length, target.length)
+            if (min >= 2 && (poolName.includes(target) || target.includes(poolName))) return true
+          }
+          const file = normNeed(String(item.imageFile ?? item.audioFile ?? item.videoFile ?? ''))
+          return Boolean(file) && (file.includes(target) || target.includes(file))
+        }) ?? null
+      }
+      const resourceNeeds: Array<Record<string, unknown>> = []
+      const needsRename: Array<Record<string, unknown>> = []
+      for (let i = 0; i < planSegments.length; i += 1) {
+        if (only.length && !only.includes(i + 1)) continue
+        const segment = planSegments[i] as Record<string, unknown>
+        const entries = (Array.isArray(segment.resources) ? segment.resources : []) as Array<Record<string, unknown>>
+        if (!entries.length) continue
+        const items = entries.map((entry) => {
+          const need = String(entry.name ?? '').trim()
+          const hit = need ? matchPool(need) : null
+          if (need && !hit) needsRename.push({ segment: i + 1, from: need, to: '（池中没有，确认是否真缺）' })
+          else if (need && hit && hit.name !== need) needsRename.push({ segment: i + 1, from: need, to: hit.name })
+          return {
+            need,
+            kind: String(entry.kind ?? entry.type ?? ''),
+            matched: hit ? hit.name : '',
+            has_file: hit ? Boolean(hit.imageFile || hit.audioFile || hit.videoFile) : false,
+          }
+        })
+        resourceNeeds.push({ segment: i + 1, name: String(segment.name ?? ''), needs: items })
+      }
+
       // 汇总：需生成（被引用但没文件）/ 建议降级 / 建议合并
       const needGenerate: Array<Record<string, unknown>> = []
       for (const [id, segments] of referenced.entries()) {
@@ -2459,11 +2502,16 @@ export function AgentRail({
           zero_reference: zeroReference,
           single_segment_subjects: singleSegmentSubjects,
           missing_material: missingMaterial,
+          resource_needs: resourceNeeds,
+          needs_rename: needsRename,
         },
         next_actions: [
           needGenerate.length ? `需生成 ${needGenerate.length} 项：先用 generate_resource 出基础板，生成后跑 sync_task_images` : '不用生成新素材',
           singleSegmentSubjects.length ? `建议把 ${singleSegmentSubjects.length} 个单段主体降为资源（可用 delete_resources + 重新 upsert 资源）` : '主体分布正常',
           zeroReference.length ? `有 ${zeroReference.length} 个零引用资产，可删除或补绑定` : '无零引用资产',
+          needsRename.length
+            ? `${needsRename.length} 条资源需求与资源池名称对不上：用 update_segment(index=段号, resources=[...]) 改成池中正式名（如 from→to），池中没有的才保留新需求`
+            : '资源需求名与资源池一致，无需改名',
         ],
         note: '此工具只出表，不建不删。用户确认后再执行生成/删除。',
       }
