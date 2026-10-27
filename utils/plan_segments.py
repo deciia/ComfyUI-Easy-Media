@@ -151,6 +151,28 @@ def build_plan_messages(payload: dict) -> list[dict]:
                 subject_lines.append(f"- {name}（{_text(item.get('type'), 20) or '未分类'}）")
     if subject_lines:
         lines.append("已有主体（优先复用，别造同名）：\n" + "\n".join(subject_lines))
+
+    # 已有资源池 / 任务轨素材：规划阶段就交给模型按原名复用，避免另起新名
+    pool_rows = payload.get("existing_resources") if isinstance(payload.get("existing_resources"), list) else []
+    pool_lines = []
+    for item in pool_rows[:60]:
+        if not isinstance(item, dict):
+            continue
+        name = _text(item.get("name"), 60)
+        if not name:
+            continue
+        kind = _text(item.get("type"), 12) or "Picture"
+        ready = bool(item.get("has_file")) and str(item.get("status") or "ready") == "ready"
+        pool_lines.append(f"- {kind}：{name}{'' if ready else '（缺文件）'}")
+    if pool_lines:
+        lines.append(
+            "已有资源（资源池，写「资源需求」时必须按这里的原名原样引用，禁止另起同义新名）：\n"
+            + "\n".join(pool_lines)
+        )
+    track_rows = payload.get("task_track_assets") if isinstance(payload.get("task_track_assets"), list) else []
+    track_lines = [f"- {_text(item, 80)}" for item in track_rows[:60] if _text(item, 80)]
+    if track_lines:
+        lines.append("任务轨已用素材（同样算已有，不要重复索要）：\n" + "\n".join(track_lines))
     instruction = _text(payload.get("instruction"), 2000)
     previous = payload.get("previous_plan")
     if instruction:

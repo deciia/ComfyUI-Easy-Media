@@ -1566,6 +1566,14 @@ export function AgentRail({
       if (isRevision && !instruction) return { error: '缺少修改要求' }
       if (!isRevision && !brief) return { error: '缺少故事想法' }
       const planNow = readPlan()
+      const planPool = ((readWorkspace(projectKey).resources ?? []) as ProjectResource[])
+      const trackAssets = new Set<string>()
+      for (const seg of segments) {
+        for (const image of ((seg as unknown as { images?: Array<string | { file_name?: string }> }).images ?? [])) {
+          const name = typeof image === 'string' ? image : String(image?.file_name ?? '')
+          if (name) trackAssets.add(name)
+        }
+      }
       const body: Record<string, unknown> = {
         brief,
         instruction,
@@ -1573,6 +1581,21 @@ export function AgentRail({
         ratio: args.ratio ?? ratio,
         style: args.style ?? undefined,
         frame_rate: frameRate || 24,
+        // 规划阶段就把已有资产交给模型，避免它另起新名
+        subjects: planPool
+          .filter((item) => item.type === 'Subject')
+          .slice(0, 24)
+          .map((item) => ({ name: item.name, type: item.subjectKind || '人物', description: item.description || '' })),
+        existing_resources: planPool
+          .filter((item) => item.type !== 'Subject')
+          .slice(0, 60)
+          .map((item) => ({
+            type: item.type,
+            name: item.name,
+            status: item.status,
+            has_file: Boolean(item.imageFile || item.audioFile || item.videoFile),
+          })),
+        task_track_assets: Array.from(trackAssets).slice(0, 60),
       }
       if (isRevision) {
         if (!planNow) return { error: '当前没有分镜脚本可修改' }
