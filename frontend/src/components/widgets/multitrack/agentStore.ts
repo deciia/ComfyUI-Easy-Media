@@ -128,6 +128,8 @@ export interface WorkspaceCache {
   ratio?: string
   style?: string
   chatInput?: string
+  /** 本次派单要求写哪种稿：fragment=片段稿，final=最终提示词（派单时写入，写对后清掉） */
+  pendingWriteTarget?: 'fragment' | 'final'
   tab?: string
   subjects?: unknown[]
   plannedResources?: Array<{ kind: string; name: string; purpose?: string }>

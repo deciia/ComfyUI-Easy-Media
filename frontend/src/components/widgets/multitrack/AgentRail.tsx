@@ -1128,6 +1128,7 @@ export function AgentRail({
       }
       const nextSegments = [...segments.slice(0, after), newSegment, ...segments.slice(after)]
       writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
+      if (expectedTarget) writeWorkspace(projectKey, { pendingWriteTarget: undefined } as never)
       return { ok: true, inserted_at: after + 1, total: nextSegments.length }
     }
     if (name === 'delete_segment') {
@@ -2622,6 +2623,18 @@ export function AgentRail({
           needs_revision: true,
           problems: ['缺少 target：必须说明写片段稿（fragment）还是最终提示词（final）'],
           instruction: '这次什么都没写入。按用户要求重新调用，带上 target=…（片段稿用 fragment，终稿用 final）。',
+        }
+      }
+      // 派单意图（片段稿 / 终稿）以数据形式带过来：写错那种稿就退回，什么都不写
+      const expectedTarget = readWorkspace(projectKey).pendingWriteTarget
+      if (expectedTarget && expectedTarget !== rawTarget) {
+        return {
+          ok: false,
+          needs_revision: true,
+          problems: [
+            `本次派单要求写${expectedTarget === 'fragment' ? '片段稿（fragment）' : '最终提示词（final）'}，你传的是 ${rawTarget}`,
+          ],
+          instruction: '这次什么都没写入。按派单要求的 target 重新调用；不要顺手改另一种稿子。',
         }
       }
       const isFragmentWrite = rawTarget === 'fragment'

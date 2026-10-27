@@ -1386,6 +1386,7 @@ export function PromptEnhancerModal({
     const pictureCount = editorResources.filter((item) => item.type === 'image').length
     const audioCount = editorResources.filter((item) => item.type === 'audio').length
     setResultTab('ai')
+    writeWorkspace(bindingProjectKey, { pendingWriteTarget: 'fragment' } as never)
     registry.__easyMediaAgentAsk([
       `只做第 ${activeScriptIndex + 1} 段「${name}」的片段稿：用 write_prompt(index=${activeScriptIndex + 1}, target=fragment) 写入，不要动终稿和其它段。`,
       '',
@@ -1501,6 +1502,7 @@ function askAgentGenerate(language: '中文' | 'English') {
   ].join('\n')
   if (!registry.__easyMediaAgentAsk) return false
   setResultTab('ai')
+  writeWorkspace(bindingProjectKey, { pendingWriteTarget: 'final' } as never)
   registry.__easyMediaAgentAsk(directive)
   return true
 }
