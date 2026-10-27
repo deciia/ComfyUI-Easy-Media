@@ -434,7 +434,7 @@ export function StoryboardTab({
           <div className="px-1 pb-1 text-[11px] text-muted-foreground">
             分镜脚本（{plan.segments.length} 段 · {(() => {
               const keys = new Set(segments.map((segment) => String((segment.content as unknown as { stable_key?: string })?.stable_key ?? '')))
-              const landed = plan.segments.filter((segment, index) => keys.has(String(segment.stable_key ?? `sk-${index + 1}`))).length
+              const landed = plan.segments.filter((segment, index) => keys.has(String((segment as unknown as { stable_key?: string }).stable_key ?? `sk-${index + 1}`))).length
               if (!landed) return '未落地'
               return landed >= plan.segments.length ? '已落地' : `已落地 ${landed}/${plan.segments.length} 段`
             })()}）
