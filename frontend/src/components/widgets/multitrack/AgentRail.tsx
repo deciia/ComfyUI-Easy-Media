@@ -3917,6 +3917,17 @@ export function AgentRail({
       if (agent.includeManualResources) {
         context.planned_resources = resources.map((resource) => resource.name)
       }
+      // 任务轨已用到的素材（文件名去重）：同样视为"已有"，不要重复索要
+      {
+        const used = new Set<string>()
+        for (const seg of segments) {
+          for (const image of ((seg as unknown as { images?: Array<string | { file_name?: string }> }).images ?? [])) {
+            const name = typeof image === 'string' ? image : String(image?.file_name ?? '')
+            if (name) used.add(name)
+          }
+        }
+        if (used.size) context.task_track_assets = Array.from(used).slice(0, 60)
+      }
       // 现有资源池：让模型知道哪些素材已经存在，避免把已有资源再要一遍
       {
         const pool = (readWorkspace(projectKey).resources ?? []) as ProjectResource[]

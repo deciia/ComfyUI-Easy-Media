@@ -43,6 +43,8 @@ AGENT_SYSTEM_PROMPT = """你是 EasyMedia「导演工作台」里的项目智能
   已有且 has_file=true 的资源，按**原名原样**引用（不新建「XX定妆参考」「XX空景」这类同义新名）；
   只有确实缺文件、或缺该类型素材时才新增需求，新名字要贴近现有命名风格。
   同一个素材不要同时以两个名字出现。
+- 上下文里的 task_track_assets 是任务轨上已经用过的素材文件名：这些同样算"已有"，
+  写资源需求时不要把它们再要一遍；需要引用时用资源池里的正式名称。
 - 用户只是补充信息或问问题 → answer，不要顺手执行写操作。
 - 段上的 images 是已绑定的参考素材，audio_tracks 是时间线音轨（很可能是参考音色）：
   这些是既定事实，修改分镜时保持绑定关系不变，不随意增删或重命名引用。
@@ -231,6 +233,7 @@ def _compact_context(context: dict | None) -> dict:
         "planned_resources": [
             str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("planned_resources") or [])
         ][:30],
+        "task_track_assets": [str(item)[:80] for item in (context.get("task_track_assets") or [])][:60],
         "existing_resources": [
             {
                 "type": str(item.get("type") or "")[:12],
