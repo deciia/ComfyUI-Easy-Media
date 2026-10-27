@@ -39,6 +39,10 @@ AGENT_SYSTEM_PROMPT = """你是 EasyMedia「导演工作台」里的项目智能
   生成/修改分镜时如需引用，直接用现有名字。
 - 上下文里已有资源需求（planned_resources 非空）：视为既定清单，修改分镜时保持资源需求连续，
   只在用户要求时增删。
+- 上下文里有现有资源池（existing_resources 非空）：写分镜的「资源」需求前必须先对照它。
+  已有且 has_file=true 的资源，按**原名原样**引用（不新建「XX定妆参考」「XX空景」这类同义新名）；
+  只有确实缺文件、或缺该类型素材时才新增需求，新名字要贴近现有命名风格。
+  同一个素材不要同时以两个名字出现。
 - 用户只是补充信息或问问题 → answer，不要顺手执行写操作。
 - 段上的 images 是已绑定的参考素材，audio_tracks 是时间线音轨（很可能是参考音色）：
   这些是既定事实，修改分镜时保持绑定关系不变，不随意增删或重命名引用。
@@ -227,6 +231,16 @@ def _compact_context(context: dict | None) -> dict:
         "planned_resources": [
             str(item.get("name") if isinstance(item, dict) else item) for item in (context.get("planned_resources") or [])
         ][:30],
+        "existing_resources": [
+            {
+                "type": str(item.get("type") or "")[:12],
+                "name": str(item.get("name") or "")[:40],
+                "status": str(item.get("status") or "")[:12],
+                "has_file": bool(item.get("has_file")),
+            }
+            for item in (context.get("existing_resources") or [])
+            if isinstance(item, dict)
+        ][:80],
         "todos": [
             {"text": str(item.get("text") or "")[:120], "status": str(item.get("status") or "pending")}
             for item in (context.get("todos") or [])

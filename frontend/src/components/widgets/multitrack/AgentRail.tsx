@@ -3917,6 +3917,16 @@ export function AgentRail({
       if (agent.includeManualResources) {
         context.planned_resources = resources.map((resource) => resource.name)
       }
+      // 现有资源池：让模型知道哪些素材已经存在，避免把已有资源再要一遍
+      {
+        const pool = (readWorkspace(projectKey).resources ?? []) as Array<Record<string, unknown>>
+        context.existing_resources = pool.slice(0, 80).map((item) => ({
+          type: String(item.type ?? ''),
+          name: String(item.name ?? ''),
+          status: String(item.status ?? ''),
+          has_file: Boolean(item.imageFile || item.audioFile || item.videoFile),
+        }))
+      }
       if (agent.includeBindings) {
         const bindings = readWorkspace(projectKey).bindings ?? {}
         context.bindings = Object.entries(bindings).map(([key, ids]) => ({
