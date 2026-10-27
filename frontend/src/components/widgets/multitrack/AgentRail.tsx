@@ -1799,8 +1799,18 @@ export function AgentRail({
       const pool = readResources(projectKey) as ProjectResource[]
       const subject = pool.find((item) => item.type === 'Subject' && item.name === subjectName)
       if (!subject) return { error: `主体「${subjectName}」不存在，请先用 upsert_subject 创建` }
-      const matched = wanted.map((name) => pool.find((item) => item.name === name)).filter(Boolean) as ProjectResource[]
-      const missing = wanted.filter((name) => !pool.some((item) => item.name === name))
+      const resolveOne = (spec: string): ProjectResource | undefined => {
+        const text = String(spec).trim()
+        if (!text) return undefined
+        if (text.startsWith('id:')) return pool.find((item) => item.id === text.slice(3).trim())
+        const typed = /^(Subject|Picture|Audio|Video):(.+)$/.exec(text)
+        if (typed) return pool.find((item) => item.type === typed[1] && item.name === typed[2].trim())
+        const sameName = pool.filter((item) => item.name === text)
+        // 同名优先取非主体（子资源通常是图片），并在返回值里标明实际选了谁
+        return sameName.find((item) => item.type !== 'Subject') ?? sameName[0]
+      }
+      const matched = wanted.map(resolveOne).filter((item): item is ProjectResource => Boolean(item))
+      const missing = wanted.filter((spec) => !resolveOne(spec))
       if (!matched.length) return { error: `没有匹配到资源：${wanted.join('、')}` }
       const nextIds = args.replace === true
         ? matched.map((item) => item.id)
@@ -1962,14 +1972,15 @@ export function AgentRail({
         else if (item.type === 'Picture') { pictureNo += 1; token = `<Picture ${pictureNo}>` }
         else if (item.type === 'Audio') { audioNo += 1; token = `<Audio ${audioNo}>` }
         else if (item.type === 'Video') { videoNo += 1; token = `<Video ${videoNo}>` }
-        if (token && item.name) nameToToken.set(item.name, token)
+        if (token && item.name) nameToToken.set(`${item.type}:${item.name}`, token)
       }
       const fixes: Array<{ from: string; to: string; name: string }> = []
       const aligned = text.replace(/<(Subject|Picture|Audio|Video)\s+(\d+)>\s*[（(]([^）)]{1,40})[）)]/g, (whole, kind, num, inner) => {
         const written = String(inner)
         let matchedName = ''
         let matchedToken = ''
-        for (const [name, token] of nameToToken.entries()) {
+        for (const [key, token] of nameToToken.entries()) {
+          const name = key.slice(key.indexOf(':') + 1)
           if (!name || !written.includes(name)) continue
           if (!token.startsWith(`<${kind} `)) continue
           matchedName = name
@@ -3140,18 +3151,50 @@ export function AgentRail({
       const dryRun = args.dry_run === true
       if (!dryRun && args.confirm !== true) return { error: '删除需要 confirm=true（可先 dry_run=true 预览）' }
       const pool = readResources(projectKey) as ProjectResource[]
-      // 同名跨类型（Subject / Picture 等）拒绝，避免误删
-      const ambiguous = names
-        .map((name) => ({ name, types: Array.from(new Set(pool.filter((item) => item.name === name).map((item) => item.type))) }))
-        .filter((entry) => entry.types.length > 1)
+      // 支持三种写法消歧：纯名字 / "Picture:工作台" / "id:xxx"
+      // 同名（主体「工作台」+ 图片「工作台」）时必须带类型或 id，避免误删
+      const targets: ProjectResource[] = []
+      const missing: string[] = []
+      const ambiguous: Array<{ name: string; types: string[] }> = []
+      for (const spec of names) {
+        const text = String(spec).trim()
+        if (!text) continue
+        if (text.startsWith('id:')) {
+          const id = text.slice(3).trim()
+          const hit = pool.find((item) => item.id === id)
+          if (hit) targets.push(hit)
+          else missing.push(text)
+          continue
+        }
+        const typed = /^(Subject|Picture|Audio|Video):(.+)$/.exec(text)
+        if (typed) {
+          const wanted = pool.filter((item) => item.type === typed[1] && item.name === typed[2].trim())
+          if (wanted.length) targets.push(...wanted)
+          else missing.push(text)
+          continue
+        }
+        const sameName = pool.filter((item) => item.name === text)
+        const types = Array.from(new Set(sameName.map((item) => item.type)))
+        if (types.length > 1) {
+          ambiguous.push({ name: text, types })
+          continue
+        }
+        if (sameName.length) targets.push(...sameName)
+        else missing.push(text)
+      }
       if (ambiguous.length) {
         return {
-          error: '存在同名但不同类型的条目，请先说清删哪一种（本工具按名称删除，无法区分）',
-          ambiguous: ambiguous.map((entry) => ({ name: entry.name, types: entry.types })),
+          error:
+            '存在同名但不同类型的条目，请用「类型:名字」或「id:资源id」指定要删哪一个',
+          ambiguous: ambiguous.map((entry) => ({
+            name: entry.name,
+            types: entry.types,
+            candidates: pool
+              .filter((item) => item.name === entry.name)
+              .map((item) => ({ type: item.type, id: item.id, has_file: Boolean(item.imageFile || item.audioFile || item.videoFile) })),
+          })),
         }
       }
-      const targets = pool.filter((item) => names.includes(item.name))
-      const missing = names.filter((name) => !pool.some((item) => item.name === name))
       if (!targets.length) return { error: `没有找到：${names.join('、')}`, missing }
 
       const targetIds = new Set(targets.map((item) => item.id))
