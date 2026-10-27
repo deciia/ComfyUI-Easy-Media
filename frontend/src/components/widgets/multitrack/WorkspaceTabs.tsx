@@ -220,7 +220,7 @@ export function StoryboardTab({
         const pool = readWorkspace(projectKey).resources ?? []
         // 名称归一化：去扩展名/空白/标点，小写
         const norm = (text: string) => String(text ?? '')
-          .replace(/\.[a-z0-9]{2,5}\$/i, '')
+          .replace(/\.[a-z0-9]{2,5}$/i, '')
           .replace(/[\s_\-—·、,，.。()（）【】\[\]]/g, '')
           .toLowerCase()
         // 双向包含即视为同一个资源：「老赵」↔「老赵四视图」、「油嘴总成」↔「油嘴总成6支」
