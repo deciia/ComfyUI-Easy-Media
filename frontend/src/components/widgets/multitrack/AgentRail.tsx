@@ -466,7 +466,7 @@ export function AgentRail({
           type: 'object',
           properties: {
             subject: { type: 'string', description: '主体名称' },
-            resources: { type: 'array', items: { type: 'string' }, description: '要挂的资源名称数组' },
+            resources: { type: 'array', items: { type: 'string' }, description: '要挂的资源：名字 / 「Picture:工作台」/「id:资源id」。主体与其子图同名时用类型或 id 指定' },
             replace: { type: 'boolean', description: 'true=覆盖原引用，默认追加' },
           },
           required: ['subject', 'resources'],
@@ -766,7 +766,7 @@ export function AgentRail({
         parameters: {
           type: 'object',
           properties: {
-            names: { type: 'array', items: { type: 'string' }, description: '要删除的主体/资源名称' },
+            names: { type: 'array', items: { type: 'string' }, description: '要删除的条目：名字 / 「Picture:工作台」/「id:资源id」。同名跨类型（主体与子图同名）必须带类型或 id' },
             confirm: { type: 'boolean', description: '确认删除（必须为 true）' },
             dry_run: { type: 'boolean', description: '只报告会被删除/解绑的内容，不真正删除' },
           },
