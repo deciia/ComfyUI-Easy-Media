@@ -276,6 +276,11 @@ export function AgentRail({
             summary: { type: 'string' },
             director_note: { type: 'string' },
             shots: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '完整镜头表，替换原镜头' },
+            resources: {
+              type: 'array',
+              description: '该段的资源需求清单，整体替换。元素可写 {kind,name,for}（kind=image/video/audio）或字符串「image:老赵四视图」。只改需求清单，不动镜头/台词/时长/提示词。',
+              items: { type: 'object', additionalProperties: true },
+            },
           },
           required: ['index'],
         },
@@ -1144,6 +1149,31 @@ export function AgentRail({
       }
       if (Number.isFinite(Number(args.duration_seconds))) patch.duration_seconds = Number(args.duration_seconds)
       if (Array.isArray(args.shots)) patch.shots = args.shots
+      if (Array.isArray(args.resources)) {
+        // 资源需求：接受 {kind,name,for} 或 "image:老赵四视图"，规范化后整体替换
+        const normalized: Array<{ kind: string; name: string; for?: string }> = []
+        for (const entry of args.resources as unknown[]) {
+          if (typeof entry === 'string') {
+            const text = entry.trim()
+            if (!text) continue
+            const at = text.indexOf(':')
+            const kind = at > 0 ? text.slice(0, at).trim() : 'image'
+            const name = (at > 0 ? text.slice(at + 1) : text).trim()
+            if (name) normalized.push({ kind, name })
+            continue
+          }
+          const obj = (entry ?? {}) as Record<string, unknown>
+          const name = String(obj.name ?? '').trim()
+          if (!name) continue
+          const purpose = String(obj.for ?? obj.purpose ?? '').trim()
+          normalized.push({
+            kind: String(obj.kind ?? obj.type ?? 'image').trim() || 'image',
+            name,
+            ...(purpose ? { for: purpose } : {}),
+          })
+        }
+        patch.resources = normalized
+      }
       const nextSegments = segments.map((segment, i) => (i === index0 ? { ...segment, ...patch } : segment))
       writePlanAll({ ...(planNow as Record<string, unknown>), segments: nextSegments } as never)
       return { ok: true, updated: index0 + 1, fields: Object.keys(patch) }
