@@ -145,7 +145,7 @@ export function StoryboardTab({
       onPatchPlan={(settings) => {
         const current = readWorkspace(projectKey).plan as StoryboardPlan | null
         if (!current) return
-        writeWorkspace(projectKey, { plan: { ...(current as unknown as Record<string, unknown>), settings } as unknown as StoryboardPlan })
+        writeWorkspace(projectKey, { plan: { ...(current as unknown as Record<string, unknown>), settings } as never })
       }}
       onImportSubjects={onImportPlanSubjects ? () => {
         onImportPlanSubjects(value)
@@ -251,7 +251,7 @@ export function StoryboardTab({
         }}
       />
       <div className="flex flex-col gap-1">
-        {((planSegment.shots ?? []) as Array<Record<string, unknown>>).map((shotAny, shotIndex) => {
+        {((planSegment.shots ?? []) as unknown as Array<Record<string, unknown>>).map((shotAny, shotIndex) => {
           const dialogue = (shotAny.dialogue as Array<{ speaker?: string; line?: string }> | undefined) ?? []
           const commitShot = (key: string) => (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
             const next = event.target.value
