@@ -174,6 +174,7 @@ function buildPanel() {
       const width = node.size?.[0] ?? 360;
       const height = node.computeSize ? node.computeSize()[1] : node.size?.[1] ?? 400;
       node.setSize?.([width, Math.max(160, height)]);
+      node.arrange?.();
       node.setDirtyCanvas?.(true, true);
     }
   };
@@ -251,16 +252,26 @@ function applyInfo(panel, info) {
   panel.pathText.title = info.path || "";
 }
 
+/**
+ * 隐藏/恢复一个原生 widget。
+ * 只改 computeSize 不够：新版前端（Vue 节点）还看 widget.hidden 与 computeLayoutSize，
+ * 三处一起处理才能让它真的从布局里消失（与班长 applyWidgetHiddenLayout 同款）。
+ */
 function hideWidget(widget, hide) {
   if (!widget) return;
   if (hide) {
-    if (widget._easyOrigComputeSize === undefined) widget._easyOrigComputeSize = widget.computeSize ?? null;
+    if (widget._easySizeSaved) return;
+    widget._easySizeSaved = { cs: widget.computeSize, cls: widget.computeLayoutSize };
+    widget.hidden = true;
     widget.computeSize = () => [0, -4];
-  } else if (widget._easyOrigComputeSize !== undefined) {
-    const original = widget._easyOrigComputeSize;
-    widget._easyOrigComputeSize = undefined;
-    if (original) widget.computeSize = original;
-    else delete widget.computeSize;
+    widget.computeLayoutSize = () => ({ minHeight: 0, maxHeight: 0, minWidth: 0, maxWidth: 0 });
+  } else if (widget._easySizeSaved) {
+    const saved = widget._easySizeSaved;
+    widget.computeSize = saved.cs;
+    if (saved.cls) widget.computeLayoutSize = saved.cls;
+    else delete widget.computeLayoutSize;
+    widget.hidden = false;
+    delete widget._easySizeSaved;
   }
 }
 
