@@ -388,18 +388,20 @@ function buildPanel() {
       } else {
         // 拖拽：画框填满"节点高度 - 参数 - 固定条"；视频按比例 contain 居中（可留黑边）
         const total = Number(node.size?.[1] ?? 0);
-        const cur = Math.max(60, Number(panel.playerHeight) || PLAYER_HEIGHT);
-        const measured = Number(panel.root.offsetHeight) || 0;
-        const measuredChrome = measured > 0 ? Math.max(chrome, measured - cur) : chrome;
-        const fit = Math.round(total - paramsHeight(node) - measuredChrome);
-        panel.playerHeight = Math.max(60, Math.min(4000, fit > 0 ? fit : cur));
+        const base = panel._paramsH || paramsHeight(node);
+        const fit = Math.round(total - base - chrome);
+        panel.playerHeight = Math.max(60, Math.min(4000, fit > 0 ? fit : 60));
       }
 
       const player = panel.playerHeight;
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget) {
-        // 只用固定部分 + 已保存的画面高度，绝不读 node.size，避免与画布互相放大
-        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + player + head + details + color + 6];
+        // 面板占满"节点高度 - 参数高度"，节点尺寸本身由用户拖动决定（不再由面板反推）
+        widget.computeSize = () => {
+          const total = Number(node.size?.[1] ?? 0);
+          const base = panel._paramsH || paramsHeight(node);
+          return [node.size?.[0] ?? 360, Math.max(KIND_BAR_HEIGHT + 60, total - base)];
+        };
       }
 
       panel.video.style.height = `${player}px`;
@@ -415,6 +417,18 @@ function buildPanel() {
       }
       panel._lastSize = node.size ? [node.size[0], node.size[1]] : null;
       node.setDirtyCanvas?.(true, true);
+
+      // 实测参数区高度（画布单位），下一次 computeSize 用同一个数 → 节点高度稳定
+      requestAnimationFrame(() => {
+        try {
+          const scale = Number(app?.canvas?.ds?.scale) || 1;
+          const rootH = (Number(panel.root.offsetHeight) || 0) / scale;
+          const total = Number(node.size?.[1] ?? 0);
+          if (rootH > 20 && total > rootH) panel._paramsH = Math.round(total - rootH);
+        } catch (error) {
+          /* 测量失败时沿用上一次的值 */
+        }
+      });
     }
   };
 
