@@ -1,10 +1,11 @@
 import { app } from "../../scripts/app.js";
 
 /**
- * Save Video（easy saveVideo）节点面板 —— 参考班长「🎥 视频合并」的展示形态：
+ * Save Video（easy saveVideo）节点面板 —— 参考班长「🎥 视频合并」：
  *  - 节点创建即出现占位面板（播放器 + 可折叠的「视频详情」）
- *  - 执行完成后自动填入视频、刷新详情
+ *  - 播放器右上角有折叠按钮（▲/▼），可把画面收起来只留详情
  *  - 详情最后一行是路径 + 「打开目录」
+ *  - 「高级设置」可折叠，状态写进 node.properties 随工作流保存
  * 只做展示，不改变任何执行逻辑。
  */
 const ROWS = [
@@ -18,6 +19,9 @@ const ROWS = [
   ["format", "🎨 编码格式", (i) => (i?.format || "").toUpperCase() || "—"],
   ["audio", "🔊 音频", (i) => (i?.has_audio ? "有声" : "无声")],
 ];
+
+const ADVANCED_WIDGETS = ["video_format", "custom_save_path", "adopt_source_video", "cleanup_after_save", "notify_sound"];
+const PLAYER_HEIGHT = 220;
 
 function bytes(n) {
   n = Number(n) || 0;
@@ -46,22 +50,34 @@ function el(tag, css, text) {
 function buildPanel() {
   const root = el("div", "display:flex;flex-direction:column;background:#141414;border:1px solid #333;border-radius:6px;overflow:hidden;");
 
-  const video = el("video", "width:100%;height:220px;background:#000;object-fit:contain;display:block;");
+  const videoWrap = el("div", "position:relative;width:100%;background:#000;");
+  const video = el("video", `width:100%;height:${PLAYER_HEIGHT}px;background:#000;object-fit:contain;display:block;`);
   video.controls = true;
   video.loop = false;
   video.preload = "metadata";
   video.muted = true;
-  root.appendChild(video);
+  videoWrap.appendChild(video);
 
-  // 折叠头
+  const playerToggle = el(
+    "button",
+    "position:absolute;top:4px;right:4px;width:20px;height:18px;padding:0;border-radius:3px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#bbb;cursor:pointer;font-size:10px;line-height:16px;",
+    "▲",
+  );
+  playerToggle.title = "收起/展开画面";
+  playerToggle.addEventListener("mousedown", (event) => event.stopPropagation());
+  videoWrap.appendChild(playerToggle);
+  root.appendChild(videoWrap);
+
   const header = el(
     "div",
     "display:flex;align-items:center;gap:6px;padding:4px 8px;background:#1b1b1b;border-top:1px solid #333;cursor:pointer;user-select:none;font-size:11px;color:#bbb;",
   );
-  const caret = el("span", "width:12px;text-align:center;", "▾");
+  const caretLeft = el("span", "width:12px;text-align:center;", "▾");
   const title = el("span", "flex:1 1 auto;", "视频详情");
-  header.appendChild(caret);
+  const caretRight = el("span", "width:12px;text-align:center;opacity:.7;", "▾");
+  header.appendChild(caretLeft);
   header.appendChild(title);
+  header.appendChild(caretRight);
   root.appendChild(header);
 
   const body = el("div", "display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 8px 8px;font-size:11px;color:#ddd;");
@@ -74,7 +90,6 @@ function buildPanel() {
     cells.set(key, v);
   }
 
-  // 路径行：左路径右按钮
   const pathLabel = el("span", "color:#888;white-space:nowrap;", "📁 路径");
   const pathRow = el("div", "display:flex;align-items:center;gap:6px;min-width:0;");
   const pathText = el(
@@ -93,19 +108,38 @@ function buildPanel() {
   body.appendChild(pathRow);
   root.appendChild(body);
 
-  let collapsed = false;
-  header.addEventListener("click", (event) => {
-    event.stopPropagation();
-    collapsed = !collapsed;
-    body.style.display = collapsed ? "none" : "grid";
-    caret.textContent = collapsed ? "▸" : "▾";
-    if (panel.node?.setSize) {
-      const width = panel.node.size?.[0] ?? 360;
-      panel.node.setSize([width, collapsed ? 300 : 520]);
+  const panel = { root, video, videoWrap, cells, pathText, openBtn, node: null, info: null, playerOpen: true, detailsOpen: true };
+
+  const refreshLayout = () => {
+    video.style.display = panel.playerOpen ? "block" : "none";
+    video.style.height = panel.playerOpen ? `${PLAYER_HEIGHT}px` : "0px";
+    playerToggle.textContent = panel.playerOpen ? "▲" : "▼";
+    body.style.display = panel.detailsOpen ? "grid" : "none";
+    caretLeft.textContent = panel.detailsOpen ? "▾" : "▸";
+    caretRight.textContent = panel.detailsOpen ? "▾" : "▸";
+    const node = panel.node;
+    if (node) {
+      node.properties = node.properties || {};
+      node.properties.easyPlayerOpen = panel.playerOpen;
+      node.properties.easyDetailsOpen = panel.detailsOpen;
+      const width = node.size?.[0] ?? 360;
+      const height = node.computeSize ? node.computeSize()[1] : node.size?.[1] ?? 400;
+      node.setSize?.([width, Math.max(180, height)]);
+      node.setDirtyCanvas?.(true, true);
     }
+  };
+
+  playerToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.playerOpen = !panel.playerOpen;
+    refreshLayout();
   });
 
-  const panel = { root, video, cells, pathText, openBtn, node: null, info: null, collapsed: () => collapsed };
+  header.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.detailsOpen = !panel.detailsOpen;
+    refreshLayout();
+  });
 
   openBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   openBtn.addEventListener("click", async (event) => {
@@ -125,6 +159,7 @@ function buildPanel() {
     }
   });
 
+  panel.refreshLayout = refreshLayout;
   return panel;
 }
 
@@ -145,8 +180,6 @@ function applyInfo(panel, info) {
   panel.pathText.title = info.path || "";
 }
 
-const ADVANCED_WIDGETS = ["video_format", "custom_save_path", "adopt_source_video", "cleanup_after_save", "notify_sound"];
-
 function hideWidget(widget, hide) {
   if (!widget) return;
   if (hide) {
@@ -166,9 +199,11 @@ function applySettingsCollapsed(node) {
     hideWidget(node.widgets?.find((w) => w.name === name), collapsed);
   }
   const toggle = node.widgets?.find((w) => w.name === "easy_settings_toggle");
-  if (toggle) toggle.name = collapsed
-    ? "▸ 高级设置（输出格式 / 路径 / 净化 / 提示音）"
-    : "▾ 高级设置（输出格式 / 路径 / 净化 / 提示音）";
+  if (toggle) {
+    toggle.name = collapsed
+      ? "▸ 高级设置（输出格式 / 路径 / 净化 / 提示音）"
+      : "▾ 高级设置（输出格式 / 路径 / 净化 / 提示音）";
+  }
   node.setDirtyCanvas?.(true, true);
 }
 
@@ -183,7 +218,6 @@ function attachSettingsToggle(node) {
     node.setSize?.([width, Math.max(220, height)]);
   });
   widget.serialize = false;
-  // 挪到第一个高级 widget 之前，折叠后紧挨着它上方
   const index = node.widgets.findIndex((w) => ADVANCED_WIDGETS.includes(w.name));
   if (index >= 0) {
     node.widgets.splice(node.widgets.indexOf(widget), 1);
@@ -198,9 +232,12 @@ function ensurePanel(node) {
   node._easyVideoPanel = panel;
   panel.node = node;
   const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
-  widget.computeSize = () => [node.size?.[0] ?? 360, panel.collapsed() ? 300 : 540];
+  widget.computeSize = () => [node.size?.[0] ?? 360, 540];
   attachSettingsToggle(node);
-  if (node.size && node.size[1] < 520) node.setSize([node.size[0], 520]);
+  if (node.properties?.easyPlayerOpen === false) panel.playerOpen = false;
+  if (node.properties?.easyDetailsOpen === false) panel.detailsOpen = false;
+  panel.refreshLayout();
+  if (node.size && node.size[1] < 460) node.setSize([node.size[0], 460]);
   return panel;
 }
 
@@ -235,15 +272,17 @@ app.registerExtension({
       return result;
     };
 
-    // 从工作流恢复时，用节点上缓存的详情回填（ui 数据不随 workflow 保存）
     const onConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function (info, ...rest) {
       const result = onConfigure?.apply(this, [info, ...rest]);
       try {
         const cached = this._easyVideoInfo;
-        ensurePanel(this);
-        if (cached) applyInfo(this._easyVideoPanel, cached);
+        const panel = ensurePanel(this);
+        if (cached) applyInfo(panel, cached);
         if (this.properties?.easySettingsCollapsed !== undefined) applySettingsCollapsed(this);
+        panel.playerOpen = this.properties?.easyPlayerOpen !== false;
+        panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
+        panel.refreshLayout();
       } catch (error) {
         console.warn("[EasyMedia] 恢复视频面板失败：", error);
       }
