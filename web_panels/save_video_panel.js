@@ -1,33 +1,30 @@
 import { app } from "../../scripts/app.js";
 
 /**
- * Save Video（easy saveVideo）节点面板 —— 对齐班长「🎥 视频合并」的折叠语义：
- *  1) 画面右上角 ⌃/⌄ = 「仅画面模式」：折叠**所有参数控件 + 详情面板**，只留画面；
- *  2) 详情标题栏 = 折叠按钮 | 📋 视频详情 | 复制全部；收起后**保留标题条**（与班长一致）；
- *  3) 底部路径行 + 打开目录常驻；
- *  4) 「高级设置」仍可单独折叠（隐藏未使用的输出格式/路径/净化/提示音）。
- * 状态写入 node.properties，随工作流保存。只做展示，不改执行逻辑。
+ * Save Video（easy saveVideo）节点面板。
+ * 结构：形态图标行（🎬/🖼️/🎵）→ 画面/图片/无画面 → 视频详情 → 调色台。
+ * 形态会联动：视频=画面+控制条；图片=静图无控制条；音频=无画面。
+ * 右上角 ⌃/⌄ = 仅画面模式：折叠上方全部参数 + 详情；状态写入 node.properties。
  */
 const ROWS = [
   ["elapsed", "⏱️ 累计用时", (i) => (i?.save_seconds ? `${i.save_seconds} 秒` : "—")],
   ["filename", "📄 文件名称", (i) => i?.filename || "—"],
   ["resolution", "📐 物理尺寸", (i) => (i?.width && i?.height ? `${i.width} × ${i.height}` : "—")],
-  ["frames", "🎞️ 总帧数", (i) => (i?.frames ? `${i.frames} 帧` : "—")],
+  ["frames", "🎞️ 总帧数", (i) => (i?.frames ? `${i.frames} 帧` : i?.count ? `${i.count} 张` : "—")],
   ["duration", "▶️ 播放时间", (i) => secs(i?.duration)],
   ["fps", "🎬 视频帧率", (i) => (i?.fps ? `${i.fps} FPS` : "—")],
   ["size", "💾 文件体积", (i) => bytes(i?.size_bytes)],
   ["format", "🎨 编码格式", (i) => (i?.format || "").toUpperCase() || "—"],
-  ["audio", "🔊 音频", (i) => (i?.has_audio ? "有声" : "无声")],
+  ["audio", "🔊 音频", (i) => (i?.has_audio ? "有声" : "—")],
 ];
 
-/** 节点上方的全部输入控件（折叠按钮会把它们一起收起） */
-/** 三种输出形态的图标（点击 = 切换 save_kind） */
 const KIND_ICONS = [
   { kind: "video", icon: "🎬", title: "保存视频" },
   { kind: "images", icon: "🖼️", title: "保存图像序列" },
   { kind: "audio", icon: "🎵", title: "保存音频" },
 ];
 
+/** 折叠按钮要收起的所有参数控件 */
 const PARAM_WIDGETS = [
   "input_mode",
   "fps",
@@ -38,17 +35,27 @@ const PARAM_WIDGETS = [
   "custom_save_path",
   "adopt_source_video",
   "cleanup_after_save",
+  "save_kind",
+  "image_format",
+  "audio_format",
   "notify_sound",
 ];
-const PLAYER_HEIGHT = 220;
-const COLOR_HEIGHT = 250;
 
-/** 调色参数（键名与班长 /banzhang_api/bake_video 的 tune 完全一致） */
+/** 每种形态下应显示的专属参数（其余隐藏） */
+const KIND_WIDGETS = {
+  video: ["video_format", "adopt_source_video"],
+  images: ["image_format"],
+  audio: ["audio_format"],
+};
+
+const PLAYER_HEIGHT = 220;
+const HEADER_HEIGHT = 26;
+const DETAILS_HEIGHT = 186;
+const COLOR_HEIGHT = 250;
+const KIND_BAR_HEIGHT = 24;
+
 const COLOR_GROUPS = [
-  {
-    title: "🎨 饱和度",
-    rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }],
-  },
+  { title: "🎨 饱和度", rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }] },
   {
     title: "✨ 泛光 Bloom",
     rows: [
@@ -74,8 +81,11 @@ const COLOR_GROUPS = [
     ],
   },
 ];
-const HEADER_HEIGHT = 26;
-const DETAILS_HEIGHT = 186;
+
+const BTN_CSS =
+  "padding:0 6px;height:18px;line-height:16px;border-radius:3px;border:1px solid #4a4a4a;background:rgba(24,24,24,.9);color:#bbb;cursor:pointer;font-size:10px;";
+
+let panelRef = null;
 
 function bytes(n) {
   n = Number(n) || 0;
@@ -101,52 +111,44 @@ function el(tag, css, text) {
   return node;
 }
 
-const BTN_CSS =
-  "padding:0 6px;height:18px;line-height:16px;border-radius:3px;border:1px solid #4a4a4a;background:rgba(24,24,24,.9);color:#bbb;cursor:pointer;font-size:10px;";
+function currentKind(node) {
+  return String(node?.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
+}
+
+/** 隐藏/恢复原生 widget：三处一起改（Vue 节点渲染只看 hidden 与 computeLayoutSize） */
+function hideWidget(widget, hide) {
+  if (!widget) return;
+  if (hide) {
+    if (widget._easySizeSaved) return;
+    widget._easySizeSaved = { cs: widget.computeSize, cls: widget.computeLayoutSize };
+    widget.hidden = true;
+    widget.computeSize = () => [0, -4];
+    widget.computeLayoutSize = () => ({ minHeight: 0, maxHeight: 0, minWidth: 0, maxWidth: 0 });
+  } else if (widget._easySizeSaved) {
+    const saved = widget._easySizeSaved;
+    widget.computeSize = saved.cs;
+    if (saved.cls) widget.computeLayoutSize = saved.cls;
+    else delete widget.computeLayoutSize;
+    widget.hidden = false;
+    delete widget._easySizeSaved;
+  }
+}
 
 function buildPanel() {
   const root = el("div", "display:flex;flex-direction:column;background:#141414;border:1px solid #333;border-radius:6px;overflow:hidden;");
 
-  // ── 画面区（右上角「仅画面模式」按钮）──
-  const videoWrap = el("div", "position:relative;width:100%;background:#000;");
-  const video = el("video", `width:100%;height:${PLAYER_HEIGHT}px;background:#000;object-fit:contain;display:block;`);
-  video.controls = true;
-  video.loop = false;
-  video.preload = "metadata";
-  video.muted = true;
-  videoWrap.appendChild(video);
-
-  const videoOnlyBtn = el(
-    "button",
-    `position:absolute;top:4px;right:4px;width:20px;${BTN_CSS}`,
-    "⌃",
-  );
-  videoOnlyBtn.title = "折叠参数，仅显示画面";
-  videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
-  videoWrap.appendChild(videoOnlyBtn);
-
-  // 调色近似预览层：backdrop-filter 采样背后的视频，再用混合模式叠出泛光/柔雾/暖晕
-  const bloomLayer = el(
+  // ── 形态图标行（常驻）──
+  const kindBar = el(
     "div",
-    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) brightness(1.35);",
+    `display:flex;align-items:center;gap:4px;height:${KIND_BAR_HEIGHT}px;padding:0 6px;background:#1b1b1b;border-bottom:1px solid #333;box-sizing:border-box;`,
   );
-  const mistLayer = el(
-    "div",
-    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:lighten;backdrop-filter:blur(8px) brightness(1.12);",
-  );
-  const halationLayer = el(
-    "div",
-    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) sepia(1) saturate(4) hue-rotate(-18deg);",
-  );
-  videoWrap.appendChild(bloomLayer);
-  videoWrap.appendChild(mistLayer);
-  videoWrap.appendChild(halationLayer);
-
-  // 左上角：输出形态切换
-  const kindBar = el("div", "position:absolute;top:4px;left:4px;display:flex;gap:4px;");
   const kindButtons = new Map();
   for (const item of KIND_ICONS) {
-    const btn = el("button", `width:22px;height:20px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:18px;`, item.icon);
+    const btn = el(
+      "button",
+      `width:24px;height:19px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:17px;`,
+      item.icon,
+    );
     btn.title = item.title;
     btn.addEventListener("mousedown", (event) => event.stopPropagation());
     btn.addEventListener("click", (event) => {
@@ -156,10 +158,35 @@ function buildPanel() {
     kindBar.appendChild(btn);
     kindButtons.set(item.kind, btn);
   }
-  videoWrap.appendChild(kindBar);
+  root.appendChild(kindBar);
+
+  // ── 画面区 ──
+  const videoWrap = el("div", "position:relative;width:100%;background:#000;");
+  const video = el("video", `width:100%;height:${PLAYER_HEIGHT}px;background:#000;object-fit:contain;display:block;`);
+  video.controls = true;
+  video.loop = false;
+  video.preload = "metadata";
+  video.muted = true;
+  videoWrap.appendChild(video);
+
+  const imagePreview = el("img", `width:100%;height:${PLAYER_HEIGHT}px;object-fit:contain;background:#000;display:none;`);
+  imagePreview.alt = "";
+  videoWrap.appendChild(imagePreview);
+
+  const videoOnlyBtn = el("button", `position:absolute;top:4px;right:4px;width:20px;${BTN_CSS}`, "⌃");
+  videoOnlyBtn.title = "折叠参数，仅显示画面";
+  videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  videoWrap.appendChild(videoOnlyBtn);
+
+  const bloomLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) brightness(1.35);");
+  const mistLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:lighten;backdrop-filter:blur(8px) brightness(1.12);");
+  const halationLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) sepia(1) saturate(4) hue-rotate(-18deg);");
+  videoWrap.appendChild(bloomLayer);
+  videoWrap.appendChild(mistLayer);
+  videoWrap.appendChild(halationLayer);
   root.appendChild(videoWrap);
 
-  // ── 详情标题栏：折叠按钮 | 📋 视频详情 | 复制全部 ──
+  // ── 详情标题栏 ──
   const header = el(
     "div",
     `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
@@ -176,7 +203,6 @@ function buildPanel() {
   header.appendChild(copyAllBtn);
   root.appendChild(header);
 
-  // ── 详情字段 ──
   const body = el("div", "display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 8px 8px;font-size:11px;color:#ddd;");
   const cells = new Map();
   for (const [key, label] of ROWS) {
@@ -187,7 +213,17 @@ function buildPanel() {
     cells.set(key, v);
   }
 
-  // ── 调色台（默认收起）──
+  const pathLabel = el("span", "color:#888;white-space:nowrap;", "📁 路径");
+  const pathRow = el("div", "display:flex;align-items:center;gap:6px;min-width:0;");
+  const pathText = el("span", "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;", "—");
+  const openBtn = el("button", "flex:0 0 auto;cursor:pointer;padding:1px 8px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;font-size:11px;", "打开目录");
+  pathRow.appendChild(pathText);
+  pathRow.appendChild(openBtn);
+  body.appendChild(pathLabel);
+  body.appendChild(pathRow);
+  root.appendChild(body);
+
+  // ── 调色台 ──
   const colorHeader = el(
     "div",
     `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
@@ -218,7 +254,7 @@ function buildPanel() {
       input.addEventListener("mousedown", (event) => event.stopPropagation());
       input.addEventListener("input", () => {
         value.textContent = `${input.value}${row.unit}`;
-        applyColorPreview(panelRef);
+        applyColorPreview(panel);
       });
       line.appendChild(input);
       line.appendChild(value);
@@ -227,40 +263,19 @@ function buildPanel() {
     }
     colorBody.appendChild(g);
   }
-
   const colorActions = el("div", "display:flex;align-items:center;gap:6px;padding-top:2px;");
-  const bakeBtn = el(
-    "button",
-    "cursor:pointer;padding:2px 10px;border-radius:4px;border:1px solid #2b6cb0;background:#1d4ed8;color:#fff;font-size:11px;",
-    "应用并导出",
-  );
+  const bakeBtn = el("button", "cursor:pointer;padding:2px 10px;border-radius:4px;border:1px solid #2b6cb0;background:#1d4ed8;color:#fff;font-size:11px;", "应用并导出");
   const colorStatus = el("span", "flex:1 1 auto;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", "");
   colorActions.appendChild(bakeBtn);
   colorActions.appendChild(colorStatus);
   colorBody.appendChild(colorActions);
   root.appendChild(colorBody);
 
-  const pathLabel = el("span", "color:#888;white-space:nowrap;", "📁 路径");
-  const pathRow = el("div", "display:flex;align-items:center;gap:6px;min-width:0;");
-  const pathText = el(
-    "span",
-    "flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9ca3af;",
-    "—",
-  );
-  const openBtn = el(
-    "button",
-    "flex:0 0 auto;cursor:pointer;padding:1px 8px;border-radius:4px;border:1px solid #555;background:#222;color:#ddd;font-size:11px;",
-    "打开目录",
-  );
-  pathRow.appendChild(pathText);
-  pathRow.appendChild(openBtn);
-  body.appendChild(pathLabel);
-  body.appendChild(pathRow);
-  root.appendChild(body);
-
   const panel = {
     root,
     video,
+    imagePreview,
+    videoWrap,
     header,
     body,
     cells,
@@ -269,27 +284,38 @@ function buildPanel() {
     copyAllBtn,
     foldBtn,
     videoOnlyBtn,
-    node: null,
-    info: null,
-    videoOnly: false,
-    detailsOpen: true,
-    colorOpen: false,
-    bloomLayer,
-    mistLayer,
-    halationLayer,
+    kindBar,
     kindButtons,
-    sliders,
+    colorHeader,
     colorBody,
     colorFold,
     colorTitle,
     colorReset,
     bakeBtn,
     colorStatus,
+    sliders,
+    bloomLayer,
+    mistLayer,
+    halationLayer,
+    node: null,
+    info: null,
+    videoOnly: false,
+    detailsOpen: true,
+    colorOpen: false,
   };
   panelRef = panel;
 
   const refreshLayout = () => {
-    // 仅画面模式：参数与详情全藏，只留画面（画面高度不变）
+    const node = panel.node;
+    const kind = currentKind(node);
+    const hasPlayer = kind !== "audio";
+
+    // 形态：视频=画面+控制条；图片=静图（无控制条）；音频=无画面
+    panel.videoWrap.style.display = hasPlayer ? "block" : "none";
+    panel.video.style.display = kind === "video" ? "block" : "none";
+    panel.video.controls = kind === "video";
+    panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
+
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
     colorHeader.style.display = panel.videoOnly ? "none" : "flex";
@@ -299,21 +325,24 @@ function buildPanel() {
     videoOnlyBtn.textContent = panel.videoOnly ? "⌄" : "⌃";
     videoOnlyBtn.title = panel.videoOnly ? "展开参数与详情" : "折叠参数，仅显示画面";
 
-    const node = panel.node;
     if (node) {
       node.properties = node.properties || {};
       node.properties.easyVideoOnly = panel.videoOnly;
       node.properties.easyDetailsOpen = panel.detailsOpen;
+      node.properties.easyColorOpen = panel.colorOpen;
+
       for (const name of PARAM_WIDGETS) {
         hideWidget(node.widgets?.find((w) => w.name === name), panel.videoOnly);
       }
-        node.properties.easyColorOpen = panel.colorOpen;
-    const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
+      if (!panel.videoOnly) applyKindWidgets(node, kind);
+
+      const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget?.computeSize) {
+        const player = hasPlayer ? PLAYER_HEIGHT : 0;
         const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
         const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
         const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
-        widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + head + details + color + 6];
+        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + player + head + details + color + 6];
       }
       const width = node.size?.[0] ?? 360;
       const height = node.computeSize ? node.computeSize()[1] : node.size?.[1] ?? 400;
@@ -328,7 +357,6 @@ function buildPanel() {
     panel.videoOnly = !panel.videoOnly;
     refreshLayout();
   });
-
   foldBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.detailsOpen = !panel.detailsOpen;
@@ -339,24 +367,6 @@ function buildPanel() {
     panel.detailsOpen = !panel.detailsOpen;
     refreshLayout();
   });
-
-  copyAllBtn.addEventListener("click", async (event) => {
-    event.stopPropagation();
-    const info = panel.info;
-    const lines = [info?.filename ? `文件名称 ${info.filename}` : null]
-      .concat(ROWS.map(([key, label, fmt]) => `${label.replace(/^\S+\s/, "")} ${fmt(info)}`))
-      .filter(Boolean);
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      copyAllBtn.textContent = "已复制";
-      setTimeout(() => {
-        copyAllBtn.textContent = "复制全部";
-      }, 1200);
-    } catch (error) {
-      console.warn("[EasyMedia] 复制详情失败：", error);
-    }
-  });
-
   colorFold.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.colorOpen = !panel.colorOpen;
@@ -376,6 +386,23 @@ function buildPanel() {
   bakeBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
     await bakeColorTune(panel);
+  });
+
+  copyAllBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const info = panel.info;
+    const lines = [info?.filename ? `文件名称 ${info.filename}` : null]
+      .concat(ROWS.map(([key, label, fmt]) => `${label.replace(/^\S+\s/, "")} ${fmt(info)}`))
+      .filter(Boolean);
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      copyAllBtn.textContent = "已复制";
+      setTimeout(() => {
+        copyAllBtn.textContent = "复制全部";
+      }, 1200);
+    } catch (error) {
+      console.warn("[EasyMedia] 复制详情失败：", error);
+    }
   });
 
   openBtn.addEventListener("mousedown", (event) => event.stopPropagation());
@@ -400,15 +427,45 @@ function buildPanel() {
   return panel;
 }
 
-let panelRef = null;
+function applyKindWidgets(node, kind) {
+  const show = new Set(KIND_WIDGETS[kind] ?? []);
+  const managed = new Set(Object.values(KIND_WIDGETS).flat());
+  for (const name of managed) {
+    hideWidget(node.widgets?.find((w) => w.name === name), !show.has(name));
+  }
+}
+
+function syncKindButtons(panel) {
+  const node = panel?.node;
+  if (!node || !panel?.kindButtons) return;
+  const current = currentKind(node);
+  for (const [kind, btn] of panel.kindButtons) {
+    const active = kind === current;
+    btn.style.borderColor = active ? "#39a0ff" : "#4a4a4a";
+    btn.style.background = active ? "rgba(29,78,216,.85)" : "rgba(20,20,20,.85)";
+    btn.style.opacity = active ? "1" : "0.7";
+  }
+  applyKindWidgets(node, current);
+}
+
+function setSaveKind(panel, kind) {
+  const node = panel?.node;
+  if (!node) return;
+  const widget = node.widgets?.find((w) => w.name === "save_kind");
+  if (widget) {
+    widget.value = kind;
+    widget.callback?.(kind);
+  }
+  syncKindButtons(panel);
+  panel.refreshLayout?.();
+}
 
 function colorTune() {
-  const tune = {};
   const panel = panelRef;
+  const tune = {};
   if (!panel?.sliders) return tune;
   for (const [key, entry] of panel.sliders) {
-    const value = Number(entry.input.value);
-    tune[key] = value * entry.row.scale;
+    tune[key] = Number(entry.input.value) * entry.row.scale;
   }
   return tune;
 }
@@ -423,7 +480,6 @@ function resetColorTune() {
   applyColorPreview(panel);
 }
 
-/** 预览只做饱和度（其它三项是导出时的逐帧处理，浏览器端只能近似） */
 function applyColorPreview(panel) {
   if (!panel?.video) return;
   const tune = colorTune();
@@ -436,7 +492,6 @@ function applyColorPreview(panel) {
     panel.bloomLayer.style.opacity = bloom > 0.001 ? String(Math.min(0.9, bloom)) : "0";
     panel.bloomLayer.style.backdropFilter = `blur(${(bloomRadius * 2).toFixed(1)}px) brightness(1.35)`;
   }
-
   const mist = Number(tune["🌫️ 柔雾强度"] ?? 0);
   const mistRadius = Number(tune["🌫️ 柔焦范围"] ?? 4);
   const veil = Number(tune["🌫️ 灰雾浓度"] ?? 0.3);
@@ -445,7 +500,6 @@ function applyColorPreview(panel) {
     panel.mistLayer.style.backdropFilter = `blur(${(mistRadius * 2).toFixed(1)}px) brightness(1.12)`;
     panel.mistLayer.style.background = `rgba(255,255,255,${(veil * Math.min(0.5, mist)).toFixed(3)})`;
   }
-
   const halation = Number(tune["🔥 暖晕强度"] ?? 0);
   const halationRadius = Number(tune["🔥 暖晕范围"] ?? 5);
   if (panel.halationLayer) {
@@ -461,11 +515,9 @@ async function bakeColorTune(panel) {
     if (panel?.colorStatus) panel.colorStatus.textContent = "先出一次片再调色";
     return;
   }
+  const rows = COLOR_GROUPS.flatMap((g) => g.rows);
   const tune = colorTune();
-  const dirty = Object.entries(tune).some(([key, value]) => {
-    const def = COLOR_GROUPS.flatMap((g) => g.rows).find((row) => row.key === key)?.def ?? 0;
-    return Math.abs(Number(value) - def * (COLOR_GROUPS.flatMap((g) => g.rows).find((row) => row.key === key)?.scale ?? 1)) > 1e-6;
-  });
+  const dirty = rows.some((row) => Math.abs(Number(tune[row.key] ?? 0) - row.def * row.scale) > 1e-6);
   if (!dirty) {
     panel.colorStatus.textContent = "参数都是默认值，无需导出";
     return;
@@ -485,40 +537,15 @@ async function bakeColorTune(panel) {
     }
     panel.colorStatus.textContent = `已导出 ${data.filename || ""}（${((Date.now() - started) / 1000).toFixed(1)} 秒）`;
     if (data.filename) {
-      const params = new URLSearchParams({
+      const q = new URLSearchParams({
         filename: data.filename,
         subfolder: info.subfolder || "",
         type: info.type || "output",
       });
-      panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
+      panel.video.src = `/view?${q.toString()}&t=${Date.now()}`;
     }
   } catch (error) {
     panel.colorStatus.textContent = `导出失败：${error}`;
-  }
-}
-
-/** 设置输出形态：改 widget 值 + 刷新图标高亮（值随工作流序列化） */
-function setSaveKind(panel, kind) {
-  const node = panel?.node;
-  if (!node) return;
-  const widget = node.widgets?.find((w) => w.name === "save_kind");
-  if (widget) {
-    widget.value = kind;
-    widget.callback?.(kind);
-  }
-  syncKindButtons(panel);
-  panel.colorStatus && (panel.colorStatus.textContent = "");
-}
-
-function syncKindButtons(panel) {
-  const node = panel?.node;
-  if (!node || !panel?.kindButtons) return;
-  const current = String(node.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
-  for (const [kind, btn] of panel.kindButtons) {
-    const active = kind === current;
-    btn.style.borderColor = active ? "#39a0ff" : "#4a4a4a";
-    btn.style.background = active ? "rgba(29,78,216,.85)" : "rgba(20,20,20,.85)";
-    btn.style.opacity = active ? "1" : "0.7";
   }
 }
 
@@ -530,36 +557,22 @@ function applyInfo(panel, info) {
     subfolder: info.subfolder || "",
     type: info.type || "output",
   });
-  if (info.filename) panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
+  if (info.kind === "images") {
+    const name = info.first_filename || String(info.filename || "").split(" … ")[0];
+    if (name) {
+      const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });
+      panel.imagePreview.src = `/view?${q.toString()}&t=${Date.now()}`;
+    }
+  } else if (info.filename) {
+    panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
+  }
   for (const [key, , fmt] of ROWS) {
     const cell = panel.cells.get(key);
     if (cell) cell.textContent = fmt(info);
   }
   panel.pathText.textContent = info.path || info.filename || "—";
   panel.pathText.title = info.path || "";
-}
-
-/**
- * 隐藏/恢复一个原生 widget。
- * 只改 computeSize 不够：新版前端（Vue 节点）还看 widget.hidden 与 computeLayoutSize，
- * 三处一起处理才能让它真的从布局里消失（与班长 applyWidgetHiddenLayout 同款）。
- */
-function hideWidget(widget, hide) {
-  if (!widget) return;
-  if (hide) {
-    if (widget._easySizeSaved) return;
-    widget._easySizeSaved = { cs: widget.computeSize, cls: widget.computeLayoutSize };
-    widget.hidden = true;
-    widget.computeSize = () => [0, -4];
-    widget.computeLayoutSize = () => ({ minHeight: 0, maxHeight: 0, minWidth: 0, maxWidth: 0 });
-  } else if (widget._easySizeSaved) {
-    const saved = widget._easySizeSaved;
-    widget.computeSize = saved.cs;
-    if (saved.cls) widget.computeLayoutSize = saved.cls;
-    else delete widget.computeLayoutSize;
-    widget.hidden = false;
-    delete widget._easySizeSaved;
-  }
+  panel.refreshLayout?.();
 }
 
 function ensurePanel(node) {
@@ -568,13 +581,13 @@ function ensurePanel(node) {
   node._easyVideoPanel = panel;
   panel.node = node;
   const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
-  widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
+  widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
   panel.videoOnly = node.properties?.easyVideoOnly === true;
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
   panel.colorOpen = node.properties?.easyColorOpen === true;
-  panel.refreshLayout();
   syncKindButtons(panel);
-  if (node.size && node.size[1] < 430) node.setSize([node.size[0], 430]);
+  panel.refreshLayout();
+  if (node.size && node.size[1] < 460) node.setSize([node.size[0], 460]);
   return panel;
 }
 
@@ -619,8 +632,8 @@ app.registerExtension({
         panel.videoOnly = this.properties?.easyVideoOnly === true;
         panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
         panel.colorOpen = this.properties?.easyColorOpen === true;
-        panel.refreshLayout();
         syncKindButtons(panel);
+        panel.refreshLayout();
       } catch (error) {
         console.warn("[EasyMedia] 恢复视频面板失败：", error);
       }

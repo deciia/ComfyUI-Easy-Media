@@ -592,6 +592,8 @@ def _save_media_output(
         info = {
             "kind": "images",
             "filename": saved[0] if len(saved) == 1 else f"{saved[0]} … {saved[-1]}",
+            "first_filename": saved[0],
+            "last_filename": saved[-1],
             "subfolder": subfolder or "",
             "type": "temp" if write_temp else "output",
             "path": os.path.join(full_output_folder, saved[0]),
