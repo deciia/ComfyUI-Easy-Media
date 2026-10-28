@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 import urllib.request
 from fractions import Fraction
@@ -17,7 +18,7 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 
 from ..utils import log_stage_time, flatten_media_inputs, merge_two_audio, save_audio_to_temp_wav, split_list_outputs
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file, get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,99 @@ _OUTPUT_MODE_OPTIONS = ["save", "preview_only", "hide", "hide&save"]
 # 用普通下拉 + 固定输入，避免 DynamicCombo 切换子输入导致
 # 存档按位置还原时整体串位（重启后 input_mode/output_mode/filename_prefix 错位）。
 _INPUT_MODE_OPTIONS = ["images+audio", "video"]
+
+# 输出格式（参考班长「🎥 视频合并」的格式清单）：第一个是默认值，保持原行为
+_VIDEO_FORMAT_OPTIONS = [
+    "跟随源 (AUTO)",
+    "MP4 (H264)",
+    "MP4 (H265)",
+    "MOV (H264)",
+    "MOV (ProRes)",
+    "MKV (H264)",
+    "WEBM (AV1)",
+    "GIF",
+    "WEBP",
+]
+
+# label -> (ext, container, codec)
+_NATIVE_FORMATS = {
+    "跟随源 (AUTO)": ("mp4", Types.VideoContainer.AUTO, Types.VideoCodec.AUTO),
+    "MP4 (H264)": ("mp4", Types.VideoContainer.MP4, Types.VideoCodec.H264),
+    "MKV (H264)": ("mkv", Types.VideoContainer.MKV, Types.VideoCodec.H264),
+    "WEBM (AV1)": ("webm", Types.VideoContainer.WEBM, Types.VideoCodec.AV1),
+}
+
+# label -> (ext, ffmpeg 参数, 是否保留音频)
+_FFMPEG_FORMATS = {
+    "MP4 (H265)": ("mp4", ["-c:v", "libx265", "-crf", "20", "-pix_fmt", "yuv420p",
+                           "-c:a", "aac", "-tag:v", "hvc1"], True),
+    "MOV (H264)": ("mov", ["-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                           "-c:a", "aac"], True),
+    "MOV (ProRes)": ("mov", ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
+                             "-c:a", "pcm_s16le"], True),
+    "GIF": ("gif", ["-an", "-loop", "0"], False),
+    "WEBP": ("webp", ["-an", "-loop", "0", "-q:v", "80"], False),
+}
+
+
+def _format_spec(label: str):
+    """返回 (ext, container, codec, ffmpeg_args) —— ffmpeg_args 为 None 表示走原生保存。"""
+    label = str(label or "").strip()
+    if label in _NATIVE_FORMATS:
+        ext, container, codec = _NATIVE_FORMATS[label]
+        return ext, container, codec, None
+    if label in _FFMPEG_FORMATS:
+        ext, args, _keep_audio = _FFMPEG_FORMATS[label]
+        return ext, Types.VideoContainer.AUTO, Types.VideoCodec.AUTO, list(args)
+    return _NATIVE_FORMATS["跟随源 (AUTO)"][0], *_NATIVE_FORMATS["跟随源 (AUTO)"][1:], None
+
+
+def _resolve_save_dir(custom_path: str, write_temp: bool):
+    """自定义目录：绝对路径直接用；相对路径按 output（或 temp）目录解析。"""
+    text = str(custom_path or "").strip()
+    base = folder_paths.get_temp_directory() if write_temp else folder_paths.get_output_directory()
+    if not text:
+        return None
+    target = text if os.path.isabs(text) else os.path.join(base, text)
+    os.makedirs(target, exist_ok=True)
+    return target
+
+
+def _next_free_path(save_dir: str, filename_prefix: str, ext: str) -> tuple[str, str]:
+    """在自定义目录里按 prefix_00001_.ext 递增取一个不冲突的文件名。"""
+    # 自定义目录已决定位置，前缀里的目录部分不能再用（否则会写到不存在的子目录）
+    safe = os.path.basename(str(filename_prefix or "ComfyUI").replace("\\", "/")).strip() or "ComfyUI"
+    for counter in range(1, 100000):
+        name = f"{safe}_{counter:05}_.{ext}"
+        full = os.path.join(save_dir, name)
+        if not os.path.exists(full):
+            return name, full
+    raise RuntimeError(f"无法在 {save_dir} 里分配文件名")
+
+
+def _ffmpeg_transcode(src: str, dst: str, args: list[str], fps: float | None = None):
+    """用 ffmpeg 把 src 转成 dst（容器/编码由 args 决定）。失败抛 RuntimeError。"""
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("需要 FFmpeg 才能输出该格式（未找到 ffmpeg 可执行文件）")
+    command = [ffmpeg, "-y", "-nostdin", "-v", "error", "-i", src]
+    if fps and dst.lower().endswith((".gif", ".webp")):
+        command += ["-vf", f"fps={max(1.0, float(fps)):.3f},scale=iw:-1:flags=lanczos"]
+    command += args + [dst]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg 转码失败：{(result.stderr or '').strip()[:300]}")
+
+
+def _cleanup_gpu(tag: str = "Save Video"):
+    """出片后卸载模型 + 清显存；任何异常只记录，不覆盖原始结果。"""
+    try:
+        import comfy.model_management as mm
+        mm.unload_all_models()
+        mm.soft_empty_cache()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[EasySaveVideo] %s 显存清理失败：%s", tag, exc)
+
 
 
 class MakeVideoList(io.ComfyNode):
@@ -168,6 +262,37 @@ class EasySaveVideo(io.ComfyNode):
                     tooltip="Write ComfyUI prompt/workflow metadata into the saved file.",
                 ),
                 io.String.Input("filename_prefix", default="ComfyUI"),
+                # —— 以下为追加输入（位置必须在末尾，避免旧存档按位置回填时错位）——
+                io.Combo.Input(
+                    "video_format",
+                    options=list(_VIDEO_FORMAT_OPTIONS),
+                    default="跟随源 (AUTO)",
+                    tooltip=(
+                        "输出容器/编码。AUTO/MP4(H264)/MKV/WEBM 走原生保存；"
+                        "MP4(H265)/MOV(H264)/MOV(ProRes)/GIF/WEBP 走 FFmpeg 转码。"
+                    ),
+                ),
+                io.String.Input(
+                    "custom_save_path",
+                    default="",
+                    tooltip=(
+                        "自定义保存目录（仅 save / hide&save 生效）。绝对路径直接用，"
+                        "相对路径按 output 目录解析；留空保持原行为。"
+                    ),
+                ),
+                io.Boolean.Input(
+                    "adopt_source_video",
+                    default=False,
+                    tooltip=(
+                        "video 模式：目标容器与源一致、未替换音轨、未写元数据时，"
+                        "直接复制文件（流复制，不重新编码）。"
+                    ),
+                ),
+                io.Boolean.Input(
+                    "cleanup_after_save",
+                    default=False,
+                    tooltip="出片后卸载模型并清理显存（出错也会清理）。",
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
@@ -188,6 +313,10 @@ class EasySaveVideo(io.ComfyNode):
         video=None,
         audio=None,
         save_metadata: bool = False,
+        video_format: str = "跟随源 (AUTO)",
+        custom_save_path: str = "",
+        adopt_source_video: bool = False,
+        cleanup_after_save: bool = False,
     ) -> io.NodeOutput:
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
@@ -239,43 +368,23 @@ class EasySaveVideo(io.ComfyNode):
                 )
             )
 
-        width, height = source_video.get_dimensions()
-
-        if write_temp:
-            output_dir = folder_paths.get_temp_directory()
-            folder_type = io.FolderType.temp
-        else:
-            output_dir = folder_paths.get_output_directory()
-            folder_type = io.FolderType.output
-
-        full_output_folder, filename, counter, subfolder, filename_prefix = (
-            folder_paths.get_save_image_path(filename_prefix, output_dir, width, height)
-        )
-
-        ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
-        file = f"{filename}_{counter:05}_.{ext}"
-        full_path = os.path.join(full_output_folder, file)
-        prefix = "temp" if write_temp else "output"
-        relative_output_path = os.path.relpath(full_path, output_dir).replace("\\", "/")
-        relative_path = f"{prefix}/{relative_output_path}"
-
-        metadata: dict | None = None
-        if save_metadata:
-            metadata = {}
-            if cls.hidden.extra_pnginfo is not None:
-                metadata.update(cls.hidden.extra_pnginfo)
-            if cls.hidden.prompt is not None:
-                metadata["prompt"] = cls.hidden.prompt
-            if not metadata:
-                metadata = None
-
-        with log_stage_time("Save Video", f"{relative_path} / save_video"):
-            source_video.save_to(
-                full_path,
-                format=Types.VideoContainer.AUTO,
-                codec=Types.VideoCodec.AUTO,
-                metadata=metadata,
+        try:
+            relative_path, file, subfolder, folder_type = _save_video_output(
+                source_video=source_video,
+                write_temp=write_temp,
+                filename_prefix=filename_prefix,
+                save_metadata=bool(save_metadata),
+                video_format=video_format,
+                custom_save_path=custom_save_path,
+                adopt_source_video=bool(adopt_source_video),
+                audio_replaced=bool(audio is not None and input_mode_key == "video"),
+                fps=float(fps or 24.0),
+                prompt=cls.hidden.prompt,
+                extra_pnginfo=cls.hidden.extra_pnginfo,
             )
+        finally:
+            if cleanup_after_save:
+                _cleanup_gpu()
 
         if hide_preview:
             return io.NodeOutput(source_video, relative_path)
@@ -285,6 +394,115 @@ class EasySaveVideo(io.ComfyNode):
             relative_path,
             ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]),
         )
+
+def _save_video_output(
+    *,
+    source_video,
+    write_temp: bool,
+    filename_prefix: str,
+    save_metadata: bool,
+    video_format: str,
+    custom_save_path: str,
+    adopt_source_video: bool,
+    audio_replaced: bool,
+    fps: float,
+    prompt,
+    extra_pnginfo,
+):
+    """按 video_format 落盘，返回 (relative_path, file, subfolder, folder_type)。
+
+    - 原生容器（AUTO/MP4/MKV/WEBM）：走 source_video.save_to；
+    - 其它容器（H265/MOV/ProRes/GIF/WEBP）：先写原生临时文件，再用 FFmpeg 转码；
+    - adopt_source_video：同容器且无需改音轨/元数据时直接复制，不重新编码。
+    """
+    width, height = source_video.get_dimensions()
+    ext, container, codec, ff_args = _format_spec(video_format)
+
+    if write_temp:
+        output_dir = folder_paths.get_temp_directory()
+        folder_type = io.FolderType.temp
+    else:
+        output_dir = folder_paths.get_output_directory()
+        folder_type = io.FolderType.output
+
+    custom_dir = None if write_temp else _resolve_save_dir(custom_save_path, write_temp)
+
+    if custom_dir:
+        file, full_path = _next_free_path(custom_dir, filename_prefix, ext)
+        try:
+            subfolder = os.path.relpath(custom_dir, output_dir).replace("\\", "/")
+            if subfolder.startswith(".."):
+                subfolder = ""
+        except Exception:
+            subfolder = ""
+    else:
+        full_output_folder, filename, counter, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(filename_prefix, output_dir, width, height)
+        )
+        file = f"{filename}_{counter:05}_.{ext}"
+        full_path = os.path.join(full_output_folder, file)
+
+    prefix = "temp" if write_temp else "output"
+    relative_output_path = os.path.relpath(full_path, output_dir).replace("\\", "/")
+    relative_path = f"{prefix}/{relative_output_path}"
+
+    metadata: dict | None = None
+    if save_metadata:
+        metadata = {}
+        if extra_pnginfo is not None:
+            metadata.update(extra_pnginfo)
+        if prompt is not None:
+            metadata["prompt"] = prompt
+        if not metadata:
+            metadata = None
+
+    with log_stage_time("Save Video", f"{relative_path} / save_video"):
+        adopted = False
+        if adopt_source_video and ff_args is None and metadata is None and not audio_replaced:
+            temp_files: list[str] = []
+            try:
+                src_path, temp_files = video_input_to_local_file(
+                    source_video,
+                    suffix=f".{ext}",
+                    save_kwargs={"format": container, "codec": codec},
+                )
+                src_ext = os.path.splitext(src_path)[1].lstrip(".").lower()
+                if src_ext == ext:
+                    shutil.copy2(src_path, full_path)
+                    adopted = True
+                    logger.info("[EasySaveVideo] 采用成品视频（流复制）：%s", relative_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[EasySaveVideo] 采用成品失败，回退到重新编码：%s", exc)
+            finally:
+                for path in temp_files:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
+        if not adopted:
+            if ff_args is None:
+                source_video.save_to(full_path, format=container, codec=codec, metadata=metadata)
+            else:
+                tmp_dir = folder_paths.get_temp_directory()
+                fd, tmp_src = tempfile.mkstemp(suffix=".mp4", dir=tmp_dir)
+                os.close(fd)
+                try:
+                    source_video.save_to(
+                        tmp_src,
+                        format=Types.VideoContainer.MP4,
+                        codec=Types.VideoCodec.H264,
+                        metadata=metadata,
+                    )
+                    _ffmpeg_transcode(tmp_src, full_path, ff_args, fps=fps)
+                finally:
+                    try:
+                        os.unlink(tmp_src)
+                    except OSError:
+                        pass
+
+    return relative_path, file, subfolder, folder_type
+
 
 def _save_audio_to_temp_wav(audio: dict) -> str | None:
     """Backward-compatible wrapper for the shared AUDIO serializer."""
