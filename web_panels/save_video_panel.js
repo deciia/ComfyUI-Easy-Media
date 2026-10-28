@@ -34,6 +34,39 @@ const PARAM_WIDGETS = [
   "notify_sound",
 ];
 const PLAYER_HEIGHT = 220;
+const COLOR_HEIGHT = 250;
+
+/** 调色参数（键名与班长 /banzhang_api/bake_video 的 tune 完全一致） */
+const COLOR_GROUPS = [
+  {
+    title: "🎨 饱和度",
+    rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }],
+  },
+  {
+    title: "✨ 泛光 Bloom",
+    rows: [
+      { key: "✨ 泛光强度", label: "强度", min: 0, max: 100, step: 1, def: 0, unit: "%", scale: 0.01 },
+      { key: "✨ 泛光起点", label: "起点 · 多亮才发光", min: 0, max: 95, step: 1, def: 75, unit: "%", scale: 0.01 },
+      { key: "✨ 泛光范围", label: "范围 · 扩散多远", min: 1, max: 10, step: 0.5, def: 4, unit: "", scale: 1 },
+    ],
+  },
+  {
+    title: "🌫️ 柔雾 Mist",
+    rows: [
+      { key: "🌫️ 柔雾强度", label: "强度 · 柔焦量", min: 0, max: 100, step: 1, def: 0, unit: "%", scale: 0.01 },
+      { key: "🌫️ 柔焦范围", label: "柔焦范围", min: 1, max: 10, step: 0.5, def: 4, unit: "", scale: 1 },
+      { key: "🌫️ 灰雾浓度", label: "灰雾 · 抬黑位", min: 0, max: 100, step: 1, def: 30, unit: "%", scale: 0.01 },
+    ],
+  },
+  {
+    title: "🔥 暖晕 Halation",
+    rows: [
+      { key: "🔥 暖晕强度", label: "强度 · 红橙溢出", min: 0, max: 100, step: 1, def: 0, unit: "%", scale: 0.01 },
+      { key: "🔥 暖晕起点", label: "起点 · 多亮才出暖晕", min: 0, max: 95, step: 1, def: 70, unit: "%", scale: 0.01 },
+      { key: "🔥 暖晕范围", label: "范围 · 扩散多远", min: 1, max: 10, step: 0.5, def: 5, unit: "", scale: 1 },
+    ],
+  },
+];
 const HEADER_HEIGHT = 26;
 const DETAILS_HEIGHT = 186;
 
@@ -114,6 +147,59 @@ function buildPanel() {
     cells.set(key, v);
   }
 
+  // ── 调色台（默认收起）──
+  const colorHeader = el(
+    "div",
+    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
+  );
+  const colorFold = el("button", BTN_CSS, "▸");
+  const colorTitle = el("span", "flex:1 1 auto;cursor:pointer;", "🎨 调色台");
+  const colorReset = el("button", BTN_CSS, "重置");
+  colorHeader.appendChild(colorFold);
+  colorHeader.appendChild(colorTitle);
+  colorHeader.appendChild(colorReset);
+  root.appendChild(colorHeader);
+
+  const colorBody = el("div", "display:none;flex-direction:column;gap:6px;padding:6px 8px;border-top:1px solid #2a2a2a;background:#171717;font-size:11px;color:#ddd;");
+  const sliders = new Map();
+  for (const group of COLOR_GROUPS) {
+    const g = el("div", "display:flex;flex-direction:column;gap:3px;");
+    g.appendChild(el("div", "color:#9bd0ff;font-size:10px;", group.title));
+    for (const row of group.rows) {
+      const line = el("div", "display:flex;align-items:center;gap:6px;");
+      line.appendChild(el("span", "flex:0 0 108px;color:#888;white-space:nowrap;", row.label));
+      const input = el("input", "flex:1 1 auto;min-width:0;");
+      input.type = "range";
+      input.min = String(row.min);
+      input.max = String(row.max);
+      input.step = String(row.step);
+      input.value = String(row.def);
+      const value = el("span", "flex:0 0 44px;text-align:right;color:#bbb;font-variant-numeric:tabular-nums;", `${row.def}${row.unit}`);
+      input.addEventListener("mousedown", (event) => event.stopPropagation());
+      input.addEventListener("input", () => {
+        value.textContent = `${input.value}${row.unit}`;
+        applyColorPreview(panelRef);
+      });
+      line.appendChild(input);
+      line.appendChild(value);
+      g.appendChild(line);
+      sliders.set(row.key, { input, value, row });
+    }
+    colorBody.appendChild(g);
+  }
+
+  const colorActions = el("div", "display:flex;align-items:center;gap:6px;padding-top:2px;");
+  const bakeBtn = el(
+    "button",
+    "cursor:pointer;padding:2px 10px;border-radius:4px;border:1px solid #2b6cb0;background:#1d4ed8;color:#fff;font-size:11px;",
+    "应用并导出",
+  );
+  const colorStatus = el("span", "flex:1 1 auto;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", "");
+  colorActions.appendChild(bakeBtn);
+  colorActions.appendChild(colorStatus);
+  colorBody.appendChild(colorActions);
+  root.appendChild(colorBody);
+
   const pathLabel = el("span", "color:#888;white-space:nowrap;", "📁 路径");
   const pathRow = el("div", "display:flex;align-items:center;gap:6px;min-width:0;");
   const pathText = el(
@@ -147,12 +233,24 @@ function buildPanel() {
     info: null,
     videoOnly: false,
     detailsOpen: true,
+    colorOpen: false,
+    sliders,
+    colorBody,
+    colorFold,
+    colorTitle,
+    colorReset,
+    bakeBtn,
+    colorStatus,
   };
+  panelRef = panel;
 
   const refreshLayout = () => {
     // 仅画面模式：参数与详情全藏，只留画面（画面高度不变）
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
+    colorHeader.style.display = panel.videoOnly ? "none" : "flex";
+    colorBody.style.display = panel.videoOnly || !panel.colorOpen ? "none" : "flex";
+    colorFold.textContent = panel.colorOpen ? "▾" : "▸";
     foldBtn.textContent = panel.detailsOpen ? "▾" : "▸";
     videoOnlyBtn.textContent = panel.videoOnly ? "⌄" : "⌃";
     videoOnlyBtn.title = panel.videoOnly ? "展开参数与详情" : "折叠参数，仅显示画面";
@@ -165,11 +263,13 @@ function buildPanel() {
       for (const name of PARAM_WIDGETS) {
         hideWidget(node.widgets?.find((w) => w.name === name), panel.videoOnly);
       }
-      const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
+        node.properties.easyColorOpen = panel.colorOpen;
+    const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget?.computeSize) {
         const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
         const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
-        widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + head + details + 6];
+        const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
+        widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + head + details + color + 6];
       }
       const width = node.size?.[0] ?? 360;
       const height = node.computeSize ? node.computeSize()[1] : node.size?.[1] ?? 400;
@@ -213,6 +313,27 @@ function buildPanel() {
     }
   });
 
+  colorFold.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.colorOpen = !panel.colorOpen;
+    refreshLayout();
+  });
+  colorTitle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.colorOpen = !panel.colorOpen;
+    refreshLayout();
+  });
+  colorReset.addEventListener("click", (event) => {
+    event.stopPropagation();
+    resetColorTune();
+    refreshLayout();
+  });
+  bakeBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  bakeBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await bakeColorTune(panel);
+  });
+
   openBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   openBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
@@ -233,6 +354,79 @@ function buildPanel() {
 
   panel.refreshLayout = refreshLayout;
   return panel;
+}
+
+let panelRef = null;
+
+function colorTune() {
+  const tune = {};
+  const panel = panelRef;
+  if (!panel?.sliders) return tune;
+  for (const [key, entry] of panel.sliders) {
+    const value = Number(entry.input.value);
+    tune[key] = value * entry.row.scale;
+  }
+  return tune;
+}
+
+function resetColorTune() {
+  const panel = panelRef;
+  if (!panel?.sliders) return;
+  for (const [, entry] of panel.sliders) {
+    entry.input.value = String(entry.row.def);
+    entry.value.textContent = `${entry.row.def}${entry.row.unit}`;
+  }
+  applyColorPreview(panel);
+}
+
+/** 预览只做饱和度（其它三项是导出时的逐帧处理，浏览器端只能近似） */
+function applyColorPreview(panel) {
+  if (!panel?.video) return;
+  const tune = colorTune();
+  const sat = Number(tune["🎨 饱和度"] ?? 1);
+  panel.video.style.filter = Math.abs(sat - 1) < 0.01 ? "" : `saturate(${sat.toFixed(2)})`;
+}
+
+async function bakeColorTune(panel) {
+  const info = panel?.info;
+  if (!info?.path) {
+    if (panel?.colorStatus) panel.colorStatus.textContent = "先出一次片再调色";
+    return;
+  }
+  const tune = colorTune();
+  const dirty = Object.entries(tune).some(([key, value]) => {
+    const def = COLOR_GROUPS.flatMap((g) => g.rows).find((row) => row.key === key)?.def ?? 0;
+    return Math.abs(Number(value) - def * (COLOR_GROUPS.flatMap((g) => g.rows).find((row) => row.key === key)?.scale ?? 1)) > 1e-6;
+  });
+  if (!dirty) {
+    panel.colorStatus.textContent = "参数都是默认值，无需导出";
+    return;
+  }
+  panel.colorStatus.textContent = "导出中…";
+  const started = Date.now();
+  try {
+    const res = await fetch("/banzhang_api/bake_video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src: info.path, tune }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      panel.colorStatus.textContent = `导出失败：${data?.msg || res.status}`;
+      return;
+    }
+    panel.colorStatus.textContent = `已导出 ${data.filename || ""}（${((Date.now() - started) / 1000).toFixed(1)} 秒）`;
+    if (data.filename) {
+      const params = new URLSearchParams({
+        filename: data.filename,
+        subfolder: info.subfolder || "",
+        type: info.type || "output",
+      });
+      panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
+    }
+  } catch (error) {
+    panel.colorStatus.textContent = `导出失败：${error}`;
+  }
 }
 
 function applyInfo(panel, info) {
@@ -284,6 +478,7 @@ function ensurePanel(node) {
   widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
   panel.videoOnly = node.properties?.easyVideoOnly === true;
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
+  panel.colorOpen = node.properties?.easyColorOpen === true;
   panel.refreshLayout();
   if (node.size && node.size[1] < 430) node.setSize([node.size[0], 430]);
   return panel;
@@ -329,6 +524,7 @@ app.registerExtension({
         if (cached) applyInfo(panel, cached);
         panel.videoOnly = this.properties?.easyVideoOnly === true;
         panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
+        panel.colorOpen = this.properties?.easyColorOpen === true;
         panel.refreshLayout();
       } catch (error) {
         console.warn("[EasyMedia] 恢复视频面板失败：", error);
