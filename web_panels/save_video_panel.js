@@ -381,6 +381,7 @@ function buildPanel() {
     detailsOpen: true,
     colorOpen: false,
     playerHeight: PLAYER_HEIGHT,
+    aspect: 16 / 9,
     _lastSize: null,
   };
   panelRef = panel;
@@ -492,7 +493,12 @@ function buildPanel() {
   panel.syncTransport = syncTransport;
 
   panel.video.addEventListener("timeupdate", () => panel.transport.style.display === "flex" && syncTransport());
-  panel.video.addEventListener("loadedmetadata", syncTransport);
+  panel.video.addEventListener("loadedmetadata", () => {
+    const vw = Number(panel.video.videoWidth) || 0;
+    const vh = Number(panel.video.videoHeight) || 0;
+    if (vw > 0 && vh > 0) panel.aspect = vh / vw;
+    syncTransport();
+  });
   panel.video.addEventListener("play", syncTransport);
   panel.video.addEventListener("pause", syncTransport);
 
@@ -738,6 +744,7 @@ async function bakeColorTune(panel) {
 function applyInfo(panel, info) {
   if (!info) return;
   panel.info = info;
+  if (info?.width > 0 && info?.height > 0) panel.aspect = Number(info.height) / Number(info.width);
   const params = new URLSearchParams({
     filename: info.filename || "",
     subfolder: info.subfolder || "",
@@ -788,8 +795,25 @@ function ensurePanel(node) {
 function handleNodeResize(node) {
   const panel = node._easyVideoPanel;
   if (!panel || panel._applyingSize) return;
-  panel._lastSize = node.size ? [node.size[0], node.size[1]] : null;
+  const size = node.size;
+  if (!size) return;
+  const prev = panel._lastSize;
+  const dw = prev ? Math.abs(size[0] - prev[0]) : 0;
+  const dh = prev ? Math.abs(size[1] - prev[1]) : 0;
+  panel._lastSize = [size[0], size[1]];
+
+  // 宽度方向在拖：画面按视频宽高比缩放，节点高度随之调整（与「多轨项目视频合并」一致）
+  if (dw > dh && kindOf(panel) !== "audio") {
+    const player = Math.max(60, Math.min(1600, Math.round(size[0] * panel.aspect)));
+    panel.playerHeight = player;
+    panel.refreshLayout?.({ resizeNode: true });
+    return;
+  }
   panel.refreshLayout?.({ resizeNode: false });
+}
+
+function kindOf(panel) {
+  return String(panel?.node?.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
 }
 
 app.registerExtension({
