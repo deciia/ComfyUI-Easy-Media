@@ -183,10 +183,10 @@ function buildPanel() {
   audioPlayer.preload = "metadata";
   videoWrap.appendChild(audioPlayer);
 
-  const videoOnlyBtn = el("button", `position:absolute;top:4px;right:4px;width:20px;${BTN_CSS}`, "⌃");
+  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "⌃");
   videoOnlyBtn.title = "折叠参数，仅显示画面";
   videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
-  videoWrap.appendChild(videoOnlyBtn);
+  kindBar.appendChild(videoOnlyBtn);
 
   const bloomLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) brightness(1.35);");
   const mistLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:lighten;backdrop-filter:blur(8px) brightness(1.12);");
