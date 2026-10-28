@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 from fractions import Fraction
 from typing import Optional
@@ -550,6 +551,7 @@ def _save_video_output(
         if not metadata:
             metadata = None
 
+    _started = time.perf_counter()
     with log_stage_time("Save Video", f"{relative_path} / save_video"):
         adopted = False
         if adopt_source_video and ff_args is None and metadata is None and not audio_replaced:
@@ -605,6 +607,7 @@ def _save_video_output(
         "height": int(height),
         "format": os.path.splitext(file)[1].lstrip(".").lower(),
         "video_format": str(video_format or ""),
+        "save_seconds": round(time.perf_counter() - _started, 2),
     }
     try:
         probe = ffprobe_info(full_path) or {}
