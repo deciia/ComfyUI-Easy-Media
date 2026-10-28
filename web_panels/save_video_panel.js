@@ -313,6 +313,8 @@ function buildPanel() {
     videoOnly: false,
     detailsOpen: true,
     colorOpen: false,
+    playerHeight: PLAYER_HEIGHT,
+    _lastSize: null,
   };
   panelRef = panel;
 
@@ -323,6 +325,9 @@ function buildPanel() {
 
     // 形态：视频=画面+控制条；图片=静图（无控制条）；音频=只有播放条
     panel.videoWrap.style.display = "block";
+    const ph = Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
+    panel.video.style.height = `${ph}px`;
+    panel.imagePreview.style.height = `${ph}px`;
     panel.video.style.display = kind === "video" ? "block" : "none";
     panel.video.controls = kind === "video";
     panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
@@ -352,7 +357,7 @@ function buildPanel() {
 
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget?.computeSize) {
-        const player = kind === "audio" ? AUDIO_BAR_HEIGHT : PLAYER_HEIGHT;
+        const player = kind === "audio" ? AUDIO_BAR_HEIGHT : Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
         const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
         const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
         const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
@@ -606,7 +611,27 @@ function ensurePanel(node) {
   syncKindButtons(panel);
   panel.refreshLayout();
   if (node.size && node.size[1] < 460) node.setSize([node.size[0], 460]);
+  panel._lastSize = node.size ? [node.size[0], node.size[1]] : null;
   return panel;
+}
+
+/** 节点被拖动改高度时，把高度增量交给画面（其余部分保持固定高度） */
+function handleNodeResize(node) {
+  const panel = node._easyVideoPanel;
+  if (!panel) return;
+  const size = node.size;
+  if (!size) return;
+  if (!panel._lastSize) {
+    panel._lastSize = [size[0], size[1]];
+    return;
+  }
+  const delta = Number(size[1]) - Number(panel._lastSize[1]);
+  panel._lastSize = [size[0], size[1]];
+  if (!delta) return;
+  const next = Math.max(80, Math.min(900, Math.round((panel.playerHeight || PLAYER_HEIGHT) + delta)));
+  if (next === panel.playerHeight) return;
+  panel.playerHeight = next;
+  panel.refreshLayout?.();
 }
 
 app.registerExtension({
@@ -636,6 +661,17 @@ app.registerExtension({
         } catch (error) {
           console.warn("[EasyMedia] 刷新视频面板失败：", error);
         }
+      }
+      return result;
+    };
+
+    const onResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function (size, ...rest) {
+      const result = onResize?.apply(this, [size, ...rest]);
+      try {
+        handleNodeResize(this);
+      } catch (error) {
+        console.warn("[EasyMedia] 调整画面高度失败：", error);
       }
       return result;
     };
