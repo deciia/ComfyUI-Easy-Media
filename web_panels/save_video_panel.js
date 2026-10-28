@@ -20,15 +20,18 @@ const ROWS = [
   ["audio", "🔊 音频", (i) => (i?.has_audio ? "有声" : "无声")],
 ];
 
-const ADVANCED_WIDGETS = ["video_format", "custom_save_path", "adopt_source_video", "cleanup_after_save", "notify_sound"];
+/** 节点上方的全部输入控件（折叠按钮会把它们一起收起） */
 const PARAM_WIDGETS = [
   "input_mode",
   "fps",
   "output_mode",
   "save_metadata",
   "filename_prefix",
-  ...ADVANCED_WIDGETS,
-  "easy_settings_toggle",
+  "video_format",
+  "custom_save_path",
+  "adopt_source_video",
+  "cleanup_after_save",
+  "notify_sound",
 ];
 const PLAYER_HEIGHT = 220;
 const HEADER_HEIGHT = 26;
@@ -261,39 +264,6 @@ function hideWidget(widget, hide) {
   }
 }
 
-function applySettingsCollapsed(node) {
-  const collapsed = Boolean(node.properties?.easySettingsCollapsed);
-  for (const name of ADVANCED_WIDGETS) {
-    hideWidget(node.widgets?.find((w) => w.name === name), collapsed);
-  }
-  const toggle = node.widgets?.find((w) => w.name === "easy_settings_toggle");
-  if (toggle) {
-    toggle.name = collapsed
-      ? "▸ 高级设置（输出格式 / 路径 / 净化 / 提示音）"
-      : "▾ 高级设置（输出格式 / 路径 / 净化 / 提示音）";
-  }
-  node.setDirtyCanvas?.(true, true);
-}
-
-function attachSettingsToggle(node) {
-  if (node.widgets?.some((w) => w.name === "easy_settings_toggle")) return;
-  const widget = node.addWidget("button", "▾ 高级设置（输出格式 / 路径 / 净化 / 提示音）", null, () => {
-    node.properties = node.properties || {};
-    node.properties.easySettingsCollapsed = !node.properties.easySettingsCollapsed;
-    applySettingsCollapsed(node);
-    const width = node.size?.[0] ?? 360;
-    const height = node.computeSize ? node.computeSize()[1] : node.size?.[1] ?? 400;
-    node.setSize?.([width, Math.max(220, height)]);
-  });
-  widget.serialize = false;
-  const index = node.widgets.findIndex((w) => ADVANCED_WIDGETS.includes(w.name));
-  if (index >= 0) {
-    node.widgets.splice(node.widgets.indexOf(widget), 1);
-    node.widgets.splice(index, 0, widget);
-  }
-  applySettingsCollapsed(node);
-}
-
 function ensurePanel(node) {
   if (node._easyVideoPanel) return node._easyVideoPanel;
   const panel = buildPanel();
@@ -301,7 +271,6 @@ function ensurePanel(node) {
   panel.node = node;
   const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
   widget.computeSize = () => [node.size?.[0] ?? 360, PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
-  attachSettingsToggle(node);
   panel.videoOnly = node.properties?.easyVideoOnly === true;
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
   panel.refreshLayout();
@@ -347,7 +316,6 @@ app.registerExtension({
         const cached = this._easyVideoInfo;
         const panel = ensurePanel(this);
         if (cached) applyInfo(panel, cached);
-        if (this.properties?.easySettingsCollapsed !== undefined) applySettingsCollapsed(this);
         panel.videoOnly = this.properties?.easyVideoOnly === true;
         panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
         panel.refreshLayout();
