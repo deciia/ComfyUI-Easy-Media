@@ -53,6 +53,7 @@ const HEADER_HEIGHT = 26;
 const DETAILS_HEIGHT = 186;
 const COLOR_HEIGHT = 250;
 const KIND_BAR_HEIGHT = 24;
+const AUDIO_BAR_HEIGHT = 54;
 
 const COLOR_GROUPS = [
   { title: "🎨 饱和度", rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }] },
@@ -173,6 +174,15 @@ function buildPanel() {
   imagePreview.alt = "";
   videoWrap.appendChild(imagePreview);
 
+  // 音频形态：只有播放条，没有画面
+  const audioPlayer = el(
+    "audio",
+    `width:100%;height:${AUDIO_BAR_HEIGHT}px;background:#000;display:none;box-sizing:border-box;padding:8px 10px;`,
+  );
+  audioPlayer.controls = true;
+  audioPlayer.preload = "metadata";
+  videoWrap.appendChild(audioPlayer);
+
   const videoOnlyBtn = el("button", `position:absolute;top:4px;right:4px;width:20px;${BTN_CSS}`, "⌃");
   videoOnlyBtn.title = "折叠参数，仅显示画面";
   videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
@@ -285,6 +295,7 @@ function buildPanel() {
     foldBtn,
     videoOnlyBtn,
     kindBar,
+    audioPlayer,
     kindButtons,
     colorHeader,
     colorBody,
@@ -308,13 +319,16 @@ function buildPanel() {
   const refreshLayout = () => {
     const node = panel.node;
     const kind = currentKind(node);
-    const hasPlayer = kind !== "audio";
+    const hasPlayer = true;
 
-    // 形态：视频=画面+控制条；图片=静图（无控制条）；音频=无画面
-    panel.videoWrap.style.display = hasPlayer ? "block" : "none";
+    // 形态：视频=画面+控制条；图片=静图（无控制条）；音频=只有播放条
+    panel.videoWrap.style.display = "block";
     panel.video.style.display = kind === "video" ? "block" : "none";
     panel.video.controls = kind === "video";
     panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
+    if (panel.audioPlayer) {
+      panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
+    }
 
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
@@ -338,7 +352,7 @@ function buildPanel() {
 
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget?.computeSize) {
-        const player = hasPlayer ? PLAYER_HEIGHT : 0;
+        const player = kind === "audio" ? AUDIO_BAR_HEIGHT : PLAYER_HEIGHT;
         const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
         const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
         const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
@@ -562,6 +576,10 @@ function applyInfo(panel, info) {
     if (name) {
       const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });
       panel.imagePreview.src = `/view?${q.toString()}&t=${Date.now()}`;
+    }
+  } else if (info.kind === "audio") {
+    if (info.filename && panel.audioPlayer) {
+      panel.audioPlayer.src = `/view?${params.toString()}&t=${Date.now()}`;
     }
   } else if (info.filename) {
     panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
