@@ -595,7 +595,23 @@ function applyInfo(panel, info) {
   }
   panel.pathText.textContent = info.path || info.filename || "—";
   panel.pathText.title = info.path || "";
+  hideNativePreviews(panel);
   panel.refreshLayout?.();
+}
+
+/** 后端仍会返回 ui.PreviewVideo，ComfyUI 会在节点里插入原生播放器；这里把它藏掉，只留面板自己的播放器 */
+function hideNativePreviews(panel) {
+  const node = panel?.node;
+  if (!node?.widgets) return;
+  for (const widget of node.widgets) {
+    if (widget.name === "easy_video_panel") continue;
+    const element = widget.element;
+    if (!element || element.tagName === "CANVAS") continue;
+    const hasMedia = element.querySelector?.("video,audio,img");
+    if (!hasMedia) continue;
+    element.style.display = "none";
+    hideWidget(widget, true);
+  }
 }
 
 function ensurePanel(node) {
