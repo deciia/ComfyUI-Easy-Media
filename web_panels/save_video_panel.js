@@ -377,30 +377,34 @@ function buildPanel() {
       const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
       const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
       const chrome = KIND_BAR_HEIGHT + head + details + color + 6;
-      const base = paramsHeight(node);
 
       if (kind === "audio") {
         panel.playerHeight = AUDIO_BAR_HEIGHT;
-      } else if (opts.resizeNode) {
-        // 主动折叠/切形态时：保持画面高度不变，只改节点总高
-        panel.playerHeight = Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
-      } else {
-        // 用户拖拽：画面吃掉剩余高度（绝对计算，不做累加）
+      } else if (!opts.resizeNode) {
+        // 拖拽：按"节点高度 - 上方参数 - 面板固定部分"求画面高度。
+        // chrome 用面板实测高度反推（避免估算误差被反复放大），并限幅。
         const total = Number(node.size?.[1] ?? 0);
-        const fit = total - base - chrome;
-        panel.playerHeight = Math.max(80, Math.round(fit > 0 ? fit : PLAYER_HEIGHT));
+        const cur = Math.max(80, Number(panel.playerHeight) || PLAYER_HEIGHT);
+        const measured = Number(panel.root.offsetHeight) || 0;
+        const measuredChrome = measured > 0 ? Math.max(chrome, measured - cur) : chrome;
+        const fit = Math.round(total - paramsHeight(node) - measuredChrome);
+        panel.playerHeight = Math.max(80, Math.min(900, fit > 0 ? fit : cur));
+      } else {
+        panel.playerHeight = Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
       }
 
+      const player = panel.playerHeight;
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget) {
-        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + panel.playerHeight + head + details + color + 6];
+        // 只用固定部分 + 已保存的画面高度，绝不读 node.size，避免与画布互相放大
+        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + player + head + details + color + 6];
       }
 
-      panel.video.style.height = `${panel.playerHeight}px`;
-      panel.imagePreview.style.height = `${panel.playerHeight}px`;
+      panel.video.style.height = `${player}px`;
+      panel.imagePreview.style.height = `${player}px`;
 
       if (opts.resizeNode) {
-        const wanted = Math.max(160, Math.round(base + chrome + panel.playerHeight));
+        const wanted = Math.max(160, Math.round(paramsHeight(node) + chrome + player));
         if (Math.abs((node.size?.[1] ?? 0) - wanted) > 1) {
           panel._applyingSize = true;
           node.setSize?.([node.size?.[0] ?? 360, wanted]);
