@@ -54,6 +54,7 @@ const DETAILS_HEIGHT = 186;
 const COLOR_HEIGHT = 250;
 const KIND_BAR_HEIGHT = 24;
 const AUDIO_BAR_HEIGHT = 54;
+const TRANSPORT_HEIGHT = 30;
 
 const COLOR_GROUPS = [
   { title: "🎨 饱和度", rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }] },
@@ -182,7 +183,7 @@ function buildPanel() {
   // ── 画面区 ──
   const videoWrap = el("div", "position:relative;width:100%;background:#000;");
   const video = el("video", `width:100%;height:${PLAYER_HEIGHT}px;background:#000;object-fit:contain;display:block;`);
-  video.controls = true;
+  video.controls = false;
   video.loop = false;
   video.preload = "metadata";
   video.muted = true;
@@ -213,6 +214,49 @@ function buildPanel() {
   videoWrap.appendChild(mistLayer);
   videoWrap.appendChild(halationLayer);
   root.appendChild(videoWrap);
+
+  // ── 自绘播放条（视频形态）：时间码 | 首帧 逐帧 播放 逐帧 尾帧 | 进度 | 静音 全屏 ──
+  const transport = el(
+    "div",
+    `display:none;align-items:center;gap:6px;height:${TRANSPORT_HEIGHT}px;padding:0 8px;background:#101010;border-top:1px solid #333;box-sizing:border-box;font-size:10px;color:#bbb;`,
+  );
+  const tcLabel = el("span", "flex:0 0 auto;font-variant-numeric:tabular-nums;color:#9ca3af;", "00:00:00:00");
+  const mkBtn = (label, title) => {
+    const b = el(
+      "button",
+      "flex:0 0 auto;width:20px;height:18px;padding:0;border-radius:3px;border:1px solid transparent;background:transparent;color:#bbb;cursor:pointer;font-size:11px;line-height:16px;",
+      label,
+    );
+    b.title = title;
+    b.addEventListener("mousedown", (event) => event.stopPropagation());
+    return b;
+  };
+  const toStartBtn = mkBtn("⏮", "回到开头");
+  const prevFrameBtn = mkBtn("◀", "上一帧");
+  const playBtn = mkBtn("▶", "播放/暂停");
+  playBtn.style.borderColor = "#4a4a4a";
+  playBtn.style.background = "rgba(24,24,24,.9)";
+  const nextFrameBtn = mkBtn("▶|", "下一帧");
+  const toEndBtn = mkBtn("⏭", "跳到结尾");
+  const progress = el("input", "flex:1 1 auto;min-width:0;accent-color:#39a0ff;");
+  progress.type = "range";
+  progress.min = "0";
+  progress.max = "1000";
+  progress.value = "0";
+  progress.addEventListener("mousedown", (event) => event.stopPropagation());
+  const muteBtn = mkBtn("🔊", "静音切换");
+  const fullBtn = mkBtn("⛶", "全屏");
+
+  transport.appendChild(tcLabel);
+  transport.appendChild(toStartBtn);
+  transport.appendChild(prevFrameBtn);
+  transport.appendChild(playBtn);
+  transport.appendChild(nextFrameBtn);
+  transport.appendChild(toEndBtn);
+  transport.appendChild(progress);
+  transport.appendChild(muteBtn);
+  transport.appendChild(fullBtn);
+  root.appendChild(transport);
 
   // ── 详情标题栏 ──
   const header = el(
@@ -313,6 +357,11 @@ function buildPanel() {
     foldBtn,
     videoOnlyBtn,
     kindBar,
+    transport,
+    tcLabel,
+    playBtn,
+    progress,
+    muteBtn,
     audioPlayer,
     kindButtons,
     colorHeader,
@@ -352,6 +401,9 @@ function buildPanel() {
     if (panel.audioPlayer) {
       panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
     }
+    if (panel.transport) {
+      panel.transport.style.display = kind === "video" && !panel.videoOnly ? "flex" : "none";
+    }
 
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
@@ -376,7 +428,8 @@ function buildPanel() {
       const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
       const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
       const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
-      const chrome = KIND_BAR_HEIGHT + head + details + color + 6;
+      const transportH = kind === "video" && !panel.videoOnly ? TRANSPORT_HEIGHT : 0;
+      const chrome = KIND_BAR_HEIGHT + transportH + head + details + color + 6;
 
       if (kind === "audio") {
         panel.playerHeight = AUDIO_BAR_HEIGHT;
@@ -397,7 +450,7 @@ function buildPanel() {
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget) {
         // 只用固定部分 + 已保存的画面高度，绝不读 node.size，避免与画布互相放大
-        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + player + head + details + color + 6];
+        widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + transportH + player + head + details + color + 6];
       }
 
       panel.video.style.height = `${player}px`;
@@ -415,6 +468,75 @@ function buildPanel() {
       node.setDirtyCanvas?.(true, true);
     }
   };
+
+  // —— 播放条行为 ——
+  const fmtTc = (seconds, fps) => {
+    const total = Number(seconds) || 0;
+    const f = Math.max(1, Math.round(Number(fps) || 24));
+    const frames = Math.floor(total * f + 1e-6);
+    const ff = frames % f;
+    const ss = Math.floor(frames / f) % 60;
+    const mm = Math.floor(frames / (f * 60)) % 60;
+    const hh = Math.floor(frames / (f * 3600));
+    return [hh, mm, ss, ff].map((v) => String(v).padStart(2, "0")).join(":");
+  };
+  const fpsOf = () => Number(panel.info?.fps) || 24;
+  const syncTransport = () => {
+    const video = panel.video;
+    const duration = Number(video.duration) || 0;
+    const ratio = duration > 0 ? video.currentTime / duration : 0;
+    if (document.activeElement !== progress) progress.value = String(Math.round(ratio * 1000));
+    tcLabel.textContent = fmtTc(video.currentTime, fpsOf());
+    playBtn.textContent = video.paused ? "▶" : "⏸";
+  };
+  panel.syncTransport = syncTransport;
+
+  panel.video.addEventListener("timeupdate", () => panel.transport.style.display === "flex" && syncTransport());
+  panel.video.addEventListener("loadedmetadata", syncTransport);
+  panel.video.addEventListener("play", syncTransport);
+  panel.video.addEventListener("pause", syncTransport);
+
+  playBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (panel.video.paused) panel.video.play().catch(() => {});
+    else panel.video.pause();
+  });
+  toStartBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.video.currentTime = 0;
+    syncTransport();
+  });
+  toEndBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (Number.isFinite(panel.video.duration)) panel.video.currentTime = panel.video.duration;
+    syncTransport();
+  });
+  prevFrameBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.video.currentTime = Math.max(0, panel.video.currentTime - 1 / fpsOf());
+    syncTransport();
+  });
+  nextFrameBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.video.currentTime = panel.video.currentTime + 1 / fpsOf();
+    syncTransport();
+  });
+  progress.addEventListener("input", () => {
+    const duration = Number(panel.video.duration) || 0;
+    if (duration > 0) panel.video.currentTime = (Number(progress.value) / 1000) * duration;
+    syncTransport();
+  });
+  muteBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.video.muted = !panel.video.muted;
+    muteBtn.textContent = panel.video.muted ? "🔇" : "🔊";
+  });
+  fullBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const target = panel.video;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else target.requestFullscreen?.().catch(() => {});
+  });
 
   videoOnlyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
