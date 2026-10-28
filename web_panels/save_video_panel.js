@@ -319,7 +319,17 @@ function buildPanel() {
     const kind = currentKind(node);
     const hasPlayer = kind !== "audio";
 
-    panel.videoWrap.style.display = hasPlayer ? "flex" : "none";
+    panel.videoWrap.style.display = "flex";
+    if (kind === "audio") {
+      // 音频：画框不占空间，只留一条播放条
+      panel.videoWrap.style.flex = "0 0 auto";
+      panel.videoWrap.style.height = "54px";
+      panel.videoWrap.style.minHeight = "0";
+    } else {
+      panel.videoWrap.style.flex = "1 1 auto";
+      panel.videoWrap.style.height = "";
+      panel.videoWrap.style.minHeight = "60px";
+    }
     panel.video.style.display = kind === "video" ? "block" : "none";
     panel.video.controls = kind === "video";
     panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
@@ -348,8 +358,13 @@ function buildPanel() {
       // 面板高度下限：折叠时更小，展开时保证详情可见
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget) {
+        const audioKind = kind === "audio";
         widget.computeLayoutSize = () => ({
-          minHeight: panel.videoOnly ? KIND_BAR_HEIGHT + 60 : MIN_PANEL_HEIGHT,
+          minHeight: panel.videoOnly
+            ? KIND_BAR_HEIGHT + 60
+            : audioKind
+              ? KIND_BAR_HEIGHT + 54 + HEADER_HEIGHT + 40
+              : MIN_PANEL_HEIGHT,
           minWidth: 0,
         });
       }
