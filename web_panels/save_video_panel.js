@@ -671,8 +671,10 @@ function ensurePanel(node) {
     const origComputeSize = node.computeSize;
     node.computeSize = function (out) {
       const size = origComputeSize?.call(this, out) ?? [this.size?.[0] ?? 360, this.size?.[1] ?? 400];
-      const current = this.size ?? size;
-      return [Math.max(size[0], current[0] ?? 0), Math.max(size[1], current[1] ?? 0)];
+      const current = this.size;
+      // 已有尺寸时完全以用户拖动为准（面板是可伸缩的最后一项），否则用内容高度初始化
+      if (Array.isArray(current) && Number(current[1]) > 0) return [current[0], current[1]];
+      return size;
     };
   }
 
