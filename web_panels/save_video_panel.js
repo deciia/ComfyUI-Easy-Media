@@ -665,6 +665,17 @@ function ensurePanel(node) {
   const panel = buildPanel();
   node._easyVideoPanel = panel;
   panel.node = node;
+  // 节点高度以用户拖动为准：内容算出的高度只作为下限，拉大时不被吸回去
+  if (!node._easySizeGuard) {
+    node._easySizeGuard = true;
+    const origComputeSize = node.computeSize;
+    node.computeSize = function (out) {
+      const size = origComputeSize?.call(this, out) ?? [this.size?.[0] ?? 360, this.size?.[1] ?? 400];
+      const current = this.size ?? size;
+      return [Math.max(size[0], current[0] ?? 0), Math.max(size[1], current[1] ?? 0)];
+    };
+  }
+
   const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
   widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
   panel._applyingSize = false;
