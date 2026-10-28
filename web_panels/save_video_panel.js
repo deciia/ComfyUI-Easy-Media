@@ -183,7 +183,7 @@ function buildPanel() {
   audioPlayer.preload = "metadata";
   videoWrap.appendChild(audioPlayer);
 
-  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "⌃");
+  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "▲");
   videoOnlyBtn.title = "折叠参数，仅显示画面";
   videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   kindBar.appendChild(videoOnlyBtn);
@@ -336,7 +336,7 @@ function buildPanel() {
     colorBody.style.display = panel.videoOnly || !panel.colorOpen ? "none" : "flex";
     colorFold.textContent = panel.colorOpen ? "▾" : "▸";
     foldBtn.textContent = panel.detailsOpen ? "▾" : "▸";
-    videoOnlyBtn.textContent = panel.videoOnly ? "⌄" : "⌃";
+    videoOnlyBtn.textContent = panel.videoOnly ? "▼" : "▲";
     videoOnlyBtn.title = panel.videoOnly ? "展开参数与详情" : "折叠参数，仅显示画面";
 
     if (node) {
