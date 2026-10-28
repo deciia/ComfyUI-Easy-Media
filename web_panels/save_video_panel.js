@@ -2,9 +2,11 @@ import { app } from "../../scripts/app.js";
 
 /**
  * Save Video（easy saveVideo）节点面板。
- * 结构：形态图标行（🎬/🖼️/🎵）→ 画面/图片/无画面 → 视频详情 → 调色台。
- * 形态会联动：视频=画面+控制条；图片=静图无控制条；音频=无画面。
- * 右上角 ⌃/⌄ = 仅画面模式：折叠上方全部参数 + 详情；状态写入 node.properties。
+ *
+ * 尺寸模型与「多轨项目视频合并」一致：
+ *  - 面板 widget **不声明 computeSize**，只用 computeLayoutSize({minHeight}) 成为“可伸缩项”；
+ *  - 节点多高由用户拖动决定，多出来的空间全部给画框，画面 object-fit: contain 等比居中；
+ *  - 面板内部用 flex 布局（画框 flex:1），不写死任何像素高度，也不回写节点尺寸。
  */
 const ROWS = [
   ["elapsed", "⏱️ 累计用时", (i) => (i?.save_seconds ? `${i.save_seconds} 秒` : "—")],
@@ -48,12 +50,9 @@ const KIND_WIDGETS = {
   audio: ["audio_format"],
 };
 
-const PLAYER_HEIGHT = 220;
-const HEADER_HEIGHT = 26;
-const DETAILS_HEIGHT = 186;
-const COLOR_HEIGHT = 250;
 const KIND_BAR_HEIGHT = 24;
-const AUDIO_BAR_HEIGHT = 54;
+const HEADER_HEIGHT = 26;
+const MIN_PANEL_HEIGHT = 150;
 
 const COLOR_GROUPS = [
   { title: "🎨 饱和度", rows: [{ key: "🎨 饱和度", label: "饱和度", min: 0, max: 200, step: 1, def: 100, unit: "%", scale: 0.01 }] },
@@ -135,37 +134,23 @@ function hideWidget(widget, hide) {
   }
 }
 
-/** 估算节点上方原生参数控件占用的高度（标题 + 各 widget） */
-function paramsHeight(node) {
-  let height = 30;
-  for (const widget of node?.widgets ?? []) {
-    if (widget.name === "easy_video_panel") continue;
-    if (widget.hidden) continue;
-    let h = 20;
-    try {
-      const cs = widget.computeSize?.(node.size?.[0] ?? 360);
-      if (Array.isArray(cs) && Number.isFinite(cs[1])) h = Math.max(0, cs[1]);
-    } catch (error) {
-      h = 20;
-    }
-    height += h;
-  }
-  return height + 10;
-}
-
 function buildPanel() {
-  const root = el("div", "display:flex;flex-direction:column;background:#141414;border:1px solid #333;border-radius:6px;overflow:hidden;");
+  // 根容器：铺满 widget 分配到的空间；纵向 flex，画框吃掉剩余
+  const root = el(
+    "div",
+    "display:flex;flex-direction:column;height:100%;min-height:0;box-sizing:border-box;background:#141414;border:1px solid #333;border-radius:6px;overflow:hidden;",
+  );
 
-  // ── 形态图标行（常驻）──
+  // ── 形态图标行（固定高度）──
   const kindBar = el(
     "div",
-    `display:flex;align-items:center;gap:4px;height:${KIND_BAR_HEIGHT}px;padding:0 6px;background:#1b1b1b;border-bottom:1px solid #333;box-sizing:border-box;`,
+    `display:flex;align-items:center;gap:4px;height:${KIND_BAR_HEIGHT}px;flex:0 0 auto;padding:0 6px;background:#1b1b1b;border-bottom:1px solid #333;box-sizing:border-box;`,
   );
   const kindButtons = new Map();
   for (const item of KIND_ICONS) {
     const btn = el(
       "button",
-      `width:24px;height:19px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:17px;`,
+      "width:24px;height:19px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:17px;",
       item.icon,
     );
     btn.title = item.title;
@@ -177,34 +162,29 @@ function buildPanel() {
     kindBar.appendChild(btn);
     kindButtons.set(item.kind, btn);
   }
+  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "▲");
+  videoOnlyBtn.title = "折叠参数，仅显示画面";
+  videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  kindBar.appendChild(videoOnlyBtn);
   root.appendChild(kindBar);
 
-  // ── 画面区 ──
-  const videoWrap = el("div", "position:relative;width:100%;background:#000;");
-  const video = el("video", `width:100%;height:${PLAYER_HEIGHT}px;background:#000;object-fit:contain;display:block;`);
+  // ── 画框（可伸缩）──
+  const videoWrap = el("div", "position:relative;flex:1 1 auto;min-height:60px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;");
+  const video = el("video", "width:100%;height:100%;background:#000;object-fit:contain;display:block;");
   video.controls = true;
   video.loop = false;
   video.preload = "metadata";
   video.muted = true;
   videoWrap.appendChild(video);
 
-  const imagePreview = el("img", `width:100%;height:${PLAYER_HEIGHT}px;object-fit:contain;background:#000;display:none;`);
+  const imagePreview = el("img", "width:100%;height:100%;object-fit:contain;background:#000;display:none;");
   imagePreview.alt = "";
   videoWrap.appendChild(imagePreview);
 
-  // 音频形态：只有播放条，没有画面
-  const audioPlayer = el(
-    "audio",
-    `width:100%;height:${AUDIO_BAR_HEIGHT}px;background:#000;display:none;box-sizing:border-box;padding:8px 10px;`,
-  );
+  const audioPlayer = el("audio", "width:100%;height:54px;padding:8px 10px;box-sizing:border-box;background:#000;display:none;");
   audioPlayer.controls = true;
   audioPlayer.preload = "metadata";
   videoWrap.appendChild(audioPlayer);
-
-  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "▲");
-  videoOnlyBtn.title = "折叠参数，仅显示画面";
-  videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
-  kindBar.appendChild(videoOnlyBtn);
 
   const bloomLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) brightness(1.35);");
   const mistLayer = el("div", "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:lighten;backdrop-filter:blur(8px) brightness(1.12);");
@@ -214,11 +194,10 @@ function buildPanel() {
   videoWrap.appendChild(halationLayer);
   root.appendChild(videoWrap);
 
-
-  // ── 详情标题栏 ──
+  // ── 详情标题栏（固定）──
   const header = el(
     "div",
-    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
+    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;flex:0 0 auto;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
   );
   const foldBtn = el("button", BTN_CSS, "▾");
   foldBtn.title = "折叠/展开视频详情";
@@ -232,7 +211,7 @@ function buildPanel() {
   header.appendChild(copyAllBtn);
   root.appendChild(header);
 
-  const body = el("div", "display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 8px 8px;font-size:11px;color:#ddd;");
+  const body = el("div", "flex:0 0 auto;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 8px 8px;font-size:11px;color:#ddd;");
   const cells = new Map();
   for (const [key, label] of ROWS) {
     const k = el("span", "color:#888;white-space:nowrap;", label);
@@ -252,10 +231,10 @@ function buildPanel() {
   body.appendChild(pathRow);
   root.appendChild(body);
 
-  // ── 调色台 ──
+  // ── 调色台（固定高度，可折叠）──
   const colorHeader = el(
     "div",
-    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
+    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;flex:0 0 auto;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
   );
   const colorFold = el("button", BTN_CSS, "▸");
   const colorTitle = el("span", "flex:1 1 auto;cursor:pointer;", "🎨 调色台");
@@ -265,7 +244,7 @@ function buildPanel() {
   colorHeader.appendChild(colorReset);
   root.appendChild(colorHeader);
 
-  const colorBody = el("div", "display:none;flex-direction:column;gap:6px;padding:6px 8px;border-top:1px solid #2a2a2a;background:#171717;font-size:11px;color:#ddd;");
+  const colorBody = el("div", "flex:0 0 auto;display:none;flex-direction:column;gap:6px;padding:6px 8px;border-top:1px solid #2a2a2a;background:#171717;font-size:11px;color:#ddd;");
   const sliders = new Map();
   for (const group of COLOR_GROUPS) {
     const g = el("div", "display:flex;flex-direction:column;gap:3px;");
@@ -304,6 +283,7 @@ function buildPanel() {
     root,
     video,
     imagePreview,
+    audioPlayer,
     videoWrap,
     header,
     body,
@@ -314,7 +294,6 @@ function buildPanel() {
     foldBtn,
     videoOnlyBtn,
     kindBar,
-    audioPlayer,
     kindButtons,
     colorHeader,
     colorBody,
@@ -332,28 +311,19 @@ function buildPanel() {
     videoOnly: false,
     detailsOpen: true,
     colorOpen: false,
-    playerHeight: PLAYER_HEIGHT,
-    aspect: 16 / 9,
-    _lastSize: null,
   };
   panelRef = panel;
 
-  const refreshLayout = (opts = {}) => {
+  const refreshLayout = () => {
     const node = panel.node;
     const kind = currentKind(node);
-    const hasPlayer = true;
+    const hasPlayer = kind !== "audio";
 
-    // 形态：视频=画面+控制条；图片=静图（无控制条）；音频=只有播放条
-    panel.videoWrap.style.display = "block";
-    const ph = Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
-    panel.video.style.height = `${ph}px`;
-    panel.imagePreview.style.height = `${ph}px`;
+    panel.videoWrap.style.display = hasPlayer ? "flex" : "none";
     panel.video.style.display = kind === "video" ? "block" : "none";
     panel.video.controls = kind === "video";
     panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
-    if (panel.audioPlayer) {
-      panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
-    }
+    if (panel.audioPlayer) panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
 
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
@@ -375,92 +345,46 @@ function buildPanel() {
       }
       if (!panel.videoOnly) applyKindWidgets(node, kind);
 
-      const head = panel.videoOnly ? 0 : HEADER_HEIGHT;
-      const details = !panel.videoOnly && panel.detailsOpen ? DETAILS_HEIGHT : 0;
-      const color = !panel.videoOnly && panel.colorOpen ? COLOR_HEIGHT : 0;
-      const chrome = KIND_BAR_HEIGHT + head + details + color + 6;
-
-      if (kind === "audio") {
-        panel.playerHeight = AUDIO_BAR_HEIGHT;
-      } else if (opts.resizeNode) {
-        // 折叠/切形态：保持画面高度，改节点总高
-        panel.playerHeight = Math.max(60, Math.round(panel.playerHeight || PLAYER_HEIGHT));
-      } else {
-        // 拖拽：画框填满"节点高度 - 参数 - 固定条"；视频按比例 contain 居中（可留黑边）
-        const total = Number(node.size?.[1] ?? 0);
-        const base = panel._paramsH || paramsHeight(node);
-        const fit = Math.round(total - base - chrome);
-        panel.playerHeight = Math.max(60, Math.min(4000, fit > 0 ? fit : 60));
-      }
-
-      const player = panel.playerHeight;
+      // 面板高度下限：折叠时更小，展开时保证详情可见
       const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
       if (widget) {
-        // 面板占满"节点高度 - 参数高度"，节点尺寸本身由用户拖动决定（不再由面板反推）
-        widget.computeSize = () => {
-          const total = Number(node.size?.[1] ?? 0);
-          const base = panel._paramsH || paramsHeight(node);
-          return [node.size?.[0] ?? 360, Math.max(KIND_BAR_HEIGHT + 60, total - base)];
-        };
+        widget.computeLayoutSize = () => ({
+          minHeight: panel.videoOnly ? KIND_BAR_HEIGHT + 60 : MIN_PANEL_HEIGHT,
+          minWidth: 0,
+        });
       }
-
-      panel.video.style.height = `${player}px`;
-      panel.imagePreview.style.height = `${player}px`;
-
-      if (opts.resizeNode && kind !== "audio") {
-        const wanted = Math.max(120, Math.round(paramsHeight(node) + chrome + player));
-        if (Math.abs((node.size?.[1] ?? 0) - wanted) > 1) {
-          panel._applyingSize = true;
-          node.setSize?.([node.size?.[0] ?? 360, wanted]);
-          panel._applyingSize = false;
-        }
-      }
-      panel._lastSize = node.size ? [node.size[0], node.size[1]] : null;
       node.setDirtyCanvas?.(true, true);
-
-      // 实测参数区高度（画布单位），下一次 computeSize 用同一个数 → 节点高度稳定
-      requestAnimationFrame(() => {
-        try {
-          const scale = Number(app?.canvas?.ds?.scale) || 1;
-          const rootH = (Number(panel.root.offsetHeight) || 0) / scale;
-          const total = Number(node.size?.[1] ?? 0);
-          if (rootH > 20 && total > rootH) panel._paramsH = Math.round(total - rootH);
-        } catch (error) {
-          /* 测量失败时沿用上一次的值 */
-        }
-      });
     }
   };
 
   videoOnlyBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.videoOnly = !panel.videoOnly;
-    refreshLayout({ resizeNode: true });
+    refreshLayout();
   });
   foldBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.detailsOpen = !panel.detailsOpen;
-    refreshLayout({ resizeNode: true });
+    refreshLayout();
   });
   title.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.detailsOpen = !panel.detailsOpen;
-    refreshLayout({ resizeNode: true });
+    refreshLayout();
   });
   colorFold.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.colorOpen = !panel.colorOpen;
-    refreshLayout({ resizeNode: true });
+    refreshLayout();
   });
   colorTitle.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.colorOpen = !panel.colorOpen;
-    refreshLayout({ resizeNode: true });
+    refreshLayout();
   });
   colorReset.addEventListener("click", (event) => {
     event.stopPropagation();
     resetColorTune();
-    refreshLayout();
   });
   bakeBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   bakeBtn.addEventListener("click", async (event) => {
@@ -632,7 +556,6 @@ async function bakeColorTune(panel) {
 function applyInfo(panel, info) {
   if (!info) return;
   panel.info = info;
-  if (info?.width > 0 && info?.height > 0) panel.aspect = Number(info.height) / Number(info.width);
   const params = new URLSearchParams({
     filename: info.filename || "",
     subfolder: info.subfolder || "",
@@ -665,45 +588,18 @@ function ensurePanel(node) {
   const panel = buildPanel();
   node._easyVideoPanel = panel;
   panel.node = node;
-  // 节点高度以用户拖动为准：内容算出的高度只作为下限，拉大时不被吸回去
-  if (!node._easySizeGuard) {
-    node._easySizeGuard = true;
-    const origComputeSize = node.computeSize;
-    node.computeSize = function (out) {
-      const size = origComputeSize?.call(this, out) ?? [this.size?.[0] ?? 360, this.size?.[1] ?? 400];
-      const current = this.size;
-      // 已有尺寸时完全以用户拖动为准（面板是可伸缩的最后一项），否则用内容高度初始化
-      if (Array.isArray(current) && Number(current[1]) > 0) return [current[0], current[1]];
-      return size;
-    };
-  }
-
   const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
-  widget.computeSize = () => [node.size?.[0] ?? 360, KIND_BAR_HEIGHT + PLAYER_HEIGHT + HEADER_HEIGHT + DETAILS_HEIGHT + 6];
-  panel._applyingSize = false;
+  // 关键：不声明 computeSize，只声明可伸缩范围 → 节点多高都由用户拖动决定，多出来的空间归面板
+  widget.computeLayoutSize = () => ({
+    minHeight: panel.videoOnly ? KIND_BAR_HEIGHT + 60 : MIN_PANEL_HEIGHT,
+    minWidth: 0,
+  });
   panel.videoOnly = node.properties?.easyVideoOnly === true;
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
   panel.colorOpen = node.properties?.easyColorOpen === true;
   syncKindButtons(panel);
   panel.refreshLayout();
-  if (node.size && node.size[1] < 460) node.setSize([node.size[0], 460]);
-  panel._lastSize = node.size ? [node.size[0], node.size[1]] : null;
   return panel;
-}
-
-/** 节点被拖动改高度时，把高度增量交给画面（其余部分保持固定高度） */
-/** 节点被拖动改高度：画面按"剩余高度"重新填充（不改节点尺寸，避免与画布互搏） */
-function handleNodeResize(node) {
-  const panel = node._easyVideoPanel;
-  if (!panel || panel._applyingSize) return;
-  const size = node.size;
-  if (!size) return;
-  panel._lastSize = [size[0], size[1]];
-  panel.refreshLayout?.({ resizeNode: false });
-}
-
-function kindOf(panel) {
-  return String(panel?.node?.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
 }
 
 app.registerExtension({
@@ -733,17 +629,6 @@ app.registerExtension({
         } catch (error) {
           console.warn("[EasyMedia] 刷新视频面板失败：", error);
         }
-      }
-      return result;
-    };
-
-    const onResize = nodeType.prototype.onResize;
-    nodeType.prototype.onResize = function (size, ...rest) {
-      const result = onResize?.apply(this, [size, ...rest]);
-      try {
-        handleNodeResize(this);
-      } catch (error) {
-        console.warn("[EasyMedia] 调整画面高度失败：", error);
       }
       return result;
     };
