@@ -117,6 +117,23 @@ function buildPanel() {
   videoOnlyBtn.title = "折叠参数，仅显示画面";
   videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   videoWrap.appendChild(videoOnlyBtn);
+
+  // 调色近似预览层：backdrop-filter 采样背后的视频，再用混合模式叠出泛光/柔雾/暖晕
+  const bloomLayer = el(
+    "div",
+    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) brightness(1.35);",
+  );
+  const mistLayer = el(
+    "div",
+    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:lighten;backdrop-filter:blur(8px) brightness(1.12);",
+  );
+  const halationLayer = el(
+    "div",
+    "position:absolute;inset:0;pointer-events:none;opacity:0;mix-blend-mode:screen;backdrop-filter:blur(8px) sepia(1) saturate(4) hue-rotate(-18deg);",
+  );
+  videoWrap.appendChild(bloomLayer);
+  videoWrap.appendChild(mistLayer);
+  videoWrap.appendChild(halationLayer);
   root.appendChild(videoWrap);
 
   // ── 详情标题栏：折叠按钮 | 📋 视频详情 | 复制全部 ──
@@ -234,6 +251,9 @@ function buildPanel() {
     videoOnly: false,
     detailsOpen: true,
     colorOpen: false,
+    bloomLayer,
+    mistLayer,
+    halationLayer,
     sliders,
     colorBody,
     colorFold,
@@ -385,6 +405,30 @@ function applyColorPreview(panel) {
   const tune = colorTune();
   const sat = Number(tune["🎨 饱和度"] ?? 1);
   panel.video.style.filter = Math.abs(sat - 1) < 0.01 ? "" : `saturate(${sat.toFixed(2)})`;
+
+  const bloom = Number(tune["✨ 泛光强度"] ?? 0);
+  const bloomRadius = Number(tune["✨ 泛光范围"] ?? 4);
+  if (panel.bloomLayer) {
+    panel.bloomLayer.style.opacity = bloom > 0.001 ? String(Math.min(0.9, bloom)) : "0";
+    panel.bloomLayer.style.backdropFilter = `blur(${(bloomRadius * 2).toFixed(1)}px) brightness(1.35)`;
+  }
+
+  const mist = Number(tune["🌫️ 柔雾强度"] ?? 0);
+  const mistRadius = Number(tune["🌫️ 柔焦范围"] ?? 4);
+  const veil = Number(tune["🌫️ 灰雾浓度"] ?? 0.3);
+  if (panel.mistLayer) {
+    panel.mistLayer.style.opacity = mist > 0.001 ? String(Math.min(0.9, mist)) : "0";
+    panel.mistLayer.style.backdropFilter = `blur(${(mistRadius * 2).toFixed(1)}px) brightness(1.12)`;
+    panel.mistLayer.style.background = `rgba(255,255,255,${(veil * Math.min(0.5, mist)).toFixed(3)})`;
+  }
+
+  const halation = Number(tune["🔥 暖晕强度"] ?? 0);
+  const halationRadius = Number(tune["🔥 暖晕范围"] ?? 5);
+  if (panel.halationLayer) {
+    panel.halationLayer.style.opacity = halation > 0.001 ? String(Math.min(0.9, halation)) : "0";
+    panel.halationLayer.style.backdropFilter =
+      `blur(${(halationRadius * 2).toFixed(1)}px) sepia(1) saturate(4) hue-rotate(-18deg)`;
+  }
 }
 
 async function bakeColorTune(panel) {
