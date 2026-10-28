@@ -89,6 +89,10 @@ def _play_notify_sound(file_name: str):
 
 
 # 输出格式（参考班长「🎥 视频合并」的格式清单）：第一个是默认值，保持原行为
+_SAVE_KIND_OPTIONS = ["video", "images", "audio"]
+_IMAGE_FORMAT_OPTIONS = ["PNG", "JPG", "WEBP"]
+_AUDIO_FORMAT_OPTIONS = ["WAV", "MP3", "FLAC"]
+
 _VIDEO_FORMAT_OPTIONS = [
     "跟随源 (AUTO)",
     "MP4 (H264)",
@@ -353,6 +357,24 @@ class EasySaveVideo(io.ComfyNode):
                     tooltip="出片后卸载模型并清理显存（出错也会清理）。",
                 ),
                 io.Combo.Input(
+                    "save_kind",
+                    options=list(_SAVE_KIND_OPTIONS),
+                    default="video",
+                    tooltip="输出形态：video=视频；images=图像序列；audio=音频文件。",
+                ),
+                io.Combo.Input(
+                    "image_format",
+                    options=list(_IMAGE_FORMAT_OPTIONS),
+                    default="PNG",
+                    tooltip="save_kind=images 时的图片格式。",
+                ),
+                io.Combo.Input(
+                    "audio_format",
+                    options=list(_AUDIO_FORMAT_OPTIONS),
+                    default="WAV",
+                    tooltip="save_kind=audio 时的音频格式。",
+                ),
+                io.Combo.Input(
                     "notify_sound",
                     options=_list_notify_sounds(),
                     default=_NOTIFY_MUTE,
@@ -389,6 +411,9 @@ class EasySaveVideo(io.ComfyNode):
         adopt_source_video: bool = False,
         cleanup_after_save: bool = False,
         notify_sound: str = _NOTIFY_MUTE,
+        save_kind: str = "video",
+        image_format: str = "PNG",
+        audio_format: str = "WAV",
     ) -> io.NodeOutput:
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
@@ -442,19 +467,35 @@ class EasySaveVideo(io.ComfyNode):
                 )
             )
 
+        kind = str(save_kind or "video").strip().lower()
         try:
-            relative_path, file, subfolder, folder_type, video_info = _save_video_output(
-                source_video=source_video,
-                write_temp=write_temp,
-                filename_prefix=filename_prefix,
-                save_metadata=bool(save_metadata),
-                video_format=video_format,
-                custom_save_path=custom_save_path,
-                adopt_source_video=bool(adopt_source_video),
-                audio_replaced=bool(audio is not None and input_mode_key == "video"),
-                fps=float(fps or 24.0),
-                prompt=cls.hidden.prompt,
-                extra_pnginfo=cls.hidden.extra_pnginfo,
+            if kind in {"images", "audio"}:
+                relative_path, file, subfolder, folder_type, video_info = _save_media_output(
+                    source_video=source_video,
+                    write_temp=write_temp,
+                    filename_prefix=filename_prefix,
+                    save_metadata=bool(save_metadata),
+                    kind=kind,
+                    image_format=image_format,
+                    audio_format=audio_format,
+                    audio=audio,
+                    frame_rate=float(fps or 24.0),
+                    prompt=cls.hidden.prompt,
+                    extra_pnginfo=cls.hidden.extra_pnginfo,
+                )
+            else:
+                relative_path, file, subfolder, folder_type, video_info = _save_video_output(
+                    source_video=source_video,
+                    write_temp=write_temp,
+                    filename_prefix=filename_prefix,
+                    save_metadata=bool(save_metadata),
+                    video_format=video_format,
+                    custom_save_path=custom_save_path,
+                    adopt_source_video=bool(adopt_source_video),
+                    audio_replaced=bool(audio is not None and input_mode_key == "video"),
+                    fps=float(fps or 24.0),
+                    prompt=cls.hidden.prompt,
+                    extra_pnginfo=cls.hidden.extra_pnginfo,
             )
         finally:
             if cleanup_after_save:
@@ -476,8 +517,11 @@ class EasySaveVideo(io.ComfyNode):
         if notify_sound and notify_sound != _NOTIFY_MUTE:
             _play_notify_sound(notify_sound)
 
-        preview = ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]).as_dict()
-        custom_ui = {**preview, "easy_video_info": [video_info]}
+        if kind in {"images", "audio"}:
+            custom_ui = {"easy_video_info": [video_info]}
+        else:
+            preview = ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]).as_dict()
+            custom_ui = {**preview, "easy_video_info": [video_info]}
 
         if hide_preview:
             return io.NodeOutput(source_video, relative_path, pass_images, pass_audio, ui={"easy_video_info": [video_info]})
@@ -489,6 +533,130 @@ class EasySaveVideo(io.ComfyNode):
             pass_audio,
             ui=custom_ui,
         )
+
+def _save_media_output(
+    *,
+    source_video,
+    write_temp: bool,
+    filename_prefix: str,
+    save_metadata: bool,
+    kind: str,
+    image_format: str,
+    audio_format: str,
+    audio,
+    frame_rate: float,
+    prompt,
+    extra_pnginfo,
+):
+    """save_kind=images / audio 的落盘，返回与 _save_video_output 同形状的元组。"""
+    from PIL import Image
+    import numpy as np
+
+    output_dir = folder_paths.get_temp_directory() if write_temp else folder_paths.get_output_directory()
+    folder_type = io.FolderType.temp if write_temp else io.FolderType.output
+    prefix = "temp" if write_temp else "output"
+    metadata = None
+    if save_metadata:
+        metadata = {}
+        if extra_pnginfo is not None:
+            metadata.update(extra_pnginfo)
+        if prompt is not None:
+            metadata["prompt"] = prompt
+        if not metadata:
+            metadata = None
+
+    if kind == "images":
+        fmt = str(image_format or "PNG").upper()
+        ext = {"PNG": "png", "JPG": "jpg", "WEBP": "webp"}.get(fmt, "png")
+        images = source_video.get_components().images
+        height, width = int(images.shape[1]), int(images.shape[2])
+        full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+            filename_prefix, output_dir, width, height
+        )
+        saved: list[str] = []
+        total_bytes = 0
+        for i in range(int(images.shape[0])):
+            name = f"{filename}_{counter:05}_{i:04}_.{ext}"
+            path = os.path.join(full_output_folder, name)
+            frame = (images[i].detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+            img = Image.fromarray(frame)
+            save_kwargs = {}
+            if fmt == "PNG":
+                save_kwargs["compress_level"] = 4
+            else:
+                save_kwargs["quality"] = 92
+            img.save(path, **save_kwargs)
+            saved.append(name)
+            total_bytes += os.path.getsize(path)
+        rel = f"{prefix}/{os.path.relpath(os.path.join(full_output_folder, saved[0]), output_dir).replace(chr(92), '/')}"
+        info = {
+            "kind": "images",
+            "filename": saved[0] if len(saved) == 1 else f"{saved[0]} … {saved[-1]}",
+            "subfolder": subfolder or "",
+            "type": "temp" if write_temp else "output",
+            "path": os.path.join(full_output_folder, saved[0]),
+            "dir": full_output_folder,
+            "count": len(saved),
+            "size_bytes": total_bytes,
+            "width": width,
+            "height": height,
+            "format": ext,
+            "image_format": fmt,
+        }
+        return rel, saved[0], subfolder, folder_type, info
+
+    # ---- audio ----
+    fmt = str(audio_format or "WAV").upper()
+    ext = {"WAV": "wav", "MP3": "mp3", "FLAC": "flac"}.get(fmt, "wav")
+    source_audio = audio
+    temp_files: list[str] = []
+    try:
+        if source_audio is None:
+            src_path, temp_files = video_input_to_local_file(source_video)
+            source_audio = ffmpeg_extract_audio(src_path)
+        if source_audio is None:
+            raise ValueError("没有可导出的音频：接上 AUDIO 输入，或让视频带音轨")
+        wav_path = save_audio_to_temp_wav(source_audio)
+        if wav_path is None:
+            raise ValueError("音频序列化失败")
+        temp_files.append(str(wav_path))
+        full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+            filename_prefix, output_dir, 1, 1
+        )
+        name = f"{filename}_{counter:05}_.{ext}"
+        out_path = os.path.join(full_output_folder, name)
+        if ext == "wav":
+            shutil.copy2(wav_path, out_path)
+        else:
+            ffmpeg = get_ffmpeg_path("ffmpeg")
+            if ffmpeg is None:
+                raise RuntimeError("导出 MP3/FLAC 需要 FFmpeg")
+            args = ["-c:a", "libmp3lame", "-b:a", "192k"] if ext == "mp3" else ["-c:a", "flac"]
+            command = [ffmpeg, "-y", "-nostdin", "-v", "error", "-i", str(wav_path), *args, out_path]
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg 转音频失败：{(result.stderr or '').strip()[:200]}")
+        probe = ffprobe_info(out_path) or {}
+        info = {
+            "kind": "audio",
+            "filename": name,
+            "subfolder": subfolder or "",
+            "type": "temp" if write_temp else "output",
+            "path": out_path,
+            "size_bytes": os.path.getsize(out_path),
+            "duration": probe.get("duration"),
+            "format": ext,
+            "audio_format": fmt,
+        }
+        rel = f"{prefix}/{os.path.relpath(out_path, output_dir).replace(chr(92), '/')}"
+        return rel, name, subfolder, folder_type, info
+    finally:
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
 
 def _save_video_output(
     *,

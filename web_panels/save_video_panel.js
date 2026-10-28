@@ -21,6 +21,13 @@ const ROWS = [
 ];
 
 /** 节点上方的全部输入控件（折叠按钮会把它们一起收起） */
+/** 三种输出形态的图标（点击 = 切换 save_kind） */
+const KIND_ICONS = [
+  { kind: "video", icon: "🎬", title: "保存视频" },
+  { kind: "images", icon: "🖼️", title: "保存图像序列" },
+  { kind: "audio", icon: "🎵", title: "保存音频" },
+];
+
 const PARAM_WIDGETS = [
   "input_mode",
   "fps",
@@ -134,6 +141,22 @@ function buildPanel() {
   videoWrap.appendChild(bloomLayer);
   videoWrap.appendChild(mistLayer);
   videoWrap.appendChild(halationLayer);
+
+  // 左上角：输出形态切换
+  const kindBar = el("div", "position:absolute;top:4px;left:4px;display:flex;gap:4px;");
+  const kindButtons = new Map();
+  for (const item of KIND_ICONS) {
+    const btn = el("button", `width:22px;height:20px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:18px;`, item.icon);
+    btn.title = item.title;
+    btn.addEventListener("mousedown", (event) => event.stopPropagation());
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setSaveKind(panel, item.kind);
+    });
+    kindBar.appendChild(btn);
+    kindButtons.set(item.kind, btn);
+  }
+  videoWrap.appendChild(kindBar);
   root.appendChild(videoWrap);
 
   // ── 详情标题栏：折叠按钮 | 📋 视频详情 | 复制全部 ──
@@ -254,6 +277,7 @@ function buildPanel() {
     bloomLayer,
     mistLayer,
     halationLayer,
+    kindButtons,
     sliders,
     colorBody,
     colorFold,
@@ -473,6 +497,33 @@ async function bakeColorTune(panel) {
   }
 }
 
+let panelRef = null;
+
+/** 设置输出形态：改 widget 值 + 刷新图标高亮（值随工作流序列化） */
+function setSaveKind(panel, kind) {
+  const node = panel?.node;
+  if (!node) return;
+  const widget = node.widgets?.find((w) => w.name === "save_kind");
+  if (widget) {
+    widget.value = kind;
+    widget.callback?.(kind);
+  }
+  syncKindButtons(panel);
+  panel.colorStatus && (panel.colorStatus.textContent = "");
+}
+
+function syncKindButtons(panel) {
+  const node = panel?.node;
+  if (!node || !panel?.kindButtons) return;
+  const current = String(node.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
+  for (const [kind, btn] of panel.kindButtons) {
+    const active = kind === current;
+    btn.style.borderColor = active ? "#39a0ff" : "#4a4a4a";
+    btn.style.background = active ? "rgba(29,78,216,.85)" : "rgba(20,20,20,.85)";
+    btn.style.opacity = active ? "1" : "0.7";
+  }
+}
+
 function applyInfo(panel, info) {
   if (!info) return;
   panel.info = info;
@@ -524,6 +575,7 @@ function ensurePanel(node) {
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
   panel.colorOpen = node.properties?.easyColorOpen === true;
   panel.refreshLayout();
+  syncKindButtons(panel);
   if (node.size && node.size[1] < 430) node.setSize([node.size[0], 430]);
   return panel;
 }
@@ -570,6 +622,7 @@ app.registerExtension({
         panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
         panel.colorOpen = this.properties?.easyColorOpen === true;
         panel.refreshLayout();
+        syncKindButtons(panel);
       } catch (error) {
         console.warn("[EasyMedia] 恢复视频面板失败：", error);
       }
