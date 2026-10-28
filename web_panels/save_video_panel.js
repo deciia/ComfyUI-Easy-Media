@@ -382,21 +382,17 @@ function buildPanel() {
 
       if (kind === "audio") {
         panel.playerHeight = AUDIO_BAR_HEIGHT;
-      } else if (!opts.fill) {
-        // 画面高度由节点宽度 × 视频宽高比决定（参考「多轨项目视频合并」），不留空白
-        const widthPx = Math.max(120, Number(node.size?.[0] ?? 360) - 2);
-        panel.playerHeight = Math.max(60, Math.min(1600, Math.round(widthPx * panel.aspect)));
-      } else if (!opts.resizeNode) {
-        // 拖拽：按"节点高度 - 上方参数 - 面板固定部分"求画面高度。
-        // chrome 用面板实测高度反推（避免估算误差被反复放大），并限幅。
+      } else if (opts.resizeNode) {
+        // 折叠/切形态：保持画面高度，改节点总高
+        panel.playerHeight = Math.max(60, Math.round(panel.playerHeight || PLAYER_HEIGHT));
+      } else {
+        // 拖拽：画框填满"节点高度 - 参数 - 固定条"；视频按比例 contain 居中（可留黑边）
         const total = Number(node.size?.[1] ?? 0);
-        const cur = Math.max(80, Number(panel.playerHeight) || PLAYER_HEIGHT);
+        const cur = Math.max(60, Number(panel.playerHeight) || PLAYER_HEIGHT);
         const measured = Number(panel.root.offsetHeight) || 0;
         const measuredChrome = measured > 0 ? Math.max(chrome, measured - cur) : chrome;
         const fit = Math.round(total - paramsHeight(node) - measuredChrome);
-        panel.playerHeight = Math.max(80, Math.min(900, fit > 0 ? fit : cur));
-      } else {
-        panel.playerHeight = Math.max(80, Math.round(panel.playerHeight || PLAYER_HEIGHT));
+        panel.playerHeight = Math.max(60, Math.min(4000, fit > 0 ? fit : cur));
       }
 
       const player = panel.playerHeight;
@@ -409,7 +405,7 @@ function buildPanel() {
       panel.video.style.height = `${player}px`;
       panel.imagePreview.style.height = `${player}px`;
 
-      if (opts.resizeNode || kind !== "audio") {
+      if (opts.resizeNode && kind !== "audio") {
         const wanted = Math.max(120, Math.round(paramsHeight(node) + chrome + player));
         if (Math.abs((node.size?.[1] ?? 0) - wanted) > 1) {
           panel._applyingSize = true;
@@ -675,18 +671,7 @@ function handleNodeResize(node) {
   if (!panel || panel._applyingSize) return;
   const size = node.size;
   if (!size) return;
-  const prev = panel._lastSize;
-  const dw = prev ? Math.abs(size[0] - prev[0]) : 0;
-  const dh = prev ? Math.abs(size[1] - prev[1]) : 0;
   panel._lastSize = [size[0], size[1]];
-
-  // 宽度方向在拖：画面按视频宽高比缩放，节点高度随之调整（与「多轨项目视频合并」一致）
-  if (dw > dh && kindOf(panel) !== "audio") {
-    const player = Math.max(60, Math.min(1600, Math.round(size[0] * panel.aspect)));
-    panel.playerHeight = player;
-    panel.refreshLayout?.({ resizeNode: true });
-    return;
-  }
   panel.refreshLayout?.({ resizeNode: false });
 }
 
