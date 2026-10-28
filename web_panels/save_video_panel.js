@@ -382,6 +382,10 @@ function buildPanel() {
 
       if (kind === "audio") {
         panel.playerHeight = AUDIO_BAR_HEIGHT;
+      } else if (!opts.fill) {
+        // 画面高度由节点宽度 × 视频宽高比决定（参考「多轨项目视频合并」），不留空白
+        const widthPx = Math.max(120, Number(node.size?.[0] ?? 360) - 2);
+        panel.playerHeight = Math.max(60, Math.min(1600, Math.round(widthPx * panel.aspect)));
       } else if (!opts.resizeNode) {
         // 拖拽：按"节点高度 - 上方参数 - 面板固定部分"求画面高度。
         // chrome 用面板实测高度反推（避免估算误差被反复放大），并限幅。
@@ -405,8 +409,8 @@ function buildPanel() {
       panel.video.style.height = `${player}px`;
       panel.imagePreview.style.height = `${player}px`;
 
-      if (opts.resizeNode) {
-        const wanted = Math.max(160, Math.round(paramsHeight(node) + chrome + player));
+      if (opts.resizeNode || kind !== "audio") {
+        const wanted = Math.max(120, Math.round(paramsHeight(node) + chrome + player));
         if (Math.abs((node.size?.[1] ?? 0) - wanted) > 1) {
           panel._applyingSize = true;
           node.setSize?.([node.size?.[0] ?? 360, wanted]);
