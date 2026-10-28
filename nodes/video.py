@@ -442,7 +442,7 @@ class EasySaveVideo(io.ComfyNode):
             )
 
         try:
-            relative_path, file, subfolder, folder_type = _save_video_output(
+            relative_path, file, subfolder, folder_type, video_info = _save_video_output(
                 source_video=source_video,
                 write_temp=write_temp,
                 filename_prefix=filename_prefix,
@@ -475,15 +475,18 @@ class EasySaveVideo(io.ComfyNode):
         if notify_sound and notify_sound != _NOTIFY_MUTE:
             _play_notify_sound(notify_sound)
 
+        preview = ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]).as_dict()
+        custom_ui = {**preview, "easy_video_info": [video_info]}
+
         if hide_preview:
-            return io.NodeOutput(source_video, relative_path, pass_images, pass_audio)
+            return io.NodeOutput(source_video, relative_path, pass_images, pass_audio, ui={"easy_video_info": [video_info]})
 
         return io.NodeOutput(
             source_video,
             relative_path,
             pass_images,
             pass_audio,
-            ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]),
+            ui=custom_ui,
         )
 
 def _save_video_output(
@@ -592,7 +595,35 @@ def _save_video_output(
                     except OSError:
                         pass
 
-    return relative_path, file, subfolder, folder_type
+    info = {
+        "filename": file,
+        "subfolder": subfolder or "",
+        "type": "temp" if write_temp else "output",
+        "path": full_path,
+        "size_bytes": os.path.getsize(full_path) if os.path.isfile(full_path) else 0,
+        "width": int(width),
+        "height": int(height),
+        "format": os.path.splitext(file)[1].lstrip(".").lower(),
+        "video_format": str(video_format or ""),
+    }
+    try:
+        probe = ffprobe_info(full_path) or {}
+        if probe.get("width"):
+            info["width"] = int(probe["width"])
+        if probe.get("height"):
+            info["height"] = int(probe["height"])
+        if probe.get("fps"):
+            info["fps"] = round(float(probe["fps"]), 3)
+        if probe.get("frame_count"):
+            info["frames"] = int(probe["frame_count"])
+        if probe.get("duration"):
+            info["duration"] = round(float(probe["duration"]), 3)
+        if probe.get("has_audio"):
+            info["has_audio"] = True
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[EasySaveVideo] 读取视频详情失败（不影响出片）：%s", exc)
+
+    return relative_path, file, subfolder, folder_type, info
 
 
 def _save_audio_to_temp_wav(audio: dict) -> str | None:

@@ -1297,6 +1297,32 @@ async def handle_prompt_studio_generate(request: web.Request) -> web.Response:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to generate prompt: {error}"}, status=500)
 
+@PromptServer.instance.routes.post("/easy-media/reveal")
+async def handle_easy_media_reveal(request: web.Request) -> web.Response:
+    """在系统文件管理器里定位文件（Windows：explorer /select,）。"""
+    try:
+        payload = await request.json()
+        raw = str((payload or {}).get("path") or "").strip()
+        if not raw:
+            return web.json_response({"ok": False, "error": "path 不能为空"}, status=400)
+        path = os.path.abspath(raw)
+        if not os.path.exists(path):
+            return web.json_response({"ok": False, "error": f"路径不存在：{path}"}, status=404)
+        import subprocess as _sp
+        import sys as _sys
+        if _sys.platform.startswith("win"):
+            # /select, 需要紧跟逗号，路径带空格也安全（Popen 传参不做 shell 解析）
+            _sp.Popen(["explorer", f"/select,{path}"])
+        elif _sys.platform == "darwin":
+            _sp.Popen(["open", "-R", path])
+        else:
+            _sp.Popen(["xdg-open", path if os.path.isdir(path) else os.path.dirname(path)])
+        return web.json_response({"ok": True, "path": path})
+    except Exception as error:  # noqa: BLE001
+        traceback.print_exc()
+        return web.json_response({"ok": False, "error": str(error)}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/prompt-studio/plan")
 async def handle_prompt_studio_plan(request: web.Request) -> web.Response:
     """导演级分镜规划；失败返回可展示错误，不写入任何数据。"""

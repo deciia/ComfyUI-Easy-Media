@@ -53,6 +53,10 @@ if os.path.exists(dist_path):
     ])
 
     _nodes.EXTENSION_WEB_DIRS[project_name] = dist_path
+    # 额外的轻量面板扩展（保存视频节点的播放器/详情），独立目录便于热改
+    _panels_dir = os.path.join(root_path, "web_panels")
+    if os.path.exists(_panels_dir):
+        _nodes.EXTENSION_WEB_DIRS[f"{project_name}_panels"] = _panels_dir
 else:
     print(f"Warning: Dist directory not found for {project_name}. Frontend assets will not be served.")
 
