@@ -31,6 +31,62 @@ _OUTPUT_MODE_OPTIONS = ["save", "preview_only", "hide", "hide&save"]
 # 存档按位置还原时整体串位（重启后 input_mode/output_mode/filename_prefix 错位）。
 _INPUT_MODE_OPTIONS = ["images+audio", "video"]
 
+_NOTIFY_MUTE = "🔇 不播放提示音"
+_NOTIFY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sounds")
+_NOTIFY_EXTS = (".wav", ".mp3", ".m4a", ".ogg", ".flac")
+
+
+def _list_notify_sounds() -> list[str]:
+    """可选提示音：插件目录下 sounds/ 里的音频文件；没有就只剩静音项。"""
+    items = [_NOTIFY_MUTE]
+    try:
+        if os.path.isdir(_NOTIFY_DIR):
+            for name in sorted(os.listdir(_NOTIFY_DIR)):
+                if os.path.splitext(name)[1].lower() in _NOTIFY_EXTS:
+                    items.append(name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[EasySaveVideo] 读取提示音目录失败：%s", exc)
+    return items
+
+
+def _play_notify_sound(file_name: str):
+    """后台线程播放提示音；非 Windows 或缺少文件时静默跳过。"""
+    if not file_name or file_name == _NOTIFY_MUTE:
+        return
+    path = file_name if os.path.isabs(file_name) else os.path.join(_NOTIFY_DIR, os.path.basename(file_name))
+    if not os.path.isfile(path):
+        return
+
+    def _run():
+        try:
+            import threading  # noqa: F401  (确保依赖）
+            if os.name != "nt":
+                return
+            import ctypes
+            # MCI 只认短路径；中文/长路径先转短路径，失败再退回 winsound
+            buffer = ctypes.create_unicode_buffer(260)
+            ctypes.windll.kernel32.GetShortPathNameW(path, buffer, 260)
+            short_path = buffer.value or path
+            alias = "easy_save_notify"
+            mci = ctypes.windll.winmm.mciSendStringW
+            mci(f"close {alias}", None, 0, 0)
+            opened = mci(f'open "{short_path}" type mpegvideo alias {alias}', None, 0, 0)
+            if opened:
+                opened = mci(f'open "{short_path}" alias {alias}', None, 0, 0)
+            if opened:
+                import winsound
+                winsound.PlaySound(path, winsound.SND_FILENAME)
+                return
+            mci(f"setaudio {alias} volume to 1000", None, 0, 0)
+            mci(f"play {alias} wait", None, 0, 0)
+            mci(f"close {alias}", None, 0, 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[EasySaveVideo] 提示音播放失败：%s", exc)
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # 输出格式（参考班长「🎥 视频合并」的格式清单）：第一个是默认值，保持原行为
 _VIDEO_FORMAT_OPTIONS = [
     "跟随源 (AUTO)",
@@ -212,7 +268,9 @@ class EasySaveVideo(io.ComfyNode):
             category=CATEGORY_VIDEO,
             description=(
                 "Save images and optional audio to a video file. "
-                "Returns the VIDEO for downstream use and the full written file path."
+                "Returns VIDEO + written file path, and passes IMAGES / AUDIO through for downstream nodes. "
+                "可选输出格式（MP4/MKV/WEBM/MOV/ProRes/H265/GIF/WEBP）、自定义保存目录、采用成品流复制、"
+                "出片后清理显存、出片提示音。"
             ),
             inputs=[
                 io.Combo.Input(
@@ -293,12 +351,24 @@ class EasySaveVideo(io.ComfyNode):
                     default=False,
                     tooltip="出片后卸载模型并清理显存（出错也会清理）。",
                 ),
+                io.Combo.Input(
+                    "notify_sound",
+                    options=_list_notify_sounds(),
+                    default=_NOTIFY_MUTE,
+                    tooltip=(
+                        "出片完成后播放的提示音。把音频放进插件的 sounds/ 目录即可出现在这里；"
+                        "默认静音。"
+                    ),
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
             outputs=[
                 io.Video.Output(display_name="VIDEO"),
                 io.String.Output(display_name="file_path"),
+                # —— 追加透传输出（位置在末尾，旧的 VIDEO/file_path 索引不变）——
+                io.Image.Output(display_name="images_out", is_output_list=False),
+                io.Audio.Output(display_name="audio_out"),
             ],
         )
 
@@ -317,6 +387,7 @@ class EasySaveVideo(io.ComfyNode):
         custom_save_path: str = "",
         adopt_source_video: bool = False,
         cleanup_after_save: bool = False,
+        notify_sound: str = _NOTIFY_MUTE,
     ) -> io.NodeOutput:
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
@@ -340,6 +411,7 @@ class EasySaveVideo(io.ComfyNode):
         hide_preview = output_mode_key in {"hide", "hide&save"}
         write_temp = output_mode_key in {"preview_only", "hide"}
 
+        pass_images = None
         if input_mode_key == "video":
             source_video = video
             if source_video is None:
@@ -356,6 +428,7 @@ class EasySaveVideo(io.ComfyNode):
                     "接上 images 端口，或把 input_mode 改成 'video'。"
                 )
             normalized, changed = normalize_video_images(images)
+            pass_images = normalized
             if changed:
                 logger.info(
                     "[EasySaveVideo] Image dimensions were cropped to even size for video encoding."
@@ -386,12 +459,30 @@ class EasySaveVideo(io.ComfyNode):
             if cleanup_after_save:
                 _cleanup_gpu()
 
+        # 透传：图像默认给本次编码用的画面；video 模式下按需从组件里取
+        if pass_images is None:
+            try:
+                pass_images = source_video.get_components().images
+            except Exception:
+                pass_images = None
+        pass_audio = audio
+        if pass_audio is None:
+            try:
+                pass_audio = source_video.get_components().audio
+            except Exception:
+                pass_audio = None
+
+        if notify_sound and notify_sound != _NOTIFY_MUTE:
+            _play_notify_sound(notify_sound)
+
         if hide_preview:
-            return io.NodeOutput(source_video, relative_path)
+            return io.NodeOutput(source_video, relative_path, pass_images, pass_audio)
 
         return io.NodeOutput(
             source_video,
             relative_path,
+            pass_images,
+            pass_audio,
             ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]),
         )
 
