@@ -497,8 +497,6 @@ async function bakeColorTune(panel) {
   }
 }
 
-let panelRef = null;
-
 /** 设置输出形态：改 widget 值 + 刷新图标高亮（值随工作流序列化） */
 function setSaveKind(panel, kind) {
   const node = panel?.node;
