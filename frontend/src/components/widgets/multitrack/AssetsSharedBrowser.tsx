@@ -43,7 +43,7 @@ function ensureFileZoomLayer() {
   ].join(';')
   const img = document.createElement('img')
   img.draggable = false
-  img.style.cssText = 'display:block;max-width:520px;max-height:520px;border-radius:7px;background:#1e1e1e'
+  img.style.cssText = 'display:block;border-radius:7px;background:#1e1e1e'
   img.addEventListener('load', () => placeFileZoom())
   layer.appendChild(img)
   document.body.appendChild(layer)
@@ -54,7 +54,10 @@ function ensureFileZoomLayer() {
 
 function placeFileZoom() {
   if (!fileZoomLayer) return
-  const { layer } = fileZoomLayer
+  const { layer, img } = fileZoomLayer
+  // 超高/超宽图先按视口收一下，保证浮层整体能显示在屏幕内
+  img.style.maxWidth = `${Math.min(520, window.innerWidth - 40)}px`
+  img.style.maxHeight = `${Math.min(520, window.innerHeight - 44)}px`
   const width = layer.offsetWidth || 280
   const height = layer.offsetHeight || 280
   let x = fileZoomPoint.x + 18
@@ -73,6 +76,9 @@ function showFileZoom(url: string, point: { clientX: number; clientY: number }) 
   layer.style.visibility = 'visible'
   layer.style.opacity = '1'
   placeFileZoom()
+  window.requestAnimationFrame(placeFileZoom)
+  window.setTimeout(placeFileZoom, 60)
+  window.setTimeout(placeFileZoom, 220)
 }
 
 function moveFileZoom(point: { clientX: number; clientY: number }) {
