@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { WorkspaceResourceItem } from './WorkspacePanels'
 
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -36,9 +37,11 @@ export function AssetsSharedBrowser({
   const [thumbSize, setThumbSize] = useState(72)
   const [zoomSrc, setZoomSrc] = useState<string | null>(null)
   const zoomRef = useRef<HTMLDivElement | null>(null)
+  const pointerRef = useRef({ x: 0, y: 0 })
 
   /** 悬停放大：浮层跟随光标，避让窗口边缘（与班长媒体加载器的 bz-zoom 同款行为） */
   const moveZoom = (event: { clientX: number; clientY: number }) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY }
     const el = zoomRef.current
     if (!el) return
     const width = el.offsetWidth || 280
@@ -52,9 +55,33 @@ export function AssetsSharedBrowser({
   }
 
   const showZoom = (event: React.MouseEvent, url: string) => {
+    pointerRef.current = { x: event.clientX, y: event.clientY }
     setZoomSrc(url)
-    window.requestAnimationFrame(() => moveZoom(event))
   }
+
+  // 浮层挂到 body 上：导演台容器带 transform:scale，fixed 定位会以它为基准而错位
+  useEffect(() => {
+    if (!zoomSrc) return
+    let raf = 0
+    const place = () => {
+      const point = pointerRef.current
+      const el = zoomRef.current
+      if (!el) {
+        raf = window.requestAnimationFrame(place)
+        return
+      }
+      const width = el.offsetWidth || 280
+      const height = el.offsetHeight || 280
+      let x = point.x + 18
+      let y = point.y + 18
+      if (x + width > window.innerWidth - 8) x = point.x - width - 18
+      if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
+      el.style.left = `${Math.max(8, x)}px`
+      el.style.top = `${Math.max(8, y)}px`
+    }
+    raf = window.requestAnimationFrame(place)
+    return () => window.cancelAnimationFrame(raf)
+  }, [zoomSrc])
 
   const hideZoom = () => setZoomSrc(null)
 
@@ -306,7 +333,7 @@ export function AssetsSharedBrowser({
             </div>
           )}
         </div>
-      {zoomSrc ? (
+      {zoomSrc ? createPortal(
         <div
           ref={zoomRef}
           className="pointer-events-none fixed z-[100001] rounded-[10px] p-1"
@@ -324,7 +351,8 @@ export function AssetsSharedBrowser({
             onLoad={(event) => moveZoom(event as unknown as React.MouseEvent)}
             style={{ display: 'block', maxWidth: 520, maxHeight: 520, borderRadius: 7, background: '#1e1e1e' }}
           />
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   )
