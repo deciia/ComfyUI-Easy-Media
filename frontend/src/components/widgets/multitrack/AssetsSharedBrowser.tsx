@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { WorkspaceResourceItem } from './WorkspacePanels'
 
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -14,6 +13,78 @@ const fieldStyle: React.CSSProperties = {
   padding: '4px 8px',
   fontSize: 12,
   outline: 'none',
+}
+
+/**
+ * 悬停放大浮层：照班长媒体加载器（bvl/hover.js 的 bz-zoom）做命令式实现。
+ * 直接 append 到 document.body，不受导演台容器 transform:scale 影响，
+ * 也不依赖 React 渲染时机，所以不会出现“浮层不出现/位置漂移”。
+ */
+let fileZoomLayer: { layer: HTMLDivElement; img: HTMLImageElement } | null = null
+const fileZoomPoint = { x: 0, y: 0 }
+
+function ensureFileZoomLayer() {
+  if (fileZoomLayer) return fileZoomLayer
+  const layer = document.createElement('div')
+  layer.style.cssText = [
+    'position:fixed',
+    'left:0',
+    'top:0',
+    'z-index:2147483647',
+    'pointer-events:none',
+    'padding:4px',
+    'border-radius:10px',
+    'background:rgba(20,21,23,0.92)',
+    'border:1px solid rgba(255,255,255,0.12)',
+    'box-shadow:0 14px 36px rgba(0,0,0,0.6)',
+    'opacity:0',
+    'visibility:hidden',
+    'transition:opacity 0.12s ease',
+  ].join(';')
+  const img = document.createElement('img')
+  img.draggable = false
+  img.style.cssText = 'display:block;max-width:520px;max-height:520px;border-radius:7px;background:#1e1e1e'
+  img.addEventListener('load', () => placeFileZoom())
+  layer.appendChild(img)
+  document.body.appendChild(layer)
+  window.addEventListener('scroll', () => hideFileZoom(), true)
+  fileZoomLayer = { layer, img }
+  return fileZoomLayer
+}
+
+function placeFileZoom() {
+  if (!fileZoomLayer) return
+  const { layer } = fileZoomLayer
+  const width = layer.offsetWidth || 280
+  const height = layer.offsetHeight || 280
+  let x = fileZoomPoint.x + 18
+  let y = fileZoomPoint.y + 18
+  if (x + width > window.innerWidth - 8) x = fileZoomPoint.x - width - 18
+  if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
+  layer.style.left = `${Math.max(8, x)}px`
+  layer.style.top = `${Math.max(8, y)}px`
+}
+
+function showFileZoom(url: string, point: { clientX: number; clientY: number }) {
+  const { layer, img } = ensureFileZoomLayer()
+  fileZoomPoint.x = point.clientX
+  fileZoomPoint.y = point.clientY
+  if (img.getAttribute('src') !== url) img.src = url
+  layer.style.visibility = 'visible'
+  layer.style.opacity = '1'
+  placeFileZoom()
+}
+
+function moveFileZoom(point: { clientX: number; clientY: number }) {
+  fileZoomPoint.x = point.clientX
+  fileZoomPoint.y = point.clientY
+  if (fileZoomLayer) placeFileZoom()
+}
+
+function hideFileZoom() {
+  if (!fileZoomLayer) return
+  fileZoomLayer.layer.style.opacity = '0'
+  fileZoomLayer.layer.style.visibility = 'hidden'
 }
 
 /** 共享资源浏览器（右侧栏页签）：input/output/temp 根目录、文件夹浏览、筛选、排序、网格/列表、拖拽入池 */
@@ -35,56 +106,6 @@ export function AssetsSharedBrowser({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [thumbSize, setThumbSize] = useState(72)
-  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
-  const zoomRef = useRef<HTMLDivElement | null>(null)
-  const pointerRef = useRef({ x: 0, y: 0 })
-
-  /** 悬停放大：浮层跟随光标，避让窗口边缘（与班长媒体加载器的 bz-zoom 同款行为） */
-  const moveZoom = (event: { clientX: number; clientY: number }) => {
-    pointerRef.current = { x: event.clientX, y: event.clientY }
-    const el = zoomRef.current
-    if (!el) return
-    const width = el.offsetWidth || 280
-    const height = el.offsetHeight || 280
-    let x = event.clientX + 18
-    let y = event.clientY + 18
-    if (x + width > window.innerWidth - 8) x = event.clientX - width - 18
-    if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
-    el.style.left = `${Math.max(8, x)}px`
-    el.style.top = `${Math.max(8, y)}px`
-  }
-
-  const showZoom = (event: React.MouseEvent, url: string) => {
-    pointerRef.current = { x: event.clientX, y: event.clientY }
-    setZoomSrc(url)
-  }
-
-  // 浮层挂到 body 上：导演台容器带 transform:scale，fixed 定位会以它为基准而错位
-  useEffect(() => {
-    if (!zoomSrc) return
-    let raf = 0
-    const place = () => {
-      const point = pointerRef.current
-      const el = zoomRef.current
-      if (!el) {
-        raf = window.requestAnimationFrame(place)
-        return
-      }
-      const width = el.offsetWidth || 280
-      const height = el.offsetHeight || 280
-      let x = point.x + 18
-      let y = point.y + 18
-      if (x + width > window.innerWidth - 8) x = point.x - width - 18
-      if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
-      el.style.left = `${Math.max(8, x)}px`
-      el.style.top = `${Math.max(8, y)}px`
-    }
-    raf = window.requestAnimationFrame(place)
-    return () => window.cancelAnimationFrame(raf)
-  }, [zoomSrc])
-
-  const hideZoom = () => setZoomSrc(null)
-
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -285,12 +306,10 @@ export function AssetsSharedBrowser({
                   }}
                   onClick={() => addItem(item)}
                   onMouseEnter={(event) => {
-                    if (item.kind === 'image' && item.url) showZoom(event, item.url)
+                    if (item.kind === 'image' && item.url) showFileZoom(item.url, event)
                   }}
-                  onMouseMove={(event) => {
-                    if (zoomSrc) moveZoom(event)
-                  }}
-                  onMouseLeave={hideZoom}
+                  onMouseMove={(event) => moveFileZoom(event)}
+                  onMouseLeave={hideFileZoom}
                   className="flex flex-col overflow-hidden rounded-md text-left"
                   style={{ width: thumbSize, border: `1px solid ${BORDER}`, background: FIELD_BG }}
                 >
@@ -333,27 +352,6 @@ export function AssetsSharedBrowser({
             </div>
           )}
         </div>
-      {zoomSrc ? createPortal(
-        <div
-          ref={zoomRef}
-          className="pointer-events-none fixed z-[100001] rounded-[10px] p-1"
-          style={{
-            background: 'rgba(20,21,23,0.92)',
-            border: '1px solid rgba(255,255,255,0.12)',
-            boxShadow: '0 14px 36px rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          <img
-            src={zoomSrc}
-            alt=""
-            draggable={false}
-            onLoad={(event) => moveZoom(event as unknown as React.MouseEvent)}
-            style={{ display: 'block', maxWidth: 520, maxHeight: 520, borderRadius: 7, background: '#1e1e1e' }}
-          />
-        </div>,
-        document.body,
-      ) : null}
     </div>
   )
 }
