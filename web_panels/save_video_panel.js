@@ -115,23 +115,67 @@ function currentKind(node) {
   return String(node?.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
 }
 
-/** 隐藏/恢复原生 widget：三处一起改（Vue 节点渲染只看 hidden 与 computeLayoutSize） */
+/**
+ * 隐藏/恢复原生 widget（参数控件）。
+ *
+ * 四个动作必须一起做，缺一个都会出问题（都踩过）：
+ *  1. `type = "hidden"` —— **前端渲染与槽绘制以 type 为准**（ComfyUI DOMWidgetImpl.computeLayoutSize
+ *     对 type==='hidden' 直接返回 0；行是否渲染同样看它）。只设 hidden 不够，槽会留在原位/飘到空白处；
+ *  2. `hidden = true` —— canvas 渲染旧路径兼容；
+ *  3. `computeSize = () => [0, 0]` —— 行高归零，但**不能是 [0, -4]**：负高度会让后续行 y 上移累积、槽错位；
+ *  4. `computeLayoutSize` 返回全 0 —— 让布局引擎认为不占位（否则节点被内容高度顶住、拖不动）。
+ */
 function hideWidget(widget, hide) {
   if (!widget) return;
   if (hide) {
     if (widget._easySizeSaved) return;
-    widget._easySizeSaved = { cs: widget.computeSize, cls: widget.computeLayoutSize };
+    widget._easySizeSaved = {
+      type: widget.type,
+      cs: widget.computeSize,
+      cls: widget.computeLayoutSize,
+      hidden: widget.hidden,
+      ch: widget.computedHeight,
+    };
+    widget.type = "hidden";
     widget.hidden = true;
-    widget.computeSize = () => [0, -4];
+    widget.computeSize = () => [0, 0];
     widget.computeLayoutSize = () => ({ minHeight: 0, maxHeight: 0, minWidth: 0, maxWidth: 0 });
+    // 关键：前端布局直接读 computedHeight（已算好的行高）。曾显示过再被隐藏的 widget 会残留
+    // computedHeight=24，Vue 仍为它留一行，而槽标签按 widget.y（已跳过隐藏行）绘制 → 错位 24px×隐藏数。
+    widget.computedHeight = 0;
   } else if (widget._easySizeSaved) {
     const saved = widget._easySizeSaved;
+    widget.type = saved.type;
+    widget.hidden = saved.hidden === true;
     widget.computeSize = saved.cs;
     if (saved.cls) widget.computeLayoutSize = saved.cls;
     else delete widget.computeLayoutSize;
-    widget.hidden = false;
+    // 还原行高：原本有值就还回去，没有就删除让前端按 computeSize 重算
+    if (saved.ch === undefined) delete widget.computedHeight;
+    else widget.computedHeight = saved.ch;
     delete widget._easySizeSaved;
   }
+}
+
+function relayoutSlots(node) {
+  if (!node) return;
+  // 槽位置来自 calculateVueInputSlotPosition → getWidgetSlotY：优先 slot.pos，否则 widget.y + 半行高。
+  // 隐藏中段 widget（images/audio 形态隐藏 video_format/adopt_source_video）后若 widget.y 不重算，
+  // 其余槽仍按旧 y 绘制 → 浮到下方空白处（本问题的成因）。_arrangeWidgets 不会更新到槽所依赖的 widget.y。
+  // arrange() 会重算所有 widget.y（槽随之归位），但它同时把 node.size 重置为 computeSize()，
+  // 因此这里先记下尺寸、重排后立刻还原：布局归 arrange，尺寸归用户，互不侵占。
+  // 清掉 widget 输入槽缓存的 pos：前端 getWidgetSlotY 里 `if (slot.pos) return slot.pos[1]` 优先用它，
+  // 而工作流加载时这些槽带着保存时的旧位置 → 无论 widget 行怎么重排，槽都钉在原地（错位的直接原因）。
+  // 清空后 getWidgetSlotY 回落到 `widget.y + NODE_SLOT_HEIGHT/2`，才会跟着行实时对齐。
+  for (const input of node.inputs ?? []) {
+    if (input && input.widget && input.pos) input.pos = undefined;
+  }
+  const savedSize = node.size ? [node.size[0], node.size[1]] : null;
+  try { node.arrange?.(); } catch { /* ignore */ }
+  if (savedSize && typeof node.setSize === "function") {
+    try { node.setSize(savedSize); } catch { /* ignore */ }
+  }
+  try { node.setDirtyCanvas?.(true, true); } catch { /* ignore */ }
 }
 
 function buildPanel() {
@@ -170,11 +214,21 @@ function buildPanel() {
 
   // ── 画框（可伸缩）──
   const videoWrap = el("div", "position:relative;flex:1 1 auto;min-height:60px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;");
-  const video = el("video", "width:100%;height:100%;background:#000;object-fit:contain;display:block;");
+  const video = el(
+    "video",
+    // 绝对定位填满画框：<video> 无源时固有尺寸是 300×150，若留在文档流里会撑住 flex 容器，
+    // 使「保存视频」形态的最小高度被抬高、节点压不下去（图片/音频形态 video 是 display:none 所以没这问题）。
+    "position:absolute;inset:0;width:100%;height:100%;background:#000;object-fit:contain;display:block;",
+  );
   video.controls = true;
   video.loop = false;
   video.preload = "metadata";
   video.muted = true;
+  // 无片时浏览器会给 <video> 画一块灰色占位（盖住容器黑底），而控件条在 video 元素内部，
+  // 不能隐藏元素（否则播放条也没了）。用 1×1 纯黑 PNG 作 poster：无片时黑底 + 播放条都在，
+  // 有片后 poster 自动被视频画面替换。
+  video.poster =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
   videoWrap.appendChild(video);
 
   const imagePreview = el("img", "width:100%;height:100%;object-fit:contain;background:#000;display:none;");
@@ -355,19 +409,9 @@ function buildPanel() {
       }
       if (!panel.videoOnly) applyKindWidgets(node, kind);
 
-      // 面板高度下限：折叠时更小，展开时保证详情可见
-      const widget = node.widgets?.find((w) => w.name === "easy_video_panel");
-      if (widget) {
-        const audioKind = kind === "audio";
-        widget.computeLayoutSize = () => ({
-          minHeight: panel.videoOnly
-            ? KIND_BAR_HEIGHT + 60
-            : audioKind
-              ? KIND_BAR_HEIGHT + 54 + HEADER_HEIGHT + 40
-              : MIN_PANEL_HEIGHT,
-          minWidth: 0,
-        });
-      }
+      // 行显隐已变化 → 重算槽位置（否则切 images/audio 时槽错位）
+      relayoutSlots(node);
+      // 高度下限由 addDOMWidget 的 getMinHeight 动态读取（见 ensurePanel），这里不再重设布局函数
       node.setDirtyCanvas?.(true, true);
     }
   };
@@ -449,20 +493,81 @@ function buildPanel() {
 function applyKindWidgets(node, kind) {
   const show = new Set(KIND_WIDGETS[kind] ?? []);
   const managed = new Set(Object.values(KIND_WIDGETS).flat());
+  let changed = false;
   for (const name of managed) {
-    hideWidget(node.widgets?.find((w) => w.name === name), !show.has(name));
+    const widget = node.widgets?.find((w) => w.name === name);
+    if (!widget) continue;
+    const shouldHide = !show.has(name);
+    const isHidden = Boolean(widget._easySizeSaved) || widget.hidden === true;
+    if (shouldHide !== isHidden) changed = true;
+    hideWidget(widget, shouldHide);
   }
+  // 形态专属参数显隐变化后重算槽位置（images/audio 形态的槽错位就出在这里）
+  if (changed) relayoutSlots(node);
+}
+
+/**
+ * 按「输入槽实际接线情况」算可保存形态（前端只能看槽类型，帧数/实际类型由后端判断）：
+ *  - 只接 audio          → 仅 audio
+ *  - 接了 images(+audio) → images / video / audio
+ *  - 只接 images        → images / video（多帧图像流→无声视频；单张图由后端报错引导存图片）
+ *  - video 槽（*）接了  → 三种都允许（可能是 VIDEO/IMAGE/AUDIO，后端自动分流）
+ *  - 完全没接           → 不限制（避免新节点被锁死）
+ */
+function availableKinds(node) {
+  const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+  const connected = (name) => inputs.some((input) => input?.name === name && input?.link != null);
+  const hasImages = connected("images");
+  const hasVideo = connected("video");
+  const hasAudio = connected("audio");
+  if (!hasImages && !hasVideo && !hasAudio) return ["video", "images", "audio"];
+  const allowed = new Set();
+  if (hasVideo) {
+    allowed.add("video");
+    allowed.add("images");
+    allowed.add("audio");
+  }
+  if (hasImages) {
+    allowed.add("images");
+    // 图像流（多帧）可保存无声视频 → 🎬 也放开；单张图由后端执行时报错提示
+    allowed.add("video");
+    if (hasAudio) {
+      allowed.add("audio");
+    }
+  }
+  if (hasAudio) allowed.add("audio");
+  if (allowed.size === 0) allowed.add("video");
+  return ["video", "images", "audio"].filter((kind) => allowed.has(kind));
 }
 
 function syncKindButtons(panel) {
   const node = panel?.node;
   if (!node || !panel?.kindButtons) return;
+  const allowed = availableKinds(node);
+  // 当前形态不被输入支持 → 自动切到第一个可用形态（优先图片/音频，最后才是视频）
+  if (!allowed.includes(currentKind(node))) {
+    const fallback = ["images", "audio", "video"].find((kind) => allowed.includes(kind)) || "video";
+    const widget = node.widgets?.find((w) => w.name === "save_kind");
+    if (widget) {
+      widget.value = fallback;
+      try {
+        widget.callback?.(fallback);
+      } catch {
+        /* 忽略回调异常：值已写入 */
+      }
+    }
+  }
   const current = currentKind(node);
   for (const [kind, btn] of panel.kindButtons) {
     const active = kind === current;
+    const usable = allowed.includes(kind);
     btn.style.borderColor = active ? "#39a0ff" : "#4a4a4a";
     btn.style.background = active ? "rgba(29,78,216,.85)" : "rgba(20,20,20,.85)";
-    btn.style.opacity = active ? "1" : "0.7";
+    btn.style.opacity = usable ? (active ? "1" : "0.7") : "0.28";
+    btn.style.cursor = usable ? "pointer" : "not-allowed";
+    btn.disabled = !usable;
+    const baseTitle = (KIND_ICONS.find((item) => item.kind === kind) || {}).title || kind;
+    btn.title = usable ? baseTitle : `${baseTitle}（当前输入不支持，需要接 ${kind === "audio" ? "音频" : kind === "images" ? "图像+音频" : "视频/图像+音频"}）`;
   }
   applyKindWidgets(node, current);
 }
@@ -595,23 +700,7 @@ function applyInfo(panel, info) {
   }
   panel.pathText.textContent = info.path || info.filename || "—";
   panel.pathText.title = info.path || "";
-  hideNativePreviews(panel);
   panel.refreshLayout?.();
-}
-
-/** 后端仍会返回 ui.PreviewVideo，ComfyUI 会在节点里插入原生播放器；这里把它藏掉，只留面板自己的播放器 */
-function hideNativePreviews(panel) {
-  const node = panel?.node;
-  if (!node?.widgets) return;
-  for (const widget of node.widgets) {
-    if (widget.name === "easy_video_panel") continue;
-    const element = widget.element;
-    if (!element || element.tagName === "CANVAS") continue;
-    const hasMedia = element.querySelector?.("video,audio,img");
-    if (!hasMedia) continue;
-    element.style.display = "none";
-    hideWidget(widget, true);
-  }
 }
 
 function ensurePanel(node) {
@@ -619,13 +708,16 @@ function ensurePanel(node) {
   const panel = buildPanel();
   node._easyVideoPanel = panel;
   panel.node = node;
-  const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, { hideOnZoom: false });
-  // 关键：不声明 computeSize，只声明可伸缩范围 → 节点多高都由用户拖动决定，多出来的空间归面板
-  widget.computeLayoutSize = () => ({
-    minHeight: panel.videoOnly ? KIND_BAR_HEIGHT + 60 : MIN_PANEL_HEIGHT,
-    minWidth: 0,
+  // 尺寸配置与 EasyMedia 其它节点完全一致（见 frontend/src/lib/create-react-widget.ts）：
+  // getMinHeight 30 / getMaxHeight = 节点当前高度 / hideOnZoom。这三项就足够让宽高完全归用户拖拽，
+  // 不要手写 computeSize/computeLayoutSize，也不要 setSize / arrange（arrange 会把 size 重置为 computeSize）。
+  const widget = node.addDOMWidget("easy_video_panel", "easy_video_panel", panel.root, {
+    hideOnZoom: false,
+    getMinHeight: () => 30,
+    getMaxHeight: () => node.size?.[1],
   });
-  panel.videoOnly = node.properties?.easyVideoOnly === true;
+  // 默认折叠（仅显示画面）：未显式保存过时按折叠处理；用户手动展开过会写入 false，保持展开
+  panel.videoOnly = node.properties?.easyVideoOnly !== false;
   panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
   panel.colorOpen = node.properties?.easyColorOpen === true;
   syncKindButtons(panel);
@@ -664,6 +756,19 @@ app.registerExtension({
       return result;
     };
 
+    const onConnectionsChange = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function (...args) {
+      const result = onConnectionsChange?.apply(this, args);
+      try {
+        const panel = ensurePanel(this);
+        syncKindButtons(panel);
+        panel.refreshLayout?.();
+      } catch (error) {
+        console.warn("[EasyMedia] 输入变化后刷新保存形态失败：", error);
+      }
+      return result;
+    };
+
     const onConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function (info, ...rest) {
       const result = onConfigure?.apply(this, [info, ...rest]);
@@ -671,7 +776,7 @@ app.registerExtension({
         const cached = this._easyVideoInfo;
         const panel = ensurePanel(this);
         if (cached) applyInfo(panel, cached);
-        panel.videoOnly = this.properties?.easyVideoOnly === true;
+        panel.videoOnly = this.properties?.easyVideoOnly !== false;
         panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
         panel.colorOpen = this.properties?.easyColorOpen === true;
         syncKindButtons(panel);

@@ -79,7 +79,7 @@ import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
-import { stripProjectMeta } from '@/lib/project-timeline'
+import { TimelineResolutionSnapshot, stripProjectMeta } from '@/lib/project-timeline'
 import { readWorkspace } from './multitrack/agentStore'
 import { readDirectorSettings } from './multitrack/directorSettings'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
@@ -300,27 +300,56 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   function applyProjectTimeline(
     nextData: TrackData,
     meta: { name: string; updated_at: number } | null,
-    snapshot?: { format?: string | null } | null,
+    snapshot?: { format?: string | null; resolution?: TimelineResolutionSnapshot | null } | null,
   ) {
     const withMeta: TrackData = meta
       ? { ...nextData, project: { name: meta.name, updated_at: meta.updated_at } }
       : stripProjectMeta(nextData)
     commitNormalizedTrackChange(withMeta)
-    // 恢复项目保存的“视频格式”：上下文接续、参考图 match/max 等控件只在 format=MiniMax 时渲染，
-    // 不恢复会让载入后的编辑器看起来“丢了功能”。
-    const savedFormat = snapshot?.format
-    if (typeof savedFormat === 'string' && savedFormat.length > 0) {
-      const widgets = (node as { widgets?: Array<{ name?: string; value?: unknown; callback?: (value: unknown) => void }> } | null)?.widgets ?? []
-      const formatWidget = widgets.find((widget) => widget?.name === 'format')
-      if (formatWidget && formatWidget.value !== savedFormat) {
-        formatWidget.value = savedFormat
+    // 恢复项目保存的“视频格式”与分辨率设置：
+    // - format：上下文接续、参考图 match/max 等控件只在 format=MiniMax 时渲染，不恢复会“丢功能”；
+    // - resolution 是 COMFY_DYNAMICCOMBO_V3：切主键会异步重建子控件（resolution.width / resolution.height /
+    //   resolution.resize_method / resolution.resize_to_pixel / resolution.aspect_ratio / resolution.megapixels），
+    //   必须先切主键、等重建完成后再写子控件，否则子值会被重建覆盖或控件尚不存在。
+    const nodeWidgets = () => (node as { widgets?: Array<{ name?: string; value?: unknown; callback?: (value: unknown) => void; setValue?: (v: unknown, ctx?: unknown) => void }> } | null)?.widgets ?? []
+    const restoreWidget = (name: string, value: unknown) => {
+      if (value === undefined || value === null || value === '') return
+      // 每次实时读取：DynamicCombo 重建会增删 widgets 数组内容
+      const widget = nodeWidgets().find((item) => item?.name === name)
+      if (!widget || widget.value === value) return
+      if (name === 'resolution' && typeof widget.setValue === 'function') {
         try {
-          formatWidget.callback?.(savedFormat)
+          widget.setValue(value, { e: undefined, node, canvas: { graph_mouse: [0, 0] } })
         } catch {
-          // 忽略回调异常：节点值已写入
+          widget.value = value
         }
-        ;(app as { canvas?: { setDirty?: (dirty: boolean, canvas?: unknown) => void } } | null)?.canvas?.setDirty?.(true)
+      } else {
+        widget.value = value
       }
+      try {
+        widget.callback?.(value)
+      } catch {
+        // 忽略回调异常：节点值已写入
+      }
+      ;(app as { canvas?: { setDirty?: (dirty: boolean, canvas?: unknown) => void } } | null)?.canvas?.setDirty?.(true)
+    }
+    const savedFormat = snapshot?.format
+    if (typeof savedFormat === 'string') restoreWidget('format', savedFormat)
+    const savedResolution = snapshot?.resolution
+    if (savedResolution) {
+      // 1) 先切主键（触发 DynamicCombo 子控件重建）
+      restoreWidget('resolution', savedResolution.preset)
+      // 2) 子控件在重建完成后写入（微任务后 60ms 与轮询兜底后 400ms 各试一次，幂等）
+      const restoreSubWidgets = () => {
+        restoreWidget('resolution.width', savedResolution.width)
+        restoreWidget('resolution.height', savedResolution.height)
+        restoreWidget('resolution.resize_method', savedResolution.resize_method)
+        restoreWidget('resolution.resize_to_pixel', savedResolution.resize_to_pixel)
+        restoreWidget('resolution.aspect_ratio', savedResolution.aspect_ratio)
+        restoreWidget('resolution.megapixels', savedResolution.megapixels)
+      }
+      window.setTimeout(restoreSubWidgets, 60)
+      window.setTimeout(restoreSubWidgets, 400)
     }
   }
 

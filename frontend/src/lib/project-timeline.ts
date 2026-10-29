@@ -29,6 +29,8 @@ export interface TimelineResolutionSnapshot {
   height?: number
   aspect_ratio?: string
   megapixels?: number
+  resize_method?: string
+  resize_to_pixel?: number
 }
 
 export interface ProjectTimelineDocument {

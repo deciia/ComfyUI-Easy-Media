@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { WorkspaceResourceItem } from './WorkspacePanels'
 
 const FIELD_BG = 'hsl(var(--background, 240 10% 8%))'
@@ -34,6 +34,29 @@ export function AssetsSharedBrowser({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [thumbSize, setThumbSize] = useState(72)
+  const [zoomSrc, setZoomSrc] = useState<string | null>(null)
+  const zoomRef = useRef<HTMLDivElement | null>(null)
+
+  /** 悬停放大：浮层跟随光标，避让窗口边缘（与班长媒体加载器的 bz-zoom 同款行为） */
+  const moveZoom = (event: { clientX: number; clientY: number }) => {
+    const el = zoomRef.current
+    if (!el) return
+    const width = el.offsetWidth || 280
+    const height = el.offsetHeight || 280
+    let x = event.clientX + 18
+    let y = event.clientY + 18
+    if (x + width > window.innerWidth - 8) x = event.clientX - width - 18
+    if (y + height > window.innerHeight - 8) y = Math.max(8, window.innerHeight - height - 8)
+    el.style.left = `${Math.max(8, x)}px`
+    el.style.top = `${Math.max(8, y)}px`
+  }
+
+  const showZoom = (event: React.MouseEvent, url: string) => {
+    setZoomSrc(url)
+    window.requestAnimationFrame(() => moveZoom(event))
+  }
+
+  const hideZoom = () => setZoomSrc(null)
 
   useEffect(() => {
     let cancelled = false
@@ -234,6 +257,13 @@ export function AssetsSharedBrowser({
                     event.dataTransfer.effectAllowed = 'copy'
                   }}
                   onClick={() => addItem(item)}
+                  onMouseEnter={(event) => {
+                    if (item.kind === 'image' && item.url) showZoom(event, item.url)
+                  }}
+                  onMouseMove={(event) => {
+                    if (zoomSrc) moveZoom(event)
+                  }}
+                  onMouseLeave={hideZoom}
                   className="flex flex-col overflow-hidden rounded-md text-left"
                   style={{ width: thumbSize, border: `1px solid ${BORDER}`, background: FIELD_BG }}
                 >
@@ -276,6 +306,26 @@ export function AssetsSharedBrowser({
             </div>
           )}
         </div>
+      {zoomSrc ? (
+        <div
+          ref={zoomRef}
+          className="pointer-events-none fixed z-[100001] rounded-[10px] p-1"
+          style={{
+            background: 'rgba(20,21,23,0.92)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: '0 14px 36px rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <img
+            src={zoomSrc}
+            alt=""
+            draggable={false}
+            onLoad={(event) => moveZoom(event as unknown as React.MouseEvent)}
+            style={{ display: 'block', maxWidth: 520, maxHeight: 520, borderRadius: 7, background: '#1e1e1e' }}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

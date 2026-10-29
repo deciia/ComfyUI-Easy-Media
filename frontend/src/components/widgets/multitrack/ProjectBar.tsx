@@ -25,11 +25,20 @@ interface ProjectBarProps {
   onApply: (
     trackData: TrackData,
     meta: { name: string; updated_at: number } | null,
-    snapshot?: { format?: string | null } | null,
+    snapshot?: { format?: string | null; resolution?: TimelineResolutionSnapshot | null } | null,
   ) => void
 }
 
 type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
+
+/**
+ * 项目签名 = 轨道数据 + 分辨率/格式快照。
+ * 分辨率是节点 widget 而非轨道数据，只按轨道算签名会让「只改画幅」不算未保存改动，
+ * 自动保存与切项目提示都不触发 → 快照永远停在旧值。
+ */
+function projectSignature(trackData: TrackData, snapshot?: TimelineResolutionSnapshot | null): string {
+  return timelineSignature(trackData) + '|' + JSON.stringify(snapshot ?? {})
+}
 
 const BUTTON_CLASS = 'h-7 rounded border border-neutral-600 bg-neutral-800 px-2 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40'
 const PRIMARY_CLASS = 'h-7 rounded border border-sky-600 bg-sky-700 px-2 text-xs text-white hover:bg-sky-600 disabled:opacity-40'
@@ -62,6 +71,8 @@ function resolutionSnapshot(input: MultiTrackPreviewResolutionInput): TimelineRe
   if (typeof input.height === 'number') snapshot.height = input.height
   if (typeof input.aspect_ratio === 'string') snapshot.aspect_ratio = input.aspect_ratio
   if (typeof input.megapixels === 'number') snapshot.megapixels = input.megapixels
+  if (typeof input.resize_method === 'string') snapshot.resize_method = input.resize_method
+  if (typeof input.resize_to_pixel === 'number') snapshot.resize_to_pixel = input.resize_to_pixel
   return snapshot
 }
 
@@ -81,6 +92,11 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const projectListRef = useRef<string[]>([])
   projectListRef.current = projects.filter((item) => item.has_timeline).map((item) => item.project_name)
   const nameRef = useRef('')
+  // registry 里的快照提供器通过 ref 取最新值，避免 useEffect([]) 闭包拿到首次渲染的 resolution
+  const resolutionSnapshotRef = useRef<() => TimelineResolutionSnapshot>(() => ({}))
+  resolutionSnapshotRef.current = () => resolutionSnapshot(resolution)
+  const formatRef = useRef<string | null>(null)
+  formatRef.current = resolution.format ?? null
   nameRef.current = currentName
   useEffect(() => {
     const registry = globalThis as unknown as {
@@ -90,6 +106,11 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         list: () => string[]
         switch: (name: string) => Promise<void>
         create: (name: string) => Promise<boolean>
+      }
+      /** 当前分辨率/格式快照：供 AI 助手 save_project 一并写盘（PUT 是整体覆盖，缺字段会抹掉快照）。 */
+      __easyMediaResolutionSnapshot?: () => {
+        resolution: TimelineResolutionSnapshot
+        format: string | null
       }
     }
     const handler = (name: string) => createProjectRef.current(name)
@@ -101,11 +122,17 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       switch: (name: string) => switchProjectRef.current(name),
       create: (name: string) => createProjectRef.current(name),
     }
+    const snapshotProvider = () => ({
+      resolution: resolutionSnapshotRef.current(),
+      format: formatRef.current,
+    })
     registry.__easyMediaCreateProject = handler
     registry.__easyMediaWorkspaceProject = workspace
+    registry.__easyMediaResolutionSnapshot = snapshotProvider
     return () => {
       if (registry.__easyMediaCreateProject === handler) delete registry.__easyMediaCreateProject
       if (registry.__easyMediaWorkspaceProject === workspace) delete registry.__easyMediaWorkspaceProject
+      if (registry.__easyMediaResolutionSnapshot === snapshotProvider) delete registry.__easyMediaResolutionSnapshot
     }
   }, [])
   // 导演工作台读取当前项目名（避免跨层传参）
@@ -120,7 +147,10 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const autoSaveBlockedRef = useRef(false)
 
-  const currentSignature = useMemo(() => timelineSignature(data), [data])
+  const currentSignature = useMemo(
+    () => projectSignature(data, resolutionSnapshot(resolution)),
+    [data, resolution],
+  )
   const dirty = currentName !== '' && savedSignatureRef.current !== null
     && savedSignatureRef.current !== currentSignature
 
@@ -156,12 +186,12 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         ...document_.track_data,
         project: { name: document_.project_name, updated_at: document_.updated_at },
       }
-      savedSignatureRef.current = timelineSignature(trackData)
+      savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
       onApply(
         trackData,
         { name: document_.project_name, updated_at: document_.updated_at },
-        { format: document_.format },
+        { format: document_.format, resolution: document_.resolution ?? null },
       )
       setMessage(t('multitrack.projectReloaded', { project: currentName }))
     } catch {
@@ -208,10 +238,13 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         format: resolution.format ?? null,
         baseUpdatedAt: lastLoadedAtRef.current,
       })
-      savedSignatureRef.current = timelineSignature({
-        ...stripProjectMeta(data),
-        project: { name: result.project_name, updated_at: result.updated_at },
-      })
+      savedSignatureRef.current = projectSignature(
+        {
+          ...stripProjectMeta(data),
+          project: { name: result.project_name, updated_at: result.updated_at },
+        },
+        resolutionSnapshot(resolution),
+      )
       lastLoadedAtRef.current = result.updated_at
       setLastSavedAt(result.updated_at)
       setAutoSaveState('idle')
@@ -266,12 +299,12 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       }
       setPendingSwitch(null)
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
-      savedSignatureRef.current = timelineSignature(trackData)
+      savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
       autoSaveBlockedRef.current = false
       setAutoSaveState('idle')
       setLastSavedAt(document_.updated_at)
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format, resolution: document_.resolution ?? null })
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
     } catch (error) {
       const text = error instanceof Error ? error.message : ''
@@ -301,7 +334,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         baseUpdatedAt: force ? null : lastLoadedAtRef.current,
       })
       const trackData = { ...stripProjectMeta(data), project: { name: result.project_name, updated_at: result.updated_at } }
-      savedSignatureRef.current = timelineSignature(trackData)
+      savedSignatureRef.current = projectSignature(trackData, resolutionSnapshot(resolution))
       lastLoadedAtRef.current = result.updated_at
       autoSaveBlockedRef.current = false
       setAutoSaveState('idle')
@@ -333,11 +366,31 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     setBusy(true)
     setMessage('')
     try {
-      const document_ = await createProjectTimeline(app, name, createDefaultTrackData())
+      let document_ = await createProjectTimeline(app, name, createDefaultTrackData())
+      // 新建接口（POST /timeline/new）只接收 track_data，不写分辨率/格式；
+      // 这里补一次 PUT，把当前分辨率/格式快照写进新项目，否则新项目快照永远是 null。
+      const createdSnapshot = resolutionSnapshot(resolution)
+      try {
+        const saved = await saveProjectTimeline(app, {
+          projectName: document_.project_name,
+          trackData: document_.track_data,
+          resolution: createdSnapshot,
+          format: resolution.format ?? null,
+          baseUpdatedAt: document_.updated_at,
+        })
+        document_ = {
+          ...document_,
+          updated_at: saved.updated_at,
+          resolution: createdSnapshot,
+          format: resolution.format ?? null,
+        }
+      } catch {
+        // 补写失败不阻塞新建
+      }
       const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
-      savedSignatureRef.current = timelineSignature(trackData)
+      savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format, resolution: document_.resolution ?? null })
       setEditing(null)
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
       void refreshProjects()

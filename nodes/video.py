@@ -264,6 +264,45 @@ def _empty_video() -> InputImpl.VideoFromComponents:  # type: ignore[return-valu
     )
 
 
+def _audio_duration_seconds(audio) -> float:
+    """AUDIO（{"waveform": Tensor[B, C, T], "sample_rate": int}）的时长秒数；取不到返回 0。"""
+    try:
+        if not isinstance(audio, dict):
+            return 0.0
+        waveform = audio.get("waveform")
+        rate = float(audio.get("sample_rate") or 0.0)
+        if waveform is None or rate <= 0.0:
+            return 0.0
+        samples = int(waveform.shape[-1])
+        return max(0.0, samples / rate)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _frames_for_audio(audio, fps: float) -> int:
+    """按音频时长换算需要铺满的帧数（至少 1 帧）。"""
+    duration = _audio_duration_seconds(audio)
+    if duration <= 0.0:
+        return 1
+    return max(1, int(round(duration * max(1.0, float(fps or 24.0)))))
+
+
+def _is_image_batch(value) -> bool:
+    """判断是否是 IMAGE 批次（torch Tensor，形如 [B, H, W, C]）。"""
+    shape = getattr(value, "shape", None)
+    return bool(shape is not None and len(shape) == 4 and hasattr(value, "repeat"))
+
+
+def _is_audio_dict(value) -> bool:
+    """判断是否是 ComfyUI 的 AUDIO（含 waveform / sample_rate 的 dict）。"""
+    return isinstance(value, dict) and "waveform" in value
+
+
+def _is_video_object(value) -> bool:
+    """判断是否是 ComfyUI 的 VIDEO（带 get_components）。"""
+    return hasattr(value, "get_components")
+
+
 class EasySaveVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -300,10 +339,13 @@ class EasySaveVideo(io.ComfyNode):
                     step=1.0,
                     tooltip="images+audio 模式的帧率；video 模式忽略。",
                 ),
-                io.Video.Input(
+                io.AnyType.Input(
                     "video",
                     optional=True,
-                    tooltip="video 模式使用：直接保存/透传的视频。",
+                    tooltip=(
+                        "直接保存/透传的媒体。兼容三种类型并自动判断："
+                        "VIDEO=按视频保存；IMAGE=当作图像序列（单帧可配音频成片）；AUDIO=并到音轨。"
+                    ),
                 ),
                 io.Audio.Input(
                     "audio",
@@ -432,12 +474,33 @@ class EasySaveVideo(io.ComfyNode):
             output_mode = str(payload_out.get("output_mode") or "save")
             save_metadata = bool(payload_out.get("save_metadata", save_metadata))
 
+        # video 槽是 AnyType：按实际接入的类型自动分流，用户不需要手动改 input_mode。
+        incoming = video
+        video = None
+        if incoming is not None:
+            if _is_audio_dict(incoming):
+                if audio is None:
+                    audio = incoming
+            elif _is_image_batch(incoming):
+                # IMAGE 批次：并入 images 通道（单帧 + 音频会在下面自动铺满成片）
+                images = incoming
+            elif _is_video_object(incoming):
+                video = incoming
+            else:
+                raise ValueError(
+                    "video 输入槽只接受 VIDEO / IMAGE / AUDIO；当前类型无法识别。"
+                )
+
         input_mode_key: str = str(input_mode or "images+audio")
+        if input_mode_key == "video" and video is None:
+            # video 槽其实接的是图片/音频：自动退回对应通道
+            input_mode_key = "images+audio" if images is not None else "audio"
         output_mode_key: str = str(output_mode or "save")
         hide_preview = output_mode_key in {"hide", "hide&save"}
         write_temp = output_mode_key in {"preview_only", "hide"}
 
         pass_images = None
+        kind = str(save_kind or "video").strip().lower()
         if input_mode_key == "video":
             source_video = video
             if source_video is None:
@@ -447,6 +510,15 @@ class EasySaveVideo(io.ComfyNode):
                 )
             if audio is not None:
                 source_video = _replace_video_audio(source_video, audio)
+        elif input_mode_key == "audio":
+            # 只有音频（本次检查新增）：仅允许导出音频文件
+            if audio is None:
+                raise ValueError("没有可保存的输入：接上 images / video / audio 任意一个。")
+            if kind != "audio":
+                raise ValueError(
+                    "只有音频输入时只能保存音频：把保存类型切成 🎵 音频，或接上图像/视频。"
+                )
+            source_video = None
         else:
             if images is None:
                 raise ValueError(
@@ -454,6 +526,29 @@ class EasySaveVideo(io.ComfyNode):
                     "接上 images 端口，或把 input_mode 改成 'video'。"
                 )
             normalized, changed = normalize_video_images(images)
+            # 单张图 + 音频 → 以该图作背景铺满音频时长，生成等长视频（原先只出 1 帧极短视频）
+            try:
+                frame_total = int(getattr(normalized, "shape", [0])[0] or 0)
+            except Exception:  # noqa: BLE001
+                frame_total = 0
+            if frame_total == 1 and audio is not None and kind == "video":
+                repeat_times = _frames_for_audio(audio, fps)
+                if repeat_times > 1:
+                    normalized = normalized.repeat(repeat_times, 1, 1, 1)
+                    logger.info(
+                        "[EasySaveVideo] 单张图 + 音频：静帧已铺满 %s 帧（约 %.1f 秒 @ %.1f fps）",
+                        repeat_times,
+                        repeat_times / max(1.0, float(fps or 24.0)),
+                        float(fps or 24.0),
+                    )
+            elif frame_total == 1 and audio is None and kind == "video":
+                # 单张图且无音频：成片只有 1 帧没有意义 → 引导存图片（多帧图像流可存无声视频）
+                raise ValueError(
+                    "只接了单张图且没有音频，无法生成有意义的视频："
+                    "请把保存类型切成 🖼️ 保存图片；"
+                    "接上 AUDIO 可生成「图片背景 + 音频」的等长视频；"
+                    "多帧图像流（streaming）可直接保存无声视频。"
+                )
             pass_images = normalized
             if changed:
                 logger.info(
@@ -467,7 +562,6 @@ class EasySaveVideo(io.ComfyNode):
                 )
             )
 
-        kind = str(save_kind or "video").strip().lower()
         try:
             if kind in {"images", "audio"}:
                 relative_path, file, subfolder, folder_type, video_info = _save_media_output(
@@ -517,11 +611,9 @@ class EasySaveVideo(io.ComfyNode):
         if notify_sound and notify_sound != _NOTIFY_MUTE:
             _play_notify_sound(notify_sound)
 
-        if kind in {"images", "audio"}:
-            custom_ui = {"easy_video_info": [video_info]}
-        else:
-            preview = ui.PreviewVideo([ui.SavedResult(file, subfolder, folder_type)]).as_dict()
-            custom_ui = {**preview, "easy_video_info": [video_info]}
+        # 面板自带播放器：不再返回 ui.PreviewVideo，避免 ComfyUI 在节点上再插一个原生播放器
+        # （否则会出现「面板播放器 + 原生播放器」两个，历史上反复被反馈）。
+        custom_ui = {"easy_video_info": [video_info]}
 
         if hide_preview:
             return io.NodeOutput(source_video, relative_path, pass_images, pass_audio, ui={"easy_video_info": [video_info]})

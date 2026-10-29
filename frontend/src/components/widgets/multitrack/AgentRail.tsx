@@ -1784,12 +1784,23 @@ export function AgentRail({
     if (name === 'save_project') {
       const registry = (globalThis as unknown as { __easyMediaGetTrackData?: () => Record<string, unknown> | null }).__easyMediaGetTrackData
       if (!registry) return { error: '拿不到任务轨数据（弹窗可能不是从节点打开）' }
-      const timeline = registry()
-      if (!timeline) return { error: '任务轨为空，没有可保存内容' }
+      const trackData = registry()
+      if (!trackData) return { error: '任务轨为空，没有可保存内容' }
+      // PUT 端点整体覆盖 timeline：必须带上当前分辨率/格式快照，
+      // 否则助手保存一次就会把项目里已存的画幅设置抹掉。
+      const snapshotProvider = (globalThis as unknown as {
+        __easyMediaResolutionSnapshot?: () => { resolution?: Record<string, unknown>; format?: string | null } | null
+      }).__easyMediaResolutionSnapshot
+      const snapshot = snapshotProvider?.() ?? null
+      const timelinePayload: Record<string, unknown> = { version: 1, track_data: trackData }
+      if (snapshot && typeof snapshot === 'object') {
+        timelinePayload.resolution = snapshot.resolution ?? null
+        timelinePayload.format = snapshot.format ?? null
+      }
       const response = await fetch('/easy-media/project/timeline', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_name: projectKey, timeline: { version: 1, track_data: timeline } }),
+        body: JSON.stringify({ project_name: projectKey, timeline: timelinePayload }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) return { error: String(data?.error || `保存失败（HTTP ${response.status}）`) }
