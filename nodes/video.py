@@ -339,12 +339,16 @@ class EasySaveVideo(io.ComfyNode):
                     step=1.0,
                     tooltip="images+audio 模式的帧率；video 模式忽略。",
                 ),
-                io.AnyType.Input(
+                io.MultiType.Input(
                     "video",
+                    types=[io.Video, io.Image, io.Audio],
                     optional=True,
                     tooltip=(
-                        "直接保存/透传的媒体。兼容三种类型并自动判断："
+                        "直接保存/透传的媒体，兼容三种类型并自动判断："
                         "VIDEO=按视频保存；IMAGE=当作图像序列（单帧可配音频成片）；AUDIO=并到音轨。"
+                        "槽类型是 VIDEO,IMAGE,AUDIO 多类型槽而非 AnyType(*)："
+                        "ComfyUI 的 bypass 透传对 AnyType 下游按槽序号取输入（会把上游第 0 个输入当成视频），"
+                        "多类型槽按类型匹配，上游被 bypass 也不会接错。"
                     ),
                 ),
                 io.Audio.Input(
@@ -488,7 +492,11 @@ class EasySaveVideo(io.ComfyNode):
                 video = incoming
             else:
                 raise ValueError(
-                    "video 输入槽只接受 VIDEO / IMAGE / AUDIO；当前类型无法识别。"
+                    "video 输入槽只接受 VIDEO / IMAGE / AUDIO；当前类型无法识别"
+                    f"（收到 {type(incoming).__name__}）。"
+                    "常见原因：上游节点处于 bypass（Ctrl+B）时，ComfyUI 的透传会按槽位序号而不是类型解析，"
+                    "把该节点第 0 个输入（例如 TRACKS_INFO 轨道信息）当成视频传来；"
+                    "取消上游 bypass，或把 video 直接接到输出视频的节点。"
                 )
 
         input_mode_key: str = str(input_mode or "images+audio")
