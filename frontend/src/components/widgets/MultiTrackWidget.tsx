@@ -42,6 +42,7 @@ import {
   syncMatchingTasksToPrimaryVideoTrack,
   syncMatchingTasksToPrimaryVideoSegment,
   taskModeFromTaskType,
+  collectAudioReferenceTokens,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
   snapMultiTrackResizeTime,
@@ -2243,6 +2244,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }
 
+  // 提示词面板里的 <Audio n>：按后端挂载顺序（tracks→segments）列出会真正参与本段生成的参考音频，
+  // global 全部计入，aligned 只算与当前任务段重叠的，静音段跳过，最多 3 段（与 H3 ref_audio 上限一致）。
+  const audioReferenceTokens = (() => {
+    const taskTrack = data.tracks.find((track) => track.type === 'task')
+    const activeSegment = selectedSegmentId
+      ? taskTrack?.segments.find((item) => item.id === selectedSegmentId)
+      : undefined
+    return collectAudioReferenceTokens(data, activeSegment?.start_frame, activeSegment?.end_frame)
+  })()
+
   return (
     <LocaleContext.Provider value={locale}>
       <TooltipProvider>
@@ -2290,6 +2301,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           }}
           workspaceSegments={data.tracks.find((track) => track.type === 'task')?.segments ?? []}
           workspaceFrameRate={data.frame_rate}
+          resourceTokens={audioReferenceTokens}
           segmentId={selectedSegmentId ?? undefined}
           onActivateSegment={(id) => handleSelectSegment(id, 'replace')}
           onWriteSegmentPrompt={(id, prompt) => patchTaskSegmentContent(id, { user_prompt: prompt })}

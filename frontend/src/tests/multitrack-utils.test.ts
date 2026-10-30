@@ -38,6 +38,8 @@ import {
   snapMultiTrackResizeTime,
   snapTimeToFrame,
   taskModeFromTaskType,
+  collectAudioReferenceTokens,
+  MULTITRACK_MAX_REFERENCE_AUDIOS,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
 } from '@/lib/multitrack-utils'
@@ -2246,5 +2248,69 @@ describe('taskModeFromTaskType', () => {
     expect(taskModeFromTaskType(undefined)).toBeUndefined()
     expect(taskModeFromTaskType(null)).toBeUndefined()
     expect(taskModeFromTaskType('unknown')).toBeUndefined()
+  })
+})
+
+describe('collectAudioReferenceTokens', () => {
+  const buildData = () => {
+    const data = createDefaultTrackData()
+    data.tracks.push(
+      {
+        id: 'audio-a',
+        name: 'Audio A',
+        type: 'audio',
+        color: '#123456',
+        muted: false,
+        locked: false,
+        segments: [
+          { id: 'a1', start_frame: 0, end_frame: 120, color: '#123456', content: { media_type: 'audio', file_name: '钟声.wav', reference_mode: 'global' } },
+          { id: 'a2', start_frame: 200, end_frame: 320, color: '#123456', content: { media_type: 'audio', file_name: '原神-胡桃.WAV', reference_mode: 'global' } },
+        ],
+      },
+      {
+        id: 'audio-b',
+        name: 'Audio B',
+        type: 'audio',
+        color: '#654321',
+        muted: false,
+        locked: false,
+        segments: [
+          { id: 'b1', start_frame: 240, end_frame: 300, color: '#654321', content: { media_type: 'audio', file_name: '旁白.wav', reference_mode: 'aligned' } },
+        ],
+      },
+    )
+    return data
+  }
+
+  it('lists every global reference audio in backend order', () => {
+    const tokens = collectAudioReferenceTokens(buildData(), 0, 240)
+    expect(tokens.map((item) => item.token)).toEqual(['<Audio 1>', '<Audio 2>'])
+    expect(tokens.map((item) => item.label)).toEqual(['钟声.wav', '原神-胡桃.WAV'])
+  })
+
+  it('only keeps aligned clips that overlap the active task segment', () => {
+    expect(collectAudioReferenceTokens(buildData(), 250, 300).map((item) => item.label)).toContain('旁白.wav')
+    expect(collectAudioReferenceTokens(buildData(), 0, 100).map((item) => item.label)).not.toContain('旁白.wav')
+  })
+
+  it('caps at the H3 reference-audio limit and skips muted clips', () => {
+    const data = buildData()
+    data.tracks.push({
+      id: 'audio-c',
+      name: 'Audio C',
+      type: 'audio',
+      color: '#abcdef',
+      muted: false,
+      locked: false,
+      segments: [
+        { id: 'c1', start_frame: 0, end_frame: 60, color: '#abcdef', content: { media_type: 'audio', file_name: 'muted.wav', reference_mode: 'global', muted: true } },
+        { id: 'c2', start_frame: 60, end_frame: 120, color: '#abcdef', content: { media_type: 'audio', file_name: '多出来的.wav', reference_mode: 'global' } },
+      ],
+    })
+    const tokens = collectAudioReferenceTokens(buildData(), 0, 240)
+    expect(tokens).toHaveLength(2)
+    const withMuted = collectAudioReferenceTokens(data, 0, 240)
+    expect(withMuted.map((item) => item.label)).not.toContain('muted.wav')
+    expect(withMuted).toHaveLength(MULTITRACK_MAX_REFERENCE_AUDIOS)
   })
 })

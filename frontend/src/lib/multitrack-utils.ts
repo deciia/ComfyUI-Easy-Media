@@ -1895,3 +1895,46 @@ export function referenceModePatch(mode: MultitrackReferenceMode): Record<string
     speaker_reference: undefined,
   }
 }
+
+/** 每个任务最多挂 3 段参考音频（H3 ref_audio_* 自动增长上限为 3） */
+export const MULTITRACK_MAX_REFERENCE_AUDIOS = 3
+
+/**
+ * 收集“真正会被挂到本段生成里的参考音频”，按后端挂载顺序编号 <Audio 1..n>。
+ *
+ * 顺序必须与后端一致：utils/h3_project.py 先按 tracks 数组顺序遍历，再按每条音轨的
+ * segments 数组顺序收集；`global` 全片参与，`aligned` 只在与任务段区间重叠时参与，
+ * 静音段直接跳过且不占名额。提示词里的 <Audio n> 只有照这份顺序编号才对得上模型实际收到的音频。
+ */
+export function collectAudioReferenceTokens(
+  trackData: Pick<TrackData, 'tracks'> | null | undefined,
+  startFrame?: number,
+  endFrame?: number,
+  limit: number = MULTITRACK_MAX_REFERENCE_AUDIOS,
+): Array<{ token: string; label: string; type: 'audio' }> {
+  const tokens: Array<{ token: string; label: string; type: 'audio' }> = []
+  const hasRange = typeof startFrame === 'number' && typeof endFrame === 'number' && endFrame > startFrame
+  for (const track of trackData?.tracks ?? []) {
+    if (track.type !== 'audio') continue
+    for (const segment of track.segments ?? []) {
+      const content = (segment.content ?? {}) as unknown as Record<string, unknown>
+      if (content.muted === true) continue
+      const mode = getReferenceMode(content)
+      if (mode === 'off') continue
+      if (
+        mode !== 'global'
+        && (!hasRange || !(segment.start_frame < (endFrame as number) && segment.end_frame > (startFrame as number)))
+      ) {
+        continue
+      }
+      const rawName = String(content.file_name ?? content.user_prompt ?? '').split('\n')[0].trim()
+      tokens.push({
+        token: `<Audio ${tokens.length + 1}>`,
+        label: rawName || `音频 ${tokens.length + 1}`,
+        type: 'audio',
+      })
+      if (tokens.length >= Math.max(1, limit)) return tokens
+    }
+  }
+  return tokens
+}

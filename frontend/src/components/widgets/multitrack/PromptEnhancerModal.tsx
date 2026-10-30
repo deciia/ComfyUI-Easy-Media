@@ -1211,6 +1211,11 @@ export function PromptEnhancerModal({
       return `/view?filename=${encodeURIComponent(resource.imageFile)}&type=${resource.sharedRoot ?? 'input'}${sub}`
     }
     const list: PromptReferenceResource[] = []
+    // 时间线音轨上的参考音频（global/aligned）才是真正挂给模型的 ref_audio，
+    // 它们自带 <Audio n> 且编号顺序与后端一致；此时不再列「主体与资源」里的 Audio，
+    // 否则会出现两个 Audio 1、或面板编号与模型实际收到的音频对不上。
+    const timelineAudioTokens = resourceTokens.filter((item) => item.type === 'audio' && /^<Audio\s+\d+>$/.test(String(item.token ?? '').trim()))
+    const preferTimelineAudio = timelineAudioTokens.length > 0
     const pushWithToken = (resource: ProjectResource, label: string, token?: string) => {
       const kind = resource.type
       const slot = token ? { index: Number(token.replace(/^<\w+\s+(\d+)>$/, '$1')), token } : bump(kind)
@@ -1231,14 +1236,17 @@ export function PromptEnhancerModal({
     // 1) 绑定清单顺序展开（编号契约：主体先出，其子资源紧随，顺序 = 提交给工作流的 images）
     const resolved = resolveBoundTokens(boundIds, resources)
     for (const entry of resolved) {
+      if (preferTimelineAudio && entry.resource.type === 'Audio') continue
       pushWithToken(entry.resource, entry.via ? `${entry.via}·${entry.name}` : entry.name, entry.token)
     }
     // 2) 未绑定资源池：续号（主体优先）
     const seen = new Set<string>([...boundIds, ...resolved.map((entry) => entry.resource.id)])
     for (const resource of resources) {
+      if (preferTimelineAudio && resource.type === 'Audio') continue
       if (resource.type === 'Subject' && !seen.has(resource.id)) pushWithToken(resource, resource.name)
     }
     for (const resource of resources) {
+      if (preferTimelineAudio && resource.type === 'Audio') continue
       if (resource.type !== 'Subject' && !seen.has(resource.id)) {
         const parent = resources.find((item) => item.type === 'Subject' && (item.childResourceIds ?? []).includes(resource.id))
         if (!parent || !seen.has(parent.id)) pushWithToken(resource, resource.name)
@@ -1251,10 +1259,20 @@ export function PromptEnhancerModal({
       const slot = bump('Subject')
       list.push({ id: `subject-${slot.index}`, type: 'subject', index: slot.index, label: name, detail: slot.token, token: slot.token, color: TOKEN_COLORS.subject })
     }
-    // 4) 任务段已挂素材兜底
+    // 4) 任务段已挂素材兜底（带 <Audio n> 的沿用其编号：时间线参考音频的编号必须跟后端挂载顺序一致）
     for (const item of resourceTokens) {
       const kind = item.type === 'image' ? 'Picture' : (item.type === 'audio' ? 'Audio' : item.type === 'video' ? 'Video' : 'Picture')
-      const slot = bump(kind)
+      const provided = String(item.token ?? '').trim()
+      const matched = /^<(Subject|Picture|Audio|Video)\s+(\d+)>$/.exec(provided)
+      let slot: { index: number; token: string }
+      if (matched) {
+        const idx = Number(matched[2])
+        counters[matched[1]] = Math.max(counters[matched[1]] ?? 0, idx)
+        slot = { index: idx, token: provided }
+      } else {
+        slot = bump(kind)
+      }
+      if (list.some((entry) => entry.token === slot.token)) continue
       const type = kind === 'Picture' ? 'image' : kind === 'Audio' ? 'audio' : 'video'
       list.push({
         id: `${kind}-${slot.index}`,
