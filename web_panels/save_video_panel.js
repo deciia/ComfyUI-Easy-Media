@@ -87,6 +87,15 @@ const BTN_CSS =
 
 let panelRef = null;
 
+// 点画面/其它地方时收起三点菜单（panelRef 在 buildPanel 里赋值，这里只读）
+document.addEventListener("pointerdown", (event) => {
+  const panel = panelRef;
+  if (!panel || !panel.menuOpen) return;
+  if (panel.menu?.contains(event.target) || panel.menuBtn?.contains(event.target)) return;
+  panel.menuOpen = false;
+  panel.refreshLayout?.();
+});
+
 function bytes(n) {
   n = Number(n) || 0;
   if (n <= 0) return "—";
@@ -246,6 +255,38 @@ function buildPanel() {
   videoWrap.appendChild(bloomLayer);
   videoWrap.appendChild(mistLayer);
   videoWrap.appendChild(halationLayer);
+
+  // ── 画面右下角的三点菜单 ──
+  // 播放器用的是原生 <video controls>，Chrome 的 ⋮ 菜单无法注入自定义项，
+  // 所以在原生 ⋮ 同一位置自建一个（会盖住原生 ⋮，下载/画中画/倍速随之不可用）。
+  const menuBtn = el(
+    "button",
+    "position:absolute;right:2px;bottom:2px;z-index:4;width:27px;height:27px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.34);color:#fff;cursor:pointer;font-size:17px;line-height:25px;text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.95);",
+    "⋮",
+  );
+  menuBtn.title = "更多（调色台）";
+  menuBtn.addEventListener("mouseenter", () => { menuBtn.style.background = "rgba(255,255,255,.18)"; });
+  menuBtn.addEventListener("mouseleave", () => { menuBtn.style.background = "rgba(0,0,0,.34)"; });
+  const menu = el(
+    "div",
+    "position:absolute;right:4px;bottom:32px;z-index:5;display:none;flex-direction:column;gap:1px;min-width:140px;padding:3px;border-radius:6px;border:1px solid #444;background:rgba(24,24,24,.97);box-shadow:0 6px 18px rgba(0,0,0,.55);box-sizing:border-box;",
+  );
+  const menuItemCss =
+    "display:block;width:100%;padding:4px 8px;border:0;border-radius:4px;background:transparent;color:#ddd;cursor:pointer;font-size:11px;line-height:16px;text-align:left;white-space:nowrap;";
+  const menuColor = el("button", menuItemCss, "🎨 调色台");
+  const menuReset = el("button", menuItemCss, "♻️ 重置调色");
+  menuColor.addEventListener("mouseenter", () => { menuColor.style.background = "#333"; });
+  menuColor.addEventListener("mouseleave", () => { menuColor.style.background = "transparent"; });
+  menuReset.addEventListener("mouseenter", () => { menuReset.style.background = "#333"; });
+  menuReset.addEventListener("mouseleave", () => { menuReset.style.background = "transparent"; });
+  menu.appendChild(menuColor);
+  menu.appendChild(menuReset);
+  for (const overlay of [menuBtn, menu]) {
+    overlay.addEventListener("pointerdown", (event) => event.stopPropagation());
+    overlay.addEventListener("mousedown", (event) => event.stopPropagation());
+  }
+  videoWrap.appendChild(menuBtn);
+  videoWrap.appendChild(menu);
   root.appendChild(videoWrap);
 
   // ── 详情标题栏（固定）──
@@ -285,20 +326,8 @@ function buildPanel() {
   body.appendChild(pathRow);
   root.appendChild(body);
 
-  // ── 调色台（固定高度，可折叠）──
-  const colorHeader = el(
-    "div",
-    `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;flex:0 0 auto;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
-  );
-  const colorFold = el("button", BTN_CSS, "▸");
-  const colorTitle = el("span", "flex:1 1 auto;cursor:pointer;", "🎨 调色台");
-  const colorReset = el("button", BTN_CSS, "重置");
-  colorHeader.appendChild(colorFold);
-  colorHeader.appendChild(colorTitle);
-  colorHeader.appendChild(colorReset);
-  root.appendChild(colorHeader);
-
-  const colorBody = el("div", "flex:0 0 auto;display:none;flex-direction:column;gap:6px;padding:6px 8px;border-top:1px solid #2a2a2a;background:#171717;font-size:11px;color:#ddd;");
+  // ── 调色台参数区（入口在画面右下角 ⋮ 菜单，这里只放展开后的滑杆）──
+  const colorBody = el("div", "flex:0 0 auto;display:none;flex-direction:column;gap:6px;padding:6px 8px;border-top:1px solid #333;background:#171717;font-size:11px;color:#ddd;");
   const sliders = new Map();
   for (const group of COLOR_GROUPS) {
     const g = el("div", "display:flex;flex-direction:column;gap:3px;");
@@ -349,11 +378,11 @@ function buildPanel() {
     videoOnlyBtn,
     kindBar,
     kindButtons,
-    colorHeader,
+    menuBtn,
+    menu,
+    menuColor,
+    menuReset,
     colorBody,
-    colorFold,
-    colorTitle,
-    colorReset,
     bakeBtn,
     colorStatus,
     sliders,
@@ -365,6 +394,7 @@ function buildPanel() {
     videoOnly: false,
     detailsOpen: true,
     colorOpen: false,
+    menuOpen: false,
   };
   panelRef = panel;
 
@@ -391,9 +421,13 @@ function buildPanel() {
 
     header.style.display = panel.videoOnly ? "none" : "flex";
     body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
-    colorHeader.style.display = panel.videoOnly ? "none" : "flex";
     colorBody.style.display = panel.videoOnly || !panel.colorOpen ? "none" : "flex";
-    colorFold.textContent = panel.colorOpen ? "▾" : "▸";
+    // 三点菜单入口：音频形态没有画面、videoOnly 时只剩画面，都不显示
+    const showMenu = !panel.videoOnly && kind !== "audio";
+    panel.menuBtn.style.display = showMenu ? "block" : "none";
+    if (!showMenu) panel.menuOpen = false;
+    panel.menu.style.display = showMenu && panel.menuOpen ? "flex" : "none";
+    panel.menuColor.textContent = panel.colorOpen ? "🎨 调色台（收起）" : "🎨 调色台";
     foldBtn.textContent = panel.detailsOpen ? "▾" : "▸";
     videoOnlyBtn.textContent = panel.videoOnly ? "▼" : "▲";
     videoOnlyBtn.title = panel.videoOnly ? "展开参数与详情" : "折叠参数，仅显示画面";
@@ -431,19 +465,22 @@ function buildPanel() {
     panel.detailsOpen = !panel.detailsOpen;
     refreshLayout();
   });
-  colorFold.addEventListener("click", (event) => {
+  menuBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    panel.colorOpen = !panel.colorOpen;
+    panel.menuOpen = !panel.menuOpen;
     refreshLayout();
   });
-  colorTitle.addEventListener("click", (event) => {
+  menuColor.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.colorOpen = !panel.colorOpen;
+    panel.menuOpen = false;
     refreshLayout();
   });
-  colorReset.addEventListener("click", (event) => {
+  menuReset.addEventListener("click", (event) => {
     event.stopPropagation();
     resetColorTune();
+    panel.menuOpen = false;
+    refreshLayout();
   });
   bakeBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   bakeBtn.addEventListener("click", async (event) => {
