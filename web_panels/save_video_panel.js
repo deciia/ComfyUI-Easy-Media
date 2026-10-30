@@ -724,6 +724,12 @@ function relayoutNativeControls(panel) {
 
 function applyInfo(panel, info) {  if (!info) return;
   panel.info = info;
+  // 持久化到 node.properties：切换工作流标签页会重建节点，内存里的 _easyVideoInfo 会丢；
+  // 只有 properties 会随工作流一起序列化/还原，切回来才能把上一次的成片重新加载出来。
+  if (panel.node) {
+    panel.node.properties = panel.node.properties || {};
+    panel.node.properties.easyVideoInfo = { ...info };
+  }
   const params = new URLSearchParams({
     filename: info.filename || "",
     subfolder: info.subfolder || "",
@@ -784,6 +790,15 @@ function ensurePanel(node) {
   panel.colorOpen = node.properties?.easyColorOpen === true;
   syncKindButtons(panel);
   panel.refreshLayout();
+  // 切标签页/重载工作流后：把上次执行留下的成片信息从 properties 里恢复出来，重新挂上视频
+  const storedInfo = node.properties?.easyVideoInfo;
+  if (storedInfo && typeof storedInfo === "object" && storedInfo.filename) {
+    try {
+      applyInfo(panel, storedInfo);
+    } catch (error) {
+      console.warn("[EasyMedia] 恢复上次成片失败：", error);
+    }
+  }
   return panel;
 }
 
@@ -835,7 +850,8 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function (info, ...rest) {
       const result = onConfigure?.apply(this, [info, ...rest]);
       try {
-        const cached = this._easyVideoInfo;
+        // properties 里的成片信息会跟工作流一起序列化，切标签页后还在；内存缓存只在本会话有效
+        const cached = this.properties?.easyVideoInfo ?? this._easyVideoInfo;
         const panel = ensurePanel(this);
         if (cached) applyInfo(panel, cached);
         panel.paramsHidden = readParamsHidden(this.properties);
