@@ -32,6 +32,7 @@ import {
   frameToSeconds,
   getSelectedTaskUserPrompt,
   getSelectedTaskUserPromptPatch,
+  getReferenceMode,
   getMultiTrackTaskType,
   MULTITRACK_CONTINUITY_MODES,
   MULTITRACK_DEFAULT_CONTINUITY_MODE,
@@ -331,20 +332,48 @@ export function TaskSegmentEditor({
           ?? getSegmentTrackPresentation('video').backgroundColor,
       }
     })
-    const audioResources = audioTracks.map((track, index) => {
-      const resourceIndex = videoTracks.length + index + 1
-      const label = t('multitrack.referenceAudioItem', { n: resourceIndex })
-      return {
-        id: `audio:${track.id}`,
-        type: 'audio' as const,
-        index: resourceIndex,
-        label,
-        detail: track.name,
-        token: `@${label}`,
-        color: getSegmentTrackPresentation('audio').waveformColor
-          ?? getSegmentTrackPresentation('audio').backgroundColor,
+    const audioResources = (() => {
+      // 一条音轨可以有多段参考音频（钟离.wav + 原神-胡桃.WAV 各自 global）。
+      // 有参考作用域的按「段」列，顺序/筛选与后端一致（utils/h3_project.py：
+      // tracks→segments 顺序、global 全算、aligned 只算与本任务段重叠、静音跳过）；
+      // 整条轨都没有参考作用域时退回老行为（一轨一条），避免纯音频轨突然从列表里消失。
+      const activeStart = segment.start_frame
+      const activeEnd = segment.end_frame
+      const entries: Array<{ id: string; detail: string }> = []
+      for (const track of audioTracks) {
+        const referenceSegments = track.segments.filter((item) => {
+          const content = (item.content ?? {}) as unknown as Record<string, unknown>
+          if (content.muted === true) return false
+          const mode = getReferenceMode(content)
+          if (mode === 'off') return false
+          if (mode === 'global') return true
+          return item.start_frame < activeEnd && item.end_frame > activeStart
+        })
+        if (referenceSegments.length === 0) {
+          entries.push({ id: `audio:${track.id}`, detail: track.name })
+          continue
+        }
+        for (const item of referenceSegments) {
+          const content = (item.content ?? {}) as unknown as Record<string, unknown>
+          const fileName = String(content.file_name ?? content.user_prompt ?? '').split('\n')[0].trim()
+          entries.push({ id: `audio:${item.id}`, detail: fileName || track.name })
+        }
       }
-    })
+      return entries.map((entry, index) => {
+        const resourceIndex = videoTracks.length + index + 1
+        const label = t('multitrack.referenceAudioItem', { n: resourceIndex })
+        return {
+          id: entry.id,
+          type: 'audio' as const,
+          index: resourceIndex,
+          label,
+          detail: entry.detail,
+          token: `@${label}`,
+          color: getSegmentTrackPresentation('audio').waveformColor
+            ?? getSegmentTrackPresentation('audio').backgroundColor,
+        }
+      })
+    })()
     const videoResources = videoTracks.map((track, index) => {
       const resourceIndex = index + 1
       const label = t('multitrack.referenceVideoItem', { n: resourceIndex })
