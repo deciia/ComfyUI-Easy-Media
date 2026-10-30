@@ -37,6 +37,7 @@ import {
   snapMultiTrackMoveStartTime,
   snapMultiTrackResizeTime,
   snapTimeToFrame,
+  taskModeFromTaskType,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
 } from '@/lib/multitrack-utils'
@@ -2215,5 +2216,35 @@ describe('multitrack utilities', () => {
       { id: 'task-first', start_frame: 3, end_frame: 5 },
       { id: 'task-second', start_frame: 0, end_frame: 3 },
     ])
+  })
+})
+
+describe('taskModeFromTaskType', () => {
+  it('maps the script taskType vocabulary onto the task-mode vocabulary the node accepts', () => {
+    // 脚本侧（ScriptTab / PlanPreview / 助手工具）
+    expect(taskModeFromTaskType('r2v')).toBe('ref')
+    expect(taskModeFromTaskType('fmlf2v')).toBe('default')
+    expect(taskModeFromTaskType('vi2v')).toBe('edit')
+    expect(taskModeFromTaskType('l2v')).toBe('l2v')
+    expect(taskModeFromTaskType('passthrough')).toBe('passthrough')
+    // 界面显示标签
+    expect(taskModeFromTaskType('R2V')).toBe('ref')
+    expect(taskModeFromTaskType('FMLF2V')).toBe('default')
+    expect(taskModeFromTaskType('VI2V')).toBe('edit')
+    expect(taskModeFromTaskType('L2V')).toBe('l2v')
+    expect(taskModeFromTaskType('Pass')).toBe('passthrough')
+    // 已经是合法 task_mode 的值原样通过
+    expect(taskModeFromTaskType('default')).toBe('default')
+    expect(taskModeFromTaskType('ref')).toBe('ref')
+    expect(taskModeFromTaskType('edit')).toBe('edit')
+    // 容忍带修饰的文案
+    expect(taskModeFromTaskType('R2V 参考生成')).toBe('ref')
+  })
+
+  it('returns undefined when there is nothing to convert, so callers keep the previous value', () => {
+    expect(taskModeFromTaskType('')).toBeUndefined()
+    expect(taskModeFromTaskType(undefined)).toBeUndefined()
+    expect(taskModeFromTaskType(null)).toBeUndefined()
+    expect(taskModeFromTaskType('unknown')).toBeUndefined()
   })
 })

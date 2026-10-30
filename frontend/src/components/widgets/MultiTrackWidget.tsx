@@ -41,6 +41,7 @@ import {
   setMultiTrackAudioTrackLock,
   syncMatchingTasksToPrimaryVideoTrack,
   syncMatchingTasksToPrimaryVideoSegment,
+  taskModeFromTaskType,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
   snapMultiTrackResizeTime,
@@ -1369,7 +1370,6 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   // 分镜编排：把规划结果落成任务轨片段（只由弹窗「应用到任务轨」调用）
   useEffect(() => {
-    const VALID_TASK_MODES = new Set(['R2V', 'FMLF2V', 'VI2V', 'L2V', 'Pass'])
   const applyStoryboard = (items: Array<{
       id?: string
       name: string
@@ -1413,10 +1413,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             ...previous,
             media_type: 'none',
             stable_key: stableKey,
-            // 任务类型只写节点认识的值；没有就沿用该段原值，绝不写 'default'
-      task_mode: (VALID_TASK_MODES.has(String(item.taskMode ?? '').trim())
-        ? String(item.taskMode).trim()
-        : (previous.task_mode as never)) as never,
+            // 脚本的 taskType（r2v/fmlf2v/vi2v…）≠ 任务轨的 task_mode（default/ref/edit…）：
+            // 先换算成节点认识的值；没有可换算的值就沿用该段原值，绝不写 'default'
+            task_mode: (taskModeFromTaskType(item.taskMode) ?? (previous.task_mode as never)) as never,
             continuity_mode: (item.continuityMode as never) ?? (previous.continuity_mode as never) ?? undefined,
             ref_image_size: (item.refImageSize as never) ?? (previous.ref_image_size as never) ?? undefined,
             ...(item.images && item.images.length
@@ -1499,7 +1498,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         else patch.user_prompt = payload.prompt
       }
       if (payload.variant) patch.user_prompt_variant = payload.variant
-      if (payload.taskMode && (strategy !== 'fill-missing' || !previousContent.task_mode)) patch.task_mode = payload.taskMode
+      const mappedTaskMode = taskModeFromTaskType(payload.taskMode)
+      if (mappedTaskMode && (strategy !== 'fill-missing' || !previousContent.task_mode)) patch.task_mode = mappedTaskMode
       if (payload.continuityMode && (strategy !== 'fill-missing' || !previousContent.continuity_mode)) patch.continuity_mode = payload.continuityMode
       if (payload.refImageSize && (strategy !== 'fill-missing' || !previousContent.ref_image_size)) patch.ref_image_size = payload.refImageSize
       const imagesAllowed = strategy !== 'fill-missing' || !((previousContent.images as unknown[] | undefined)?.length)
@@ -1577,11 +1577,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                 const patch = byId.get(segment.id)
                 if (!patch) return segment
                 touched += 1
+                const mappedTaskMode = taskModeFromTaskType(patch.taskMode)
                 return {
                   ...segment,
                   content: {
                     ...segment.content,
-                    ...(patch.taskMode ? { task_mode: patch.taskMode } : {}),
+                    ...(mappedTaskMode ? { task_mode: mappedTaskMode } : {}),
                     ...(patch.continuityMode ? { continuity_mode: patch.continuityMode } : {}),
                   } as MultiTrackSegment['content'],
                 }
@@ -1868,7 +1869,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         else patch.user_prompt = payload.prompt
       }
       if (payload.variant) patch.user_prompt_variant = payload.variant
-      if (payload.taskMode) patch.task_mode = payload.taskMode
+      const mappedTaskMode = taskModeFromTaskType(payload.taskMode)
+      if (mappedTaskMode) patch.task_mode = mappedTaskMode
       if (payload.continuityMode) patch.continuity_mode = payload.continuityMode
       if (payload.refImageSize) patch.ref_image_size = payload.refImageSize
       if (payload.images) {

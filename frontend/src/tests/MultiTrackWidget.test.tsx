@@ -2571,4 +2571,61 @@ describe('MultiTrackWidget', () => {
 
     expect(screen.getByTestId('selected-segment-count').textContent).toBe('1')
   })
+
+  it('applies the storyboard taskType as a legal task mode instead of falling back to default', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = []
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    const applyStoryboard = (globalThis as unknown as {
+      __easyMediaApplyStoryboard?: (items: unknown[]) => boolean
+    }).__easyMediaApplyStoryboard
+    expect(applyStoryboard).toBeTypeOf('function')
+
+    act(() => {
+      applyStoryboard?.([{
+        name: '段 1',
+        durationFrames: 48,
+        brief: 'brief',
+        prompt: 'prompt',
+        // 脚本侧 ScriptTab 存的是 'r2v'，不是 'R2V'
+        taskMode: 'r2v',
+        stableKey: 'sk-1',
+      }])
+    })
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments[0].content.task_mode).toBe('ref')
+  })
+
+  it('keeps the existing task mode when the storyboard has no taskType for the segment', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-existing',
+      start_frame: 0,
+      end_frame: 48,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'l2v', stable_key: 'sk-1' } as unknown as TrackData['tracks'][number]['segments'][number]['content'],
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    const applyStoryboard = (globalThis as unknown as {
+      __easyMediaApplyStoryboard?: (items: unknown[]) => boolean
+    }).__easyMediaApplyStoryboard
+
+    act(() => {
+      applyStoryboard?.([{
+        name: '段 1',
+        durationFrames: 48,
+        brief: 'brief',
+        prompt: 'prompt',
+        stableKey: 'sk-1',
+      }])
+    })
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments[0].content.task_mode).toBe('l2v')
+  })
 })

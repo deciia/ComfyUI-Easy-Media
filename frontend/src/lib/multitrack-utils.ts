@@ -121,6 +121,31 @@ export function getMultiTrackTaskType(
   return 'fmlf2v'
 }
 
+/**
+ * 分镜脚本的 `settings.taskType` 与任务轨的 `content.task_mode` 是两套词表：
+ *   taskType（ScriptTab / PlanPreview / 助手工具）: r2v | fmlf2v | vi2v | l2v | passthrough，UI 显示 R2V / FMLF2V …
+ *   task_mode（任务轨段，节点只认这套）: default | ref | edit | l2v | passthrough
+ * 任何写任务轨的通道都必须经过本函数换算，否则 normalizeTaskMode 会把非法值归一成 default
+ * （现象：脚本里选了 R2V，任务轨仍然存成 default，界面显示成按图片张数推导出的 FMLF2V）。
+ * 返回 undefined 表示「没有可用的合法值」，调用方应保留该段原值，而不是写 default。
+ */
+export function taskModeFromTaskType(value: unknown): MultiTrackTaskMode | undefined {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) return undefined
+  if (raw === 'l2v') return 'l2v'
+  if (raw === 'passthrough' || raw === 'pass') return 'passthrough'
+  if (raw === 'ref' || raw === 'r2v' || raw === 'rv2v') return 'ref'
+  if (raw === 'edit' || raw === 'vi2v' || raw === 'v2v') return 'edit'
+  if (raw === 'default' || raw === 't2v' || raw === 'i2v' || raw === 'fl2v' || raw === 'fmlf2v') return 'default'
+  // 兜底：容忍「R2V 参考生成」这类带修饰的文案
+  if (raw.includes('vi2v')) return 'edit'
+  if (raw.includes('r2v')) return 'ref'
+  if (raw.includes('l2v')) return 'l2v'
+  if (raw.includes('pass')) return 'passthrough'
+  if (raw.includes('fl2v') || raw.includes('i2v') || raw.includes('t2v')) return 'default'
+  return undefined
+}
+
 export interface MergeSelectedTaskSegmentsResult {
   tracks: MultiTrack[]
   mergedSegmentId: string

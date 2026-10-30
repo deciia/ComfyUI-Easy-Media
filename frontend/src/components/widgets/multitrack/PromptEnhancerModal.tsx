@@ -2879,7 +2879,9 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                           prompt: target,
                           variant: previewVariant,
                           // 任务模式/衔接/参考图：段级 > 脚本级（与分镜编排的优先级一致）
-                          taskMode: mappedTask.task_mode,
+                          // 传显示标签（R2V/VI2V/FMLF2V…），由写入通道统一换算成 task_mode，
+                          // 避免 VI2V 被替身成 ref（编辑任务被当成参考生成）
+                          taskMode: taskTypeOfCurrentSegment() || mappedTask.task_mode,
                           continuityMode: segSettings?.contextMode || planSettingsNow?.contextMode || undefined,
                           refImageSize: segSettings?.refImageSize || planSettingsNow?.refImageSize || undefined,
                           images: imagesList,
