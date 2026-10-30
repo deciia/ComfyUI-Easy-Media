@@ -382,6 +382,27 @@ function buildPanel() {
   };
   panelRef = panel;
 
+  // 画框宽度变化（拖节点、折叠参数、切形态）后校正原生控件条宽度
+  try {
+    let lastWidth = 0;
+    let timer = 0;
+    const observer = new ResizeObserver((entries) => {
+      if (!videoWrap.isConnected) {
+        observer.disconnect();
+        return;
+      }
+      const width = Math.round(entries[0]?.contentRect?.width ?? 0);
+      if (!width || Math.abs(width - lastWidth) < 2) return;
+      lastWidth = width;
+      clearTimeout(timer);
+      timer = setTimeout(() => relayoutNativeControls(panel), 120);
+    });
+    observer.observe(videoWrap);
+    panel.controlsObserver = observer;
+  } catch {
+    /* ResizeObserver 不可用时忽略：只是少一次自动校正 */
+  }
+
   const refreshLayout = () => {
     const node = panel.node;
     const kind = currentKind(node);
@@ -684,8 +705,24 @@ async function bakeColorTune(panel) {
   }
 }
 
-function applyInfo(panel, info) {
-  if (!info) return;
+/**
+ * 原生 <video controls> 的控件条只在「视频元素尺寸变化」时重排。
+ * ComfyUI 里节点被拖宽/参数折叠/切换形态后，元素的实际宽度变了，但控件条仍按旧宽度排版：
+ * 表现为播放前控件条不贴节点左右边、一按播放（触发一次 surface resize）才对齐。
+ * 这里在容器宽度变化或元数据就绪时切一次 controls，强制原生控件按当前尺寸重排。
+ */
+function relayoutNativeControls(panel) {
+  const video = panel?.video;
+  if (!video || video.controls === false) return;
+  // 播放中不打断（播放本身会触发重排，而且切 controls 会闪）
+  if (!video.paused) return;
+  video.controls = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (panel.video && panel.video.isConnected !== false) panel.video.controls = true;
+  }));
+}
+
+function applyInfo(panel, info) {  if (!info) return;
   panel.info = info;
   const params = new URLSearchParams({
     filename: info.filename || "",
@@ -704,6 +741,8 @@ function applyInfo(panel, info) {
     }
   } else if (info.filename) {
     panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
+    // 元数据就绪后再校正一次控件条宽度（此时元素已是最终尺寸）
+    panel.video.addEventListener("loadedmetadata", () => relayoutNativeControls(panel), { once: true });
   }
   for (const [key, , fmt] of ROWS) {
     const cell = panel.cells.get(key);
@@ -727,6 +766,17 @@ function ensurePanel(node) {
     getMinHeight: () => 30,
     getMaxHeight: () => node.size?.[1],
   });
+  // 节点被拖宽/缩放后，Chrome 的原生控件条不会自己按新宽度重排（元素 CSS 尺寸可能没变），
+  // 表现为播放前控件条只覆盖节点左半截、一播放才对齐。这里在 resize 结束后强制重排一次。
+  if (typeof node.onResize === "function") {
+    const previousOnResize = node.onResize;
+    node.onResize = function (...args) {
+      const result = previousOnResize.apply(this, args);
+      clearTimeout(panel.resizeNudgeTimer);
+      panel.resizeNudgeTimer = setTimeout(() => relayoutNativeControls(panel), 180);
+      return result;
+    };
+  }
   // 默认：上方设置参数折叠（未显式保存过就按折叠）；视频详情默认折叠；调色台默认收起
   panel.paramsHidden = readParamsHidden(node.properties);
   // 视频详情固定默认折叠（旧节点之前被默认写成了 true，不能再拿它当用户意图）
