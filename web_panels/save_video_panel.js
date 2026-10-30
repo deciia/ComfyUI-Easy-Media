@@ -87,14 +87,12 @@ const BTN_CSS =
 
 let panelRef = null;
 
-// 点画面/其它地方时收起三点菜单（panelRef 在 buildPanel 里赋值，这里只读）
-document.addEventListener("pointerdown", (event) => {
-  const panel = panelRef;
-  if (!panel || !panel.menuOpen) return;
-  if (panel.menu?.contains(event.target) || panel.menuBtn?.contains(event.target)) return;
-  panel.menuOpen = false;
-  panel.refreshLayout?.();
-});
+/** 参数折叠状态：新字段优先；旧节点沿用 easyVideoOnly（它当时把参数一起折叠了） */
+function readParamsHidden(properties) {
+  const props = properties || {};
+  if (props.easyParamsHidden !== undefined) return props.easyParamsHidden !== false;
+  return props.easyVideoOnly !== false;
+}
 
 function bytes(n) {
   n = Number(n) || 0;
@@ -215,10 +213,21 @@ function buildPanel() {
     kindBar.appendChild(btn);
     kindButtons.set(item.kind, btn);
   }
-  const videoOnlyBtn = el("button", `margin-left:auto;width:24px;height:19px;padding:0;${BTN_CSS}`, "▲");
-  videoOnlyBtn.title = "折叠参数，仅显示画面";
-  videoOnlyBtn.addEventListener("mousedown", (event) => event.stopPropagation());
-  kindBar.appendChild(videoOnlyBtn);
+  // 右侧三个按钮（都在三角形折叠键左边 → 详情、调色台，最右是三角形）：
+  //   📋 视频详情折叠（默认折叠） / 🎨 调色台 / ▲ 只折叠上方的设置参数
+  const barBtnCss = `width:22px;height:19px;padding:0;${BTN_CSS}`;
+  const detailsBtn = el("button", `margin-left:auto;${barBtnCss}`, "📋");
+  detailsBtn.title = "展开/收起视频详情（默认折叠）";
+  detailsBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  const colorBtn = el("button", barBtnCss, "🎨");
+  colorBtn.title = "调色台（展开/收起）";
+  colorBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  const paramsBtn = el("button", barBtnCss, "▲");
+  paramsBtn.title = "折叠上方设置参数";
+  paramsBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  kindBar.appendChild(detailsBtn);
+  kindBar.appendChild(colorBtn);
+  kindBar.appendChild(paramsBtn);
   root.appendChild(kindBar);
 
   // ── 画框（可伸缩）──
@@ -256,37 +265,7 @@ function buildPanel() {
   videoWrap.appendChild(mistLayer);
   videoWrap.appendChild(halationLayer);
 
-  // ── 画面右下角的三点菜单 ──
-  // 播放器用的是原生 <video controls>，Chrome 的 ⋮ 菜单无法注入自定义项，
-  // 所以在原生 ⋮ 同一位置自建一个（会盖住原生 ⋮，下载/画中画/倍速随之不可用）。
-  const menuBtn = el(
-    "button",
-    "position:absolute;right:2px;bottom:2px;z-index:4;width:27px;height:27px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.34);color:#fff;cursor:pointer;font-size:17px;line-height:25px;text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.95);",
-    "⋮",
-  );
-  menuBtn.title = "更多（调色台）";
-  menuBtn.addEventListener("mouseenter", () => { menuBtn.style.background = "rgba(255,255,255,.18)"; });
-  menuBtn.addEventListener("mouseleave", () => { menuBtn.style.background = "rgba(0,0,0,.34)"; });
-  const menu = el(
-    "div",
-    "position:absolute;right:4px;bottom:32px;z-index:5;display:none;flex-direction:column;gap:1px;min-width:140px;padding:3px;border-radius:6px;border:1px solid #444;background:rgba(24,24,24,.97);box-shadow:0 6px 18px rgba(0,0,0,.55);box-sizing:border-box;",
-  );
-  const menuItemCss =
-    "display:block;width:100%;padding:4px 8px;border:0;border-radius:4px;background:transparent;color:#ddd;cursor:pointer;font-size:11px;line-height:16px;text-align:left;white-space:nowrap;";
-  const menuColor = el("button", menuItemCss, "🎨 调色台");
-  const menuReset = el("button", menuItemCss, "♻️ 重置调色");
-  menuColor.addEventListener("mouseenter", () => { menuColor.style.background = "#333"; });
-  menuColor.addEventListener("mouseleave", () => { menuColor.style.background = "transparent"; });
-  menuReset.addEventListener("mouseenter", () => { menuReset.style.background = "#333"; });
-  menuReset.addEventListener("mouseleave", () => { menuReset.style.background = "transparent"; });
-  menu.appendChild(menuColor);
-  menu.appendChild(menuReset);
-  for (const overlay of [menuBtn, menu]) {
-    overlay.addEventListener("pointerdown", (event) => event.stopPropagation());
-    overlay.addEventListener("mousedown", (event) => event.stopPropagation());
-  }
-  videoWrap.appendChild(menuBtn);
-  videoWrap.appendChild(menu);
+  // 三点菜单已移除：调色台与视频详情各自有按钮，避免与原生播放器 ⋮ 重复
   root.appendChild(videoWrap);
 
   // ── 详情标题栏（固定）──
@@ -356,8 +335,16 @@ function buildPanel() {
   }
   const colorActions = el("div", "display:flex;align-items:center;gap:6px;padding-top:2px;");
   const bakeBtn = el("button", "cursor:pointer;padding:2px 10px;border-radius:4px;border:1px solid #2b6cb0;background:#1d4ed8;color:#fff;font-size:11px;", "应用并导出");
+  const colorResetBtn = el("button", "cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid #4a4a4a;background:rgba(24,24,24,.9);color:#bbb;font-size:11px;", "♻️ 重置");
+  colorResetBtn.title = "把调色台所有参数恢复默认";
+  colorResetBtn.addEventListener("mousedown", (event) => event.stopPropagation());
+  colorResetBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    resetColorTune();
+  });
   const colorStatus = el("span", "flex:1 1 auto;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", "");
   colorActions.appendChild(bakeBtn);
+  colorActions.appendChild(colorResetBtn);
   colorActions.appendChild(colorStatus);
   colorBody.appendChild(colorActions);
   root.appendChild(colorBody);
@@ -375,13 +362,11 @@ function buildPanel() {
     openBtn,
     copyAllBtn,
     foldBtn,
-    videoOnlyBtn,
+    detailsBtn,
+    colorBtn,
+    paramsBtn,
     kindBar,
     kindButtons,
-    menuBtn,
-    menu,
-    menuColor,
-    menuReset,
     colorBody,
     bakeBtn,
     colorStatus,
@@ -391,10 +376,9 @@ function buildPanel() {
     halationLayer,
     node: null,
     info: null,
-    videoOnly: false,
-    detailsOpen: true,
+    paramsHidden: false,
+    detailsOpen: false,
     colorOpen: false,
-    menuOpen: false,
   };
   panelRef = panel;
 
@@ -419,29 +403,26 @@ function buildPanel() {
     panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
     if (panel.audioPlayer) panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
 
-    header.style.display = panel.videoOnly ? "none" : "flex";
-    body.style.display = panel.videoOnly || !panel.detailsOpen ? "none" : "grid";
-    colorBody.style.display = panel.videoOnly || !panel.colorOpen ? "none" : "flex";
-    // 三点菜单入口：音频形态没有画面、videoOnly 时只剩画面，都不显示
-    const showMenu = !panel.videoOnly && kind !== "audio";
-    panel.menuBtn.style.display = showMenu ? "block" : "none";
-    if (!showMenu) panel.menuOpen = false;
-    panel.menu.style.display = showMenu && panel.menuOpen ? "flex" : "none";
-    panel.menuColor.textContent = panel.colorOpen ? "🎨 调色台（收起）" : "🎨 调色台";
+    // 详情与调色台各有独立开关；三角形只控制上方的设置参数
+    header.style.display = "flex";
+    body.style.display = panel.detailsOpen ? "grid" : "none";
+    colorBody.style.display = panel.colorOpen ? "flex" : "none";
     foldBtn.textContent = panel.detailsOpen ? "▾" : "▸";
-    videoOnlyBtn.textContent = panel.videoOnly ? "▼" : "▲";
-    videoOnlyBtn.title = panel.videoOnly ? "展开参数与详情" : "折叠参数，仅显示画面";
+    detailsBtn.style.borderColor = panel.detailsOpen ? "#4a90d9" : "#4a4a4a";
+    colorBtn.style.borderColor = panel.colorOpen ? "#4a90d9" : "#4a4a4a";
+    paramsBtn.textContent = panel.paramsHidden ? "▼" : "▲";
+    paramsBtn.title = panel.paramsHidden ? "展开上方设置参数" : "折叠上方设置参数";
 
     if (node) {
       node.properties = node.properties || {};
-      node.properties.easyVideoOnly = panel.videoOnly;
+      node.properties.easyParamsHidden = panel.paramsHidden;
       node.properties.easyDetailsOpen = panel.detailsOpen;
       node.properties.easyColorOpen = panel.colorOpen;
 
+      if (!panel.paramsHidden) applyKindWidgets(node, kind);
       for (const name of PARAM_WIDGETS) {
-        hideWidget(node.widgets?.find((w) => w.name === name), panel.videoOnly);
+        hideWidget(node.widgets?.find((w) => w.name === name), panel.paramsHidden);
       }
-      if (!panel.videoOnly) applyKindWidgets(node, kind);
 
       // 行显隐已变化 → 重算槽位置（否则切 images/audio 时槽错位）
       relayoutSlots(node);
@@ -450,9 +431,19 @@ function buildPanel() {
     }
   };
 
-  videoOnlyBtn.addEventListener("click", (event) => {
+  paramsBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    panel.videoOnly = !panel.videoOnly;
+    panel.paramsHidden = !panel.paramsHidden;
+    refreshLayout();
+  });
+  detailsBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.detailsOpen = !panel.detailsOpen;
+    refreshLayout();
+  });
+  colorBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    panel.colorOpen = !panel.colorOpen;
     refreshLayout();
   });
   foldBtn.addEventListener("click", (event) => {
@@ -463,23 +454,6 @@ function buildPanel() {
   title.addEventListener("click", (event) => {
     event.stopPropagation();
     panel.detailsOpen = !panel.detailsOpen;
-    refreshLayout();
-  });
-  menuBtn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    panel.menuOpen = !panel.menuOpen;
-    refreshLayout();
-  });
-  menuColor.addEventListener("click", (event) => {
-    event.stopPropagation();
-    panel.colorOpen = !panel.colorOpen;
-    panel.menuOpen = false;
-    refreshLayout();
-  });
-  menuReset.addEventListener("click", (event) => {
-    event.stopPropagation();
-    resetColorTune();
-    panel.menuOpen = false;
     refreshLayout();
   });
   bakeBtn.addEventListener("mousedown", (event) => event.stopPropagation());
@@ -753,9 +727,10 @@ function ensurePanel(node) {
     getMinHeight: () => 30,
     getMaxHeight: () => node.size?.[1],
   });
-  // 默认折叠（仅显示画面）：未显式保存过时按折叠处理；用户手动展开过会写入 false，保持展开
-  panel.videoOnly = node.properties?.easyVideoOnly !== false;
-  panel.detailsOpen = node.properties?.easyDetailsOpen !== false;
+  // 默认：上方设置参数折叠（未显式保存过就按折叠）；视频详情默认折叠；调色台默认收起
+  panel.paramsHidden = readParamsHidden(node.properties);
+  // 视频详情固定默认折叠（旧节点之前被默认写成了 true，不能再拿它当用户意图）
+  panel.detailsOpen = false;
   panel.colorOpen = node.properties?.easyColorOpen === true;
   syncKindButtons(panel);
   panel.refreshLayout();
@@ -813,8 +788,8 @@ app.registerExtension({
         const cached = this._easyVideoInfo;
         const panel = ensurePanel(this);
         if (cached) applyInfo(panel, cached);
-        panel.videoOnly = this.properties?.easyVideoOnly !== false;
-        panel.detailsOpen = this.properties?.easyDetailsOpen !== false;
+        panel.paramsHidden = readParamsHidden(this.properties);
+        panel.detailsOpen = false;
         panel.colorOpen = this.properties?.easyColorOpen === true;
         syncKindButtons(panel);
         panel.refreshLayout();
