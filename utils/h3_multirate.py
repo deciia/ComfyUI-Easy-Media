@@ -169,15 +169,34 @@ def _sigma_values(sigmas) -> list[float]:
     return values
 
 
+def _model_shifts(model) -> tuple[float, float]:
+    """偏移值来自模型层（项目侧统一施加），节点本身不提供偏移设置。"""
+    options = getattr(getattr(model, "model_options", None), "get", None)
+    transformer_options = (options.get("transformer_options", {}) if callable(options) else {}) or {}
+    try:
+        shift_video = float(transformer_options.get("minimax_h3_sigma_shift_video", 12.0))
+    except (TypeError, ValueError):
+        shift_video = 12.0
+    try:
+        shift_audio = float(transformer_options.get("minimax_h3_sigma_shift_audio", 3.0))
+    except (TypeError, ValueError):
+        shift_audio = 3.0
+    return shift_video, shift_audio
+
+
 def build_multirate_sampling(
     model,
     av_latent: dict,
     sigmas,
     video_steps: int = 1,
-    shift_video: float = 12.0,
-    shift_audio: float = 3.0,
 ):
-    """返回 (patched_model, sampler, shifted_sigmas)。"""
+    """只约束「视频提交 video_steps 次」；采样器设置与偏移都不在本节点内。
+
+    返回 (model, sampler, sigmas)：
+    - model 原样返回（不克隆、不改 shift），偏移仍由项目/模型层负责；
+    - sigmas 原样返回（不做 shift_sigma），阶梯完全来自采样方案或外接预设；
+    - sampler 仅改变“视频提交节奏”：音频每步更新，视频只在宏步提交。
+    """
     video, audio = nested_av_parts(av_latent)
     if video.shape[1] != 24 or audio.shape[1] != 32 or audio.shape[2] != 2:
         raise ValueError(
@@ -185,22 +204,9 @@ def build_multirate_sampling(
             f"video={tuple(video.shape)}, audio={tuple(audio.shape)}"
         )
 
-    base = torch.tensor(_sigma_values(sigmas), dtype=torch.float32)
-    shifted_sigmas = shift_sigma(base, float(shift_video))
-
-    patched_model = model.clone()
+    sigmas_tensor = torch.tensor(_sigma_values(sigmas), dtype=torch.float32)
+    shift_video, shift_audio = _model_shifts(model)
     audio_velocity_is_raw = callable(getattr(getattr(model, "model", None), "audio_scale", None))
-    original_sampling = model.get_model_object("model_sampling")
-    model_sampling = MiniMaxH3MultiRateFlowSampling(model.model.model_config)
-    model_sampling.set_parameters(shift=float(shift_video))
-    if hasattr(original_sampling, "noise_scale"):
-        model_sampling.set_noise_scale(original_sampling.noise_scale)
-    patched_model.add_object_patch("model_sampling", model_sampling)
-
-    transformer_options = patched_model.model_options.get("transformer_options", {}).copy()
-    transformer_options["minimax_h3_sigma_shift_video"] = float(shift_video)
-    transformer_options["minimax_h3_sigma_shift_audio"] = float(shift_audio)
-    patched_model.model_options["transformer_options"] = transformer_options
 
     video_values = math.prod(video.shape[1:])
     packed_values = video_values + math.prod(audio.shape[1:])
@@ -210,10 +216,10 @@ def build_multirate_sampling(
             model_wrap, x, schedule,
             extra_args=extra_args, callback=callback, disable=disable,
             video_values=video_values, packed_values=packed_values,
-            shift_video=float(shift_video), shift_audio=float(shift_audio),
+            shift_video=shift_video, shift_audio=shift_audio,
             video_steps=int(video_steps), audio_velocity_is_raw=audio_velocity_is_raw,
         )
 
     sampler_function.__name__ = "sample_minimax_h3_multirate_audio_first"
     sampler = comfy.samplers.KSAMPLER(sampler_function)
-    return patched_model, sampler, shifted_sigmas
+    return model, sampler, sigmas_tensor

@@ -1709,12 +1709,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         # 统一施加一次；dual_t8 由双钟链路（DualClock / DetailMixer）自行处理，保持原行为，
         # 避免双重施加；passthrough 不采样、无采样任务时也不插入。位置必须在段循环之外，
         # 否则每段都会多克隆一次模型。
-        if (
-            not is_dual_t8
-            and not is_passthrough
-            and not use_multirate
-            and has_sampling_tasks
-        ):
+        if not is_dual_t8 and not is_passthrough and has_sampling_tasks:
             first_model_input = model
             model = _h3_apply_shift_override(
                 graph,
@@ -2197,8 +2192,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                             av_latent=initial_latent,
                             sigmas=first_pass_sigmas,
                             video_steps=multirate_video_steps,
-                            shift_video=shift_video_override,
-                            shift_audio=shift_audio_override,
                         )
                         first_pass_sampling_model = multirate.out(0)
                         first_pass_sampler = multirate.out(1)
