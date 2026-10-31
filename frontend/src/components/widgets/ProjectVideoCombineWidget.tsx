@@ -175,10 +175,6 @@ function projectVideoFileUrl(file: ProjectVideoFile): string | null {
   return url ? addMediaRevision(url, file.media_revision) : null
 }
 
-function elementRefHasCurrent(element: HTMLMediaElement | null): boolean {
-  return Boolean(element)
-}
-
 function projectVideoFiles(clip: ProjectClip): ProjectVideoFile[] {
   const candidates = clip.media_kind === 'audio' ? clip.audio_files : clip.video_files
   const files = candidates?.length
@@ -1034,21 +1030,33 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                 }}
               />
             ) : activeUrl && active!.clip.media_kind === 'audio' ? (
-              <audio
-                ref={(element) => {
-                  if (element) videoRefs.current.set(active!.clip.id, element as unknown as HTMLVideoElement)
-                  else videoRefs.current.delete(active!.clip.id)
-                }}
-                key={active!.clip.id}
-                src={activeUrl}
-                controls
-                className="max-h-full w-full"
-                onLoadedMetadata={(event) => {
-                  if (elementRefHasCurrent(event.currentTarget)) {
-                    event.currentTarget.currentTime = active!.clip.source_start_frame / data.frame_rate
-                  }
-                }}
-              />
+              <>
+                <div className="pointer-events-none flex h-full w-full flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
+                  <span className="text-sm font-medium text-foreground">
+                    音频 · 第 {active!.clip.index + 1} 段
+                  </span>
+                  <span className="max-w-[80%] truncate">{active!.clip.file_name}</span>
+                  <span>{isPlaying ? '播放中…' : '按播放键从头连续播放全部音频段'}</span>
+                </div>
+                {data.clips
+                  .filter((clip) => clip.enabled !== false && clip.media_kind === 'audio')
+                  .map((clip) => {
+                    const clipUrl = projectClipUrl(clip)
+                    if (!clipUrl) return null
+                    return (
+                      <audio
+                        key={clip.id}
+                        ref={(element) => {
+                          if (element) videoRefs.current.set(clip.id, element as unknown as HTMLVideoElement)
+                          else videoRefs.current.delete(clip.id)
+                        }}
+                        src={clipUrl}
+                        preload="auto"
+                        className="hidden"
+                      />
+                    )
+                  })}
+              </>
             ) : activeUrl ? (
               [
                 { clip: active!.clip, url: activeUrl, visible: true },
