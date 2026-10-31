@@ -40,6 +40,11 @@ const MP_PRESET: TimelineResolutionSnapshot = {
   aspect_ratio: '9:16 (Portrait Widescreen)',
   megapixels: 1.0,
 }
+const IMAGE_PRESET: TimelineResolutionSnapshot = {
+  preset: 'width x height (megapixels)',
+  aspect_ratio: '9:16 (Portrait Widescreen)',
+  megapixels: 2.0,
+}
 const AUDIO_PRESET: TimelineResolutionSnapshot = {
   preset: 'width x height (custom)',
   width: 64,
@@ -49,7 +54,7 @@ const AUDIO_PRESET: TimelineResolutionSnapshot = {
 /** 新建项目时的画布预设：音频 64×64，视频/图片 MP 9:16 1.0。 */
 const PROJECT_KIND_RESOLUTION: Record<ProjectKind, TimelineResolutionSnapshot | null> = {
   video: MP_PRESET,
-  image: MP_PRESET,
+  image: IMAGE_PRESET,
   audio: AUDIO_PRESET,
 }
 

@@ -366,7 +366,7 @@ class EasySaveVideo(io.ComfyNode):
                     default=False,
                     tooltip="Write ComfyUI prompt/workflow metadata into the saved file.",
                 ),
-                io.String.Input("filename_prefix", default="ComfyUI"),
+                io.String.Input("filename_prefix", default="easy_media"),
                 # —— 以下为追加输入（位置必须在末尾，避免旧存档按位置回填时错位）——
                 io.Combo.Input(
                     "video_format",
@@ -454,7 +454,7 @@ class EasySaveVideo(io.ComfyNode):
         input_mode: str = "images+audio",
         fps: float = 24.0,
         output_mode: str = "save",
-        filename_prefix: str = "ComfyUI",
+        filename_prefix: str = "easy_media",
         images=None,
         video=None,
         audio=None,

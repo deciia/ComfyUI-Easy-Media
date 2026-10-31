@@ -405,6 +405,17 @@ export function TaskSegmentEditor({
     setCombinedPromptInput((current) => current === combinedPromptValue ? current : combinedPromptValue)
   }, [combinedPromptValue])
 
+  // 图片项目：任务类型跟随参考图数量（0/1 图=文生图/图生图，多图=参考编辑）
+  const imageTaskImageCount = images.length
+  useEffect(() => {
+    if (projectKind !== 'image') return
+    const currentMode = segment.content.task_mode ?? 'default'
+    const targetMode = imageTaskImageCount >= 2 ? 'ref' : 'default'
+    if (currentMode === targetMode) return
+    if (currentMode !== 'default' && currentMode !== 'ref') return
+    handleDropdownContentChange({ task_mode: targetMode })
+  }, [projectKind, imageTaskImageCount, segment.id, segment.content.task_mode])
+
   function commitDuration() {
     const nextDuration = parseMultiTrackDurationTimecode(durationInput, frameRate)
     if (nextDuration === null) {
@@ -1355,16 +1366,19 @@ export function TaskSegmentEditor({
               </Tooltip>
             </TooltipProvider>
             <SelectContent>
-              {MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax').map((taskMode) => (
+              {(projectKind === 'image'
+                ? MULTITRACK_TASK_MODES.filter((taskMode) => taskMode === 'default' || taskMode === 'ref')
+                : MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax')
+              ).map((taskMode) => (
                 <SelectItem key={taskMode} value={taskMode}>
                   <span className="text-[10px]">
                     {projectKind === 'image'
-                    ? taskMode === 'ref' || taskMode === 'edit'
-                      ? 'edit 参考图编辑'
-                      : images.length > 0
-                        ? 'i2i 首帧图生图'
-                        : 't2i 文生图'
-                    : t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
+                      ? taskMode === 'ref'
+                        ? 'edit 参考图编辑'
+                        : images.length > 0
+                          ? 'i2i 首帧图生图'
+                          : 't2i 文生图'
+                      : t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
                   </span>
                 </SelectItem>
               ))}
