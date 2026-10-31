@@ -1337,12 +1337,6 @@ def _h3_project_data(
         generations = segment.get("generations", {})
         if not isinstance(generations, dict):
             continue
-        has_video_generation = any(
-            isinstance(candidate, dict) and candidate.get("video")
-            for candidate in generations.values()
-        )
-        if has_video_generation:
-            continue
         active_generation = str(segment.get("active_generation", ""))
         generation = generations.get(active_generation)
         if not isinstance(generation, dict) or not generation.get("audio"):
