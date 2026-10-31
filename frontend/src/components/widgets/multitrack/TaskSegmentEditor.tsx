@@ -125,8 +125,9 @@ interface SystemPromptOption {
   modes?: MultiTrackTaskMode[]
 }
 
-let cachedSystemPromptOptions: SystemPromptOption[] | undefined
+const systemPromptOptionsCache = new Map<string, SystemPromptOption[]>()
 let systemPromptOptionsRequest: Promise<SystemPromptOption[]> | null = null
+let systemPromptOptionsRequestKey: string | null = null
 
 function taskImages(segment: MultiTrackSegment): MultiTrackTaskImage[] {
   return taskImagesFromContent(segment.content.images)
@@ -184,38 +185,52 @@ function getDefaultSystemPromptForSegment(
   options: SystemPromptOption[],
   videoSegments: MultiTrackSegment[],
   format?: string,
+  projectKind?: 'video' | 'audio' | 'image',
 ): string {
   const images = activeTaskImages(segment.content.images)
-  const taskType = getMultiTrackTaskType(
-    segment.content.task_mode ?? 'default',
-    images.length,
-    hasVideoInRange(segment, videoSegments),
-  )
   const mode = segment.content.task_mode ?? 'default'
-  const promptTaskType = taskType === 'fl2v' || taskType === 'fmlf2v' ? 'i2v' : taskType
+  let promptTaskType: string
+  if (projectKind === 'image') {
+    promptTaskType = mode === 'ref' || mode === 'edit' ? 'edit' : images.length > 0 ? 'i2i' : 't2i'
+  } else if (projectKind === 'audio') {
+    promptTaskType = mode === 'ref' ? 'clone' : 'tts'
+  } else {
+    const taskType = getMultiTrackTaskType(
+      mode,
+      images.length,
+      hasVideoInRange(segment, videoSegments),
+    )
+    promptTaskType = taskType === 'fl2v' || taskType === 'fmlf2v' ? 'i2v' : taskType
+  }
   const formatMatch = options.find((option) => (
     option.format === format
-    && (option.modes?.includes(mode) || option.task_type === taskType)
+    && (option.modes?.includes(mode) || option.task_type === promptTaskType)
   ))
   return formatMatch?.system_prompt
     ?? options.find((option) => option.task_type === promptTaskType && option.format === undefined)?.system_prompt
     ?? ''
 }
 
-async function loadSystemPromptOptions(): Promise<SystemPromptOption[]> {
-  if (cachedSystemPromptOptions) return cachedSystemPromptOptions
-  if (!systemPromptOptionsRequest) {
+async function loadSystemPromptOptions(
+  projectKind: 'video' | 'audio' | 'image' = 'video',
+): Promise<SystemPromptOption[]> {
+  const key = projectKind
+  const cached = systemPromptOptionsCache.get(key)
+  if (cached) return cached
+  if (!systemPromptOptionsRequest || systemPromptOptionsRequestKey !== key) {
+    systemPromptOptionsRequestKey = key
     systemPromptOptionsRequest = (async () => {
-      const response = await fetch('/easy-media/prompt/system-prompts')
+      const response = await fetch(`/easy-media/prompt/system-prompts?project_kind=${encodeURIComponent(key)}`)
       if (!response.ok) {
         throw new Error(`Failed to load system prompt options: ${response.status}`)
       }
       const result = await response.json() as SystemPromptResponse
       const options = Array.isArray(result.items) ? result.items : []
-      cachedSystemPromptOptions = options
+      systemPromptOptionsCache.set(key, options)
       return options
     })().catch((error: unknown) => {
       systemPromptOptionsRequest = null
+      systemPromptOptionsRequestKey = null
       throw error
     })
   }
@@ -253,7 +268,7 @@ export function TaskSegmentEditor({
   const [reselectImageId, setReselectImageId] = useState<string | null>(null)
   const [isImageDragOver, setIsImageDragOver] = useState(false)
   const [applyPromptToAllOpen, setApplyPromptToAllOpen] = useState(false)
-  const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
+  const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(systemPromptOptionsCache.get(projectKind) ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
   const [isDurationEditing, setIsDurationEditing] = useState(false)
   const duration = frameToSeconds(segmentDuration(segment), frameRate)
@@ -289,10 +304,10 @@ export function TaskSegmentEditor({
     ? t('multitrack.minimaxPromptPlaceholder')
     : t('multitrack.promptPlaceholder')
   const segmentHasVideoInRange = hasVideoInRange(segment, videoSegments)
-  const systemPromptDefault = getDefaultSystemPromptForSegment(segment, systemPromptOptions ?? [], videoSegments, format)
+  const systemPromptDefault = getDefaultSystemPromptForSegment(segment, systemPromptOptions ?? [], videoSegments, format, projectKind)
   const systemPromptValue = editMode === 'combined'
     ? editableSegments.map((item) => (
-        item.content.system_prompt ?? getDefaultSystemPromptForSegment(item, systemPromptOptions ?? [], videoSegments, format)
+        item.content.system_prompt ?? getDefaultSystemPromptForSegment(item, systemPromptOptions ?? [], videoSegments, format, projectKind)
       )).join('|')
     : segment.content.system_prompt || systemPromptDefault
   const promptResources = useMemo<PromptReferenceResource[]>(() => {
@@ -433,7 +448,7 @@ export function TaskSegmentEditor({
     if (systemPromptOptions !== null) return
     let cancelled = false
     setSystemPromptLoading(true)
-    loadSystemPromptOptions()
+    loadSystemPromptOptions(projectKind)
       .then((options) => {
         if (!cancelled) setSystemPromptOptions(options)
       })

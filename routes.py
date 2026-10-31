@@ -566,7 +566,7 @@ async def handle_system_prompt_options(request: web.Request) -> web.Response:
     return web.Response(
         content_type="application/json",
         text=json.dumps({
-            "items": get_system_prompt_options(),
+            "items": get_system_prompt_options(request.rel_url.query.get("project_kind")),
         }),
     )
 
