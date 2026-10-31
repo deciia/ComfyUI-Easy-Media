@@ -1038,6 +1038,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option("passthrough", []),
                     ],
                 ),
+                io.Int.Input(
+                    "视频提交次数",
+                    default=1,
+                    min=1,
+                    max=64,
+                    step=1,
+                    tooltip=(
+                        "仅 audio_first 生效：音频每步更新，视频只在这些次数上提交；"
+                        "1 = 整段只提交一次。"
+                    ),
+                ),
+                io.Combo.Input(
+                    "仅音频分辨率",
+                    options=["64x64", "32x32"],
+                    default="64x64",
+                    tooltip=(
+                        "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
+                        "32x32（更快）。真实音频时长仍由段时长决定。"
+                    ),
+                ),
                 io.Boolean.Input(
                     "1st_pass_only",
                     default=False,
@@ -1161,26 +1181,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "Sampler 默认 = 0.5 / 1.0。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样"
                         "开始会明确报错（不静默纠正）。同样只在 rho>0 时参与计算。仅 selflift "
                         "模式生效。"
-                    ),
-                ),
-                io.Int.Input(
-                    "视频提交次数",
-                    default=1,
-                    min=1,
-                    max=64,
-                    step=1,
-                    tooltip=(
-                        "仅 audio_first 生效：音频每步更新，视频只在这些次数上提交；"
-                        "1 = 整段只提交一次。"
-                    ),
-                ),
-                io.Combo.Input(
-                    "仅音频分辨率",
-                    options=["64x64", "32x32"],
-                    default="64x64",
-                    tooltip=(
-                        "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
-                        "32x32（更快）。真实音频时长仍由段时长决定。"
                     ),
                 ),
             ],

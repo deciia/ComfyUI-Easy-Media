@@ -42,6 +42,27 @@ function setWidgetHidden(widget, hidden) {
   }
 }
 
+function placeFieldsAfterMode(node) {
+  if (!node || node.comfyClass !== NODE_TYPE || !Array.isArray(node.widgets)) return;
+  const modeIndex = node.widgets.findIndex((widget) => widget.name === "sampling_mode");
+  if (modeIndex < 0) return;
+  const wanted = [];
+  for (const name of FIELDS) {
+    const index = node.widgets.findIndex((widget) => widget.name === name);
+    if (index >= 0) wanted.push(node.widgets[index]);
+  }
+  if (wanted.length === 0) return;
+  const already = node.widgets
+    .slice(modeIndex + 1, modeIndex + 1 + wanted.length)
+    .every((widget, offset) => widget === wanted[offset]);
+  if (already) return;
+  for (const widget of wanted) {
+    const index = node.widgets.indexOf(widget);
+    if (index >= 0) node.widgets.splice(index, 1);
+  }
+  node.widgets.splice(modeIndex + 1, 0, ...wanted);
+}
+
 function applyVisibility(node) {
   if (!node || node.comfyClass !== NODE_TYPE || !node.widgets) return;
   const mode = node.widgets.find((widget) => widget.name === "sampling_mode");
