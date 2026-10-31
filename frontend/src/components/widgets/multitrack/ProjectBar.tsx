@@ -35,10 +35,13 @@ const PROJECT_KIND_OPTIONS: Array<{ value: ProjectKind; label: string }> = [
   { value: 'image', label: '图片项目' },
 ]
 
-/** 各类型项目的画布预设：音频固定 64×64；图片与视频一致（不主动改画布）。 */
+/** 各类型项目的画布预设：
+ *  - 视频/图片：默认预设 MP 9:16 1.0（切回时重置）
+ *  - 音频：自定义 64×64
+ */
 const PROJECT_KIND_RESOLUTION: Record<ProjectKind, TimelineResolutionSnapshot | null> = {
-  video: null,
-  image: null,
+  video: { preset: 'width x height (megapixels)', aspect_ratio: '9:16 (Portrait Widescreen)', megapixels: 1.0 },
+  image: { preset: 'width x height (megapixels)', aspect_ratio: '9:16 (Portrait Widescreen)', megapixels: 1.0 },
   audio: { preset: 'width x height (custom)', width: 64, height: 64 },
 }
 
