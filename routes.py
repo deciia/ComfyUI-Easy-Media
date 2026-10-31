@@ -193,9 +193,7 @@ async def handle_h3_projects(_request: web.Request) -> web.Response:
             for path in root.iterdir()
             if path.is_dir() and not path.name.startswith(".")
         } if root.is_dir() else set()
-        names.add("default")
-        projects = ["default", *sorted(name for name in names if name != "default")]
-        return web.json_response({"projects": projects})
+        return web.json_response({"projects": sorted(names)})
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to list H3 projects: {error}"}, status=500)
