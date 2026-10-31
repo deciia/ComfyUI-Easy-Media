@@ -1000,31 +1000,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option("single", []),
                         io.DynamicCombo.Option("dual", []),
                         io.DynamicCombo.Option("dual_t8", []),
-                        io.DynamicCombo.Option(
-                            "audio_first",
-                            [
-                                io.Int.Input(
-                                    "视频提交次数",
-                                    default=1,
-                                    min=1,
-                                    max=64,
-                                    tooltip=(
-                                        "音频每步更新，视频只在这些次数上提交；"
-                                        "1 = 整段只提交一次。"
-                                    ),
-                                ),
-                                io.Combo.Input(
-                                    "仅音频分辨率",
-                                    options=["64x64", "32x32"],
-                                    default="64x64",
-                                    tooltip=(
-                                        "audio_first 专用：只影响占位画面，"
-                                        "64x64（推荐，音质稳定）或 32x32（更快）。"
-                                        "真实音频时长仍由段时长决定。"
-                                    ),
-                                ),
-                            ],
-                        ),
+                        io.DynamicCombo.Option("audio_first", []),
                         io.DynamicCombo.Option(
                             "selflift",
                             [
@@ -1187,6 +1163,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "模式生效。"
                     ),
                 ),
+                io.Int.Input(
+                    "视频提交次数",
+                    default=1,
+                    min=1,
+                    max=64,
+                    step=1,
+                    tooltip=(
+                        "仅 audio_first 生效：音频每步更新，视频只在这些次数上提交；"
+                        "1 = 整段只提交一次。"
+                    ),
+                ),
+                io.Combo.Input(
+                    "仅音频分辨率",
+                    options=["64x64", "32x32"],
+                    default="64x64",
+                    tooltip=(
+                        "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
+                        "32x32（更快）。真实音频时长仍由段时长决定。"
+                    ),
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
@@ -1259,10 +1255,13 @@ class EasyMultiTrackProject(io.ComfyNode):
         try:
             multirate_video_steps = int(
                 _first_input(
-                    sampling_config.get("视频提交次数"),
+                    kwargs.get("视频提交次数"),
                     _first_input(
-                        sampling_config.get("multirate_video_steps"),
-                        _first_input(kwargs.get("multirate_video_steps"), 1),
+                        sampling_config.get("视频提交次数"),
+                        _first_input(
+                            sampling_config.get("multirate_video_steps"),
+                            _first_input(kwargs.get("multirate_video_steps"), 1),
+                        ),
                     ),
                 )
             )
@@ -1437,10 +1436,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                 32
                 if str(
                     _first_input(
-                        sampling_config.get("仅音频分辨率"),
+                        kwargs.get("仅音频分辨率"),
                         _first_input(
-                            sampling_config.get("audio_first_resolution"),
-                            _first_input(kwargs.get("audio_first_resolution"), "64x64"),
+                            sampling_config.get("仅音频分辨率"),
+                            _first_input(
+                                sampling_config.get("audio_first_resolution"),
+                                _first_input(kwargs.get("audio_first_resolution"), "64x64"),
+                            ),
                         ),
                     )
                 ).startswith("32")
