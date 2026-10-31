@@ -1004,8 +1004,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                             "audio_first",
                             [
                                 io.Int.Input(
-                                    "multirate_video_steps",
-                                    display_name="视频提交次数",
+                                    "视频提交次数",
                                     default=1,
                                     min=1,
                                     max=64,
@@ -1015,8 +1014,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                                     ),
                                 ),
                                 io.Combo.Input(
-                                    "audio_first_resolution",
-                                    display_name="仅音频分辨率",
+                                    "仅音频分辨率",
                                     options=["64x64", "32x32"],
                                     default="64x64",
                                     tooltip=(
@@ -1261,8 +1259,11 @@ class EasyMultiTrackProject(io.ComfyNode):
         try:
             multirate_video_steps = int(
                 _first_input(
-                    sampling_config.get("multirate_video_steps"),
-                    _first_input(kwargs.get("multirate_video_steps"), 1),
+                    sampling_config.get("视频提交次数"),
+                    _first_input(
+                        sampling_config.get("multirate_video_steps"),
+                        _first_input(kwargs.get("multirate_video_steps"), 1),
+                    ),
                 )
             )
         except (TypeError, ValueError):
@@ -1436,8 +1437,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                 32
                 if str(
                     _first_input(
-                        sampling_config.get("audio_first_resolution"),
-                        _first_input(kwargs.get("audio_first_resolution"), "64x64"),
+                        sampling_config.get("仅音频分辨率"),
+                        _first_input(
+                            sampling_config.get("audio_first_resolution"),
+                            _first_input(kwargs.get("audio_first_resolution"), "64x64"),
+                        ),
                     )
                 ).startswith("32")
                 else 64
