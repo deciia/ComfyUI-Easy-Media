@@ -123,6 +123,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyH3SamplingPreviewSampler,
             EasyMiniMaxH3LatentUpscaler,
             EasyMiniMaxH3SelfLiftSampler,
+            EasyH3MultiRateSampler,
             EasyH3SegmentSaveEnd,
             EasyH3ContextMediaTrim,
             EasyH3PassthroughVideo,

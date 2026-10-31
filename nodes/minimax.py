@@ -3195,3 +3195,43 @@ def _dmad_renoise_sampler(model, x, sigmas, extra_args=None, callback=None, disa
                 "sigma_hat": sigma,
             })
     return x
+
+class EasyH3MultiRateSampler(io.ComfyNode):
+    """H3 多速率采样：吃外部 sigma 阶梯，音频每步更新、视频只提交 video_steps 次。"""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy minimaxH3MultiRateSampler",
+            display_name="H3 Multi-Rate Sampler",
+            category="EasyUse/MiniMax",
+            description=(
+                "音频每步都更新、视频只在宏步提交。吃外部 SIGMAS（例如 Deciia 采样"
+                "预设的 8 步阶梯），video_steps=1 即“8 步音频、1 步视频”。"
+            ),
+            inputs=[
+                io.Model.Input("model"),
+                io.Latent.Input("av_latent"),
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input("video_steps", default=1, min=1, max=64,
+                             tooltip="视频提交（宏步）次数；1 = 整段只提交一次。"),
+                io.Float.Input("shift_video", default=12.0, min=0.01, max=100.0,
+                               step=0.01, advanced=True),
+                io.Float.Input("shift_audio", default=3.0, min=0.01, max=100.0,
+                               step=0.01, advanced=True),
+            ],
+            outputs=[
+                io.Model.Output("model"),
+                io.Sampler.Output("sampler"),
+                io.Sigmas.Output("sigmas"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, av_latent, sigmas, video_steps=1,
+                shift_video=12.0, shift_audio=3.0):
+        from ..utils.h3_multirate import build_multirate_sampling
+
+        return io.NodeOutput(*build_multirate_sampling(
+            model, av_latent, sigmas, video_steps, shift_video, shift_audio,
+        ))

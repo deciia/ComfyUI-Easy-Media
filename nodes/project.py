@@ -1004,6 +1004,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                             "audio_first",
                             [
                                 io.Combo.Input(
+                                    "audio_sampler",
+                                    display_name="音频采样器",
+                                    options=["euler", "multirate"],
+                                    default="euler",
+                                    tooltip=(
+                                        "euler：单速率（每步都提交视频）；multirate："
+                                        "音频每步更新、视频只提交「视频提交步数」次。"
+                                        "仅 audio_first 生效。选 multirate 时只用外接"
+                                        "的 Sigmas，采样器由项目内部接管。"
+                                    ),
+                                ),
+                                io.Int.Input(
+                                    "multirate_video_steps",
+                                    display_name="视频提交步数",
+                                    default=1,
+                                    min=1,
+                                    max=64,
+                                    tooltip="仅 multirate 生效：1 = 整段只提交一次。",
+                                ),
+                                io.Combo.Input(
                                     "audio_first_resolution",
                                     display_name="采样分辨率",
                                     options=["64x64", "32x32"],
@@ -1248,6 +1268,23 @@ class EasyMultiTrackProject(io.ComfyNode):
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
         is_audio_first = sampling_mode == "audio_first"
+        audio_sampler = str(
+            _first_input(
+                sampling_config.get("audio_sampler"),
+                _first_input(kwargs.get("audio_sampler"), "euler"),
+            )
+        ).lower()
+        try:
+            multirate_video_steps = int(
+                _first_input(
+                    sampling_config.get("multirate_video_steps"),
+                    _first_input(kwargs.get("multirate_video_steps"), 1),
+                )
+            )
+        except (TypeError, ValueError):
+            multirate_video_steps = 1
+        multirate_video_steps = max(1, multirate_video_steps)
+        use_multirate = is_audio_first and audio_sampler == "multirate"
         # 高级输入（2026-10-11）：视频/音频 sigma 偏移覆盖；默认值 = 原本硬编码值，向后兼容
         def _shift_value(raw, fallback: float) -> float:
             """旧工作流 widget 错位可能给到空串/0 等脏值——非法时回落默认，避免采样崩。"""
@@ -1672,7 +1709,12 @@ class EasyMultiTrackProject(io.ComfyNode):
         # 统一施加一次；dual_t8 由双钟链路（DualClock / DetailMixer）自行处理，保持原行为，
         # 避免双重施加；passthrough 不采样、无采样任务时也不插入。位置必须在段循环之外，
         # 否则每段都会多克隆一次模型。
-        if not is_dual_t8 and not is_passthrough and has_sampling_tasks:
+        if (
+            not is_dual_t8
+            and not is_passthrough
+            and not use_multirate
+            and has_sampling_tasks
+        ):
             first_model_input = model
             model = _h3_apply_shift_override(
                 graph,
@@ -2147,6 +2189,20 @@ class EasyMultiTrackProject(io.ComfyNode):
                         conditioning=positive,
                     )
                 else:
+                    if use_multirate:
+                        multirate = graph.node(
+                            "easy minimaxH3MultiRateSampler",
+                            id=f"multirate_{task_index}",
+                            model=first_pass_sampling_model,
+                            av_latent=initial_latent,
+                            sigmas=first_pass_sigmas,
+                            video_steps=multirate_video_steps,
+                            shift_video=shift_video_override,
+                            shift_audio=shift_audio_override,
+                        )
+                        first_pass_sampling_model = multirate.out(0)
+                        first_pass_sampler = multirate.out(1)
+                        first_pass_sigmas = multirate.out(2)
                     first_pass_guider = graph.node(
                         "BasicGuider",
                         id=f"first_pass_guider_{task_index}",
