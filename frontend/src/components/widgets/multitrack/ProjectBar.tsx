@@ -536,7 +536,9 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-neutral-700 px-2 py-1 text-xs text-neutral-200">
-      <span className="text-neutral-400">{t('multitrack.projectLabel')}</span>
+      <span className="text-neutral-400">
+        {data.project?.kind === 'audio' ? '🎵' : data.project?.kind === 'image' ? '🖼️' : '🎬'} 项目
+      </span>
       <select
         className="h-7 max-w-[12rem] rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100 disabled:opacity-40"
         value={currentName}

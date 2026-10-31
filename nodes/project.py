@@ -391,6 +391,7 @@ def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
         sampling_mode = "selflift"
     if sampling_mode not in {
         "single", "dual", "dual_t8", "selflift", "passthrough", "audio_first",
+        "image_first",
     }:
         raise ValueError(
             "sampling_mode must be 'single', 'dual', 'dual_t8', 'selflift', "
@@ -671,7 +672,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=0.001, optional=True),
                 io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
                 io.String.Input("sampling_plan", default="light", optional=True),
-                io.Combo.Input("sampling_mode", options=["single", "dual", "dual_t8", "selflift", "passthrough", "audio_first"], default="single", optional=True,
+                io.Combo.Input("sampling_mode", options=["single", "dual", "dual_t8", "selflift", "passthrough", "audio_first", "image_first"], default="single", optional=True,
                     tooltip="dual_t8: LBH双钟双采(T8 fork)。需要双钟调度+学习放大+Reconcile+DetailMixer时使用; 不接LoRA/滑条照常工作。audio_first: 有声剧模式，极小占位画面、只解码音频。"),
                 io.Sampler.Input("sampler", optional=True, raw_link=True),
                 io.Sigmas.Input("sigmas", optional=True, raw_link=True),
@@ -1001,6 +1002,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option("dual", []),
                         io.DynamicCombo.Option("dual_t8", []),
                         io.DynamicCombo.Option("audio_first", []),
+                        io.DynamicCombo.Option("image_first", []),
                         io.DynamicCombo.Option(
                             "selflift",
                             [
@@ -1183,6 +1185,14 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "模式生效。"
                     ),
                 ),
+                io.String.Input(
+                    "图片候选帧",
+                    default="15",
+                    tooltip=(
+                        "仅 image_first 生效：从 22 帧里挑哪些帧作为图片候选，逗号分隔，"
+                        "例如 0,3,7,11,15,19,21；只填 15 表示单帧。"
+                    ),
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
@@ -1252,6 +1262,10 @@ class EasyMultiTrackProject(io.ComfyNode):
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
         is_audio_first = sampling_mode == "audio_first"
+        is_image_first = sampling_mode == "image_first"
+        image_candidate_frames = str(
+            _first_input(kwargs.get("图片候选帧"), "15")
+        ).strip()
         try:
             multirate_video_steps = int(
                 _first_input(
@@ -1476,6 +1490,8 @@ class EasyMultiTrackProject(io.ComfyNode):
             # 2026-10-05：记录本次生成的关键设置，供合并节点前端推算
             # “参数变更后的即将生成分辨率”并实时预警（无需运行）。
             "audio_only": bool(audio_only),
+            "image_first": bool(is_image_first),
+            "图片候选帧": image_candidate_frames,
             "sampling_mode": sampling_mode,
             "gen_settings": {
                 "base_width": first_pass_width,
@@ -1754,6 +1770,9 @@ class EasyMultiTrackProject(io.ComfyNode):
             generation_mode = h3_generation_mode(task_type)
             task = entry.get("task", {})
             content = task.get("content", {}) if isinstance(task, dict) else {}
+            if is_image_first:
+                content = dict(content) if isinstance(content, dict) else {}
+                content["continuity_mode"] = "shot"
             task_is_passthrough = is_passthrough or h3_task_is_passthrough(entry)
             locked_audio_track = h3_locked_audio_track(entry, info)
             locked_video_track = h3_locked_video_track(entry, info)
@@ -2496,7 +2515,16 @@ class EasyMultiTrackProject(io.ComfyNode):
                 }
             else:
                 report_segment_step(0.76)
-                if has_output_vae:
+                if is_image_first:
+                    decoded_images = graph.node(
+                        "VAEDecode",
+                        id=f"decode_image_frames_{task_index}",
+                        samples=final_latent,
+                        vae=vae,
+                    )
+                    output_images = decoded_images.out(0)
+                    output_audio = None
+                elif has_output_vae:
                     # Deciia 2026-10-05：对齐 P8a 拓扑 —— 采样结束后先
                     # cleanGpuUsed（清节点缓存+卸载模型+清 CUDA 缓存）再进解码，
                     # 给 HyperVAE 2× 腾出显存/内存余量（P8a #900038 同款位置）。
@@ -2655,7 +2683,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     # 因此这里必须传扁平键（原 input_mode.images/audio/fps 点前缀只在
                     # DynamicCombo 形式下合法，会报 unexpected keyword argument）。
                     images=output_images,
-                    audio=saved_audio,
+                    **( {"audio": saved_audio} if saved_audio is not None else {} ),
                     fps=fps,
                     output_mode="hide&save",
                     filename_prefix=(
