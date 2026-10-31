@@ -2835,8 +2835,8 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             hidden=[io.Hidden.unique_id],
             outputs=[
                 io.String.Output("FILENAME_PREFIX", display_name="文件名前缀"),
-                TYPE_EASY_MEDIA.Output("MEDIA", display_name="多媒体"),
                 io.Video.Output("VIDEO", display_name="视频"),
+                TYPE_EASY_MEDIA.Output("MEDIA", display_name="多媒体"),
             ],
             not_idempotent=True,
         )
@@ -2879,8 +2879,8 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             images = compose_h3_project_images(safe_name, data)
             return io.NodeOutput(
                 h3_project_filename_prefix(safe_name),
-                images,
                 ExecutionBlocker(None),
+                images,
             )
         if fresh_data.get("audio_only"):
             composed_audio = compose_h3_project_audio(safe_name, data)
@@ -2903,8 +2903,8 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 pass
             return io.NodeOutput(
                 h3_project_filename_prefix(safe_name),
-                audio_payload,
                 ExecutionBlocker(None),
+                audio_payload,
             )
         composed_path = compose_h3_project_video(safe_name, data)
         composed_video = InputImpl.VideoFromFile(str(composed_path))
