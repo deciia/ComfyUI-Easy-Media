@@ -17,6 +17,7 @@ from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_pr
 from ..utils.h3_project import (
     clear_h3_project_segments_from,
     compose_h3_project_audio,
+    compose_h3_project_images,
     compose_h3_project_video,
     load_h3_project_data,
     h3_active_segment_is_passthrough,
@@ -2835,6 +2836,7 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 io.Video.Output("VIDEO"),
                 io.String.Output("FILENAME_PREFIX"),
                 io.Audio.Output("AUDIO"),
+                io.AnyType.Output("MEDIA"),
             ],
             not_idempotent=True,
         )
@@ -2871,8 +2873,16 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             )
         if not auto_combine:
             blocker = ExecutionBlocker(None)
-            return io.NodeOutput(blocker, blocker, blocker)
+            return io.NodeOutput(blocker, blocker, blocker, blocker)
         fresh_data = load_h3_project_data(safe_name)
+        if fresh_data.get("image_first"):
+            images = compose_h3_project_images(safe_name, data)
+            return io.NodeOutput(
+                ExecutionBlocker(None),
+                h3_project_filename_prefix(safe_name),
+                ExecutionBlocker(None),
+                images,
+            )
         if fresh_data.get("audio_only"):
             composed_audio = compose_h3_project_audio(safe_name, data)
             audio_payload = _h3_audio_payload(composed_audio)
@@ -2896,10 +2906,13 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 ExecutionBlocker(None),
                 h3_project_filename_prefix(safe_name),
                 audio_payload,
+                audio_payload,
             )
         composed_path = compose_h3_project_video(safe_name, data)
+        composed_video = InputImpl.VideoFromFile(str(composed_path))
         return io.NodeOutput(
-            InputImpl.VideoFromFile(str(composed_path)),
+            composed_video,
             h3_project_filename_prefix(safe_name),
             ExecutionBlocker(None),
+            composed_video,
         )

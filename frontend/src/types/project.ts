@@ -24,6 +24,8 @@ export interface ProjectClip {
   enabled: boolean
   /** audio_first 工程的音频段标记 */
   media_kind?: 'video' | 'audio'
+  /** 图片工程：该段选中的帧序号（0 起） */
+  image_frame?: number
   duration?: number
   video_files?: ProjectVideoFile[]
   audio_files?: ProjectVideoFile[]

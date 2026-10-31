@@ -111,6 +111,111 @@ def _wav_duration_seconds(path: Path) -> float:
     return 0.0
 
 
+def _h3_extract_video_frame(video_path: Path, frame_index: int, ffmpeg: str):
+    """用 ffmpeg 精确抽取某一帧，返回 PIL.Image。"""
+    import subprocess
+    import tempfile
+
+    from PIL import Image
+
+    frame_index = max(0, int(frame_index))
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "frame.png"
+        filters = [
+            ["-vf", f"select=eq(n\\,{frame_index})", "-vsync", "0"],
+            ["-vf", f"select=eq(n\\,{frame_index})"],
+        ]
+        for extra in filters:
+            command = [
+                ffmpeg, "-y", "-nostdin", "-v", "error", "-i", str(video_path),
+                *extra, "-frames:v", "1", "-update", "1", str(out),
+            ]
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode == 0 and out.is_file() and out.stat().st_size > 0:
+                return Image.open(out).convert("RGB").copy()
+        # 兜底：按 24fps 时间定位
+        command = [
+            ffmpeg, "-y", "-nostdin", "-v", "error",
+            "-ss", f"{frame_index / 24.0:.6f}", "-i", str(video_path),
+            "-frames:v", "1", "-update", "1", str(out),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
+            raise RuntimeError(
+                f"Failed to extract frame {frame_index} from {video_path.name}: "
+                f"{(result.stderr or '').strip()[:200]}"
+            )
+        return Image.open(out).convert("RGB").copy()
+
+
+def compose_h3_project_images(project_name: Any, project_data: Any = None):
+    """图片工程：每段取 1 帧，返回 ComfyUI IMAGE 批次 [N,H,W,C]。"""
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from .video import get_ffmpeg_path
+
+    output_dir = Path(folder_paths.get_output_directory()).resolve()
+    fresh = load_h3_project_data(project_name)
+    safe_name = fresh["project_name"]
+    data = project_data
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"project_data is not valid JSON: {error}") from error
+    requested_clips = data.get("clips") if isinstance(data, dict) else None
+    if not isinstance(requested_clips, list) or not requested_clips:
+        requested_clips = fresh["clips"]
+    fresh_by_index = {clip["index"]: clip for clip in fresh["clips"]}
+    candidates = [
+        int(part.strip()) for part in str(fresh.get("image_candidate_frames") or "15").split(",")
+        if part.strip().isdigit()
+    ]
+    default_frame = candidates[0] if candidates else 15
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("图片工程需要 FFmpeg 抽帧，但未找到 ffmpeg 可执行文件")
+
+    ordered: list[dict[str, Any]] = []
+    for clip in requested_clips:
+        if not isinstance(clip, dict) or clip.get("enabled") is False:
+            continue
+        try:
+            index = int(clip.get("index"))
+        except (TypeError, ValueError):
+            continue
+        source = fresh_by_index.get(index)
+        if source is None:
+            continue
+        frame_index = clip.get("image_frame")
+        if not isinstance(frame_index, (int, float)):
+            frame_index = default_frame
+        ordered.append({
+            "file_path": source["file_path"],
+            "frame_index": max(0, int(frame_index)),
+            "frame_count": int(source.get("source_frame_count") or 1),
+        })
+    if not ordered:
+        raise ValueError(f"H3 project {safe_name} has no enabled image segments to combine")
+
+    frames: list[np.ndarray] = []
+    base_size: tuple[int, int] | None = None
+    for item in ordered:
+        source_path = output_dir / item["file_path"]
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Project segment media is missing: {source_path}")
+        frame_index = min(item["frame_index"], max(0, item["frame_count"] - 1))
+        image = _h3_extract_video_frame(source_path, frame_index, ffmpeg)
+        if base_size is None:
+            base_size = image.size
+        elif image.size != base_size:
+            image = image.resize(base_size, Image.LANCZOS)
+        frames.append(np.asarray(image, dtype=np.float32) / 255.0)
+    return torch.from_numpy(np.stack(frames, axis=0))
+
+
 def compose_h3_project_audio(
     project_name: Any,
     project_data: Any = None,

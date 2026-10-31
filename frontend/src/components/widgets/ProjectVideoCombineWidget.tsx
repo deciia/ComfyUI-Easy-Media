@@ -287,6 +287,16 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     return parsed.length > 0 ? parsed[0]! : 0
   }
 
+  function setActiveClipFrame() {
+    if (!active) return
+    const clip = active.clip
+    const offset = Math.max(0, Math.min(clipDuration(clip) - 1, Math.round(currentFrameRef.current - active.start)))
+    onChange({
+      ...data,
+      clips: data.clips.map((item) => item.id === clip.id ? { ...item, image_frame: offset } : item),
+    })
+  }
+
   function selectClip(clip: ProjectClip) {
     const start = clipStartFrame(data.clips, clip.id)
     const offset = Math.min(candidateFrameOffset(), Math.max(0, clipDuration(clip) - 1))
@@ -1096,6 +1106,18 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
           <div className="grid h-9 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-y border-border px-1 text-[10px]">
             <div className="flex items-center">
+              {data.image_first ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-6 px-2 text-[10px]"
+                  disabled={!active}
+                  title="把当前播放位置设为该段的图片帧"
+                  onClick={() => setActiveClipFrame()}
+                >
+                  🖼️ 设为图片帧
+                </Button>
+              ) : null}
               {tooltip(muted ? t('projectVideoCombine.unmutePreview') : t('projectVideoCombine.mutePreview'), (
                 <Button
                   type="button"
@@ -1138,6 +1160,9 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                       const label = (
                         <div className="flex min-w-0 flex-col items-center leading-tight">
                           <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { number: clip.index + 1 })}</span>
+                          {data.image_first && typeof clip.image_frame === 'number' ? (
+                            <span className="truncate text-[9px] text-amber-500">帧 {clip.image_frame}</span>
+                          ) : null}
                           <span className="truncate text-[9px] text-muted-foreground">
                             {t('projectVideoCombine.clipContinuity', {
                               mode: t(clip.continuity_mode === 'shot'
