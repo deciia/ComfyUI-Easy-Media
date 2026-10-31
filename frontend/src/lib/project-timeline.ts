@@ -1,4 +1,4 @@
-import type { TrackData } from '@/types/multitrack'
+import type { ProjectKind, TrackData } from '@/types/multitrack'
 
 /**
  * 项目时间线（多轨编辑器轨道数据）的前端客户端。
@@ -37,6 +37,7 @@ export interface ProjectTimelineDocument {
   version: number
   project_name: string
   updated_at: number
+  project_kind?: ProjectKind | null
   resolution?: TimelineResolutionSnapshot | null
   format?: string | null
   track_data: TrackData
@@ -122,6 +123,7 @@ export async function saveProjectTimeline(
   payload: {
     projectName: string
     trackData: TrackData
+    projectKind?: ProjectKind | null
     resolution?: TimelineResolutionSnapshot | null
     format?: string | null
     baseUpdatedAt?: number | null
@@ -131,6 +133,7 @@ export async function saveProjectTimeline(
     project_name: payload.projectName,
     timeline: {
       version: 1,
+      project_kind: payload.projectKind ?? null,
       resolution: payload.resolution ?? null,
       format: payload.format ?? null,
       track_data: payload.trackData,
@@ -156,8 +159,10 @@ export async function createProjectTimeline(
   app: unknown,
   projectName: string,
   template?: TrackData | null,
+  projectKind?: ProjectKind | null,
 ): Promise<ProjectTimelineDocument> {
   const body: Record<string, unknown> = { project_name: projectName }
+  if (projectKind) body.kind = projectKind
   if (template) body.template = { track_data: template }
   const { status, payload } = await request(app, '/easy-media/project/timeline/new', {
     method: 'POST',

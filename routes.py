@@ -292,7 +292,8 @@ async def handle_create_h3_project_timeline(request: web.Request) -> web.Respons
         template = payload.get("template")
         if template is not None and not isinstance(template, (dict, str)):
             raise ValueError("template must be a JSON object")
-        timeline = create_timeline(project_name, template)
+        project_kind = payload.get("kind", "video")
+        timeline = create_timeline(project_name, template, project_kind)
         return web.json_response(timeline, status=201)
     except FileExistsError as error:
         return web.json_response({"error": str(error), "exists": True}, status=409)

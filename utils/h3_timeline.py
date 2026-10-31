@@ -226,6 +226,15 @@ def _coerce_timeline(payload: Any, project_name: str) -> dict[str, Any]:
     timeline["version"] = version
     timeline["project_name"] = project_name
     timeline["track_data"] = track_data
+    project_kind = timeline.get("project_kind")
+    if project_kind is None:
+        project_kind = "video"
+    project_kind = str(project_kind).strip().lower()
+    if project_kind not in PROJECT_KINDS:
+        raise ValueError(
+            "timeline.project_kind 必须是 video / audio / image 之一"
+        )
+    timeline["project_kind"] = project_kind
     timeline["updated_at"] = time.time()
     timeline.setdefault("meta", {"app": "easy-media", "editor": "multitrack-v1"})
     return timeline
@@ -305,13 +314,26 @@ def save_timeline(
     }
 
 
-def create_timeline(project_name: Any, template: Any = None) -> dict[str, Any]:
+PROJECT_KINDS = ("video", "audio", "image")
+
+
+def create_timeline(
+    project_name: Any,
+    template: Any = None,
+    project_kind: str = "video",
+) -> dict[str, Any]:
     """新建项目时间线；已存在时抛 ``FileExistsError``（路由映射 409）。"""
     safe_name = safe_timeline_project_name(project_name)
+    kind = str(project_kind or "video").strip().lower()
+    if kind not in PROJECT_KINDS:
+        raise ValueError("project_kind 必须是 video / audio / image 之一")
     path = timeline_path(safe_name)
     if path.exists() or path.is_symlink():
         raise FileExistsError(f"项目 {safe_name!r} 的时间线已存在：{path}")
     payload = template if template is not None else default_timeline(safe_name)
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        payload["project_kind"] = kind
     save_timeline(safe_name, payload)
     return load_timeline(safe_name)
 

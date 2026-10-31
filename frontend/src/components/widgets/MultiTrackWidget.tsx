@@ -301,11 +301,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   /** 项目栏载入/新建/删除后的统一写回：带上 project 标记，走撤销栈。 */
   function applyProjectTimeline(
     nextData: TrackData,
-    meta: { name: string; updated_at: number } | null,
+    meta: { name: string; updated_at: number; kind?: 'video' | 'audio' | 'image' } | null,
     snapshot?: { format?: string | null; resolution?: TimelineResolutionSnapshot | null } | null,
   ) {
     const withMeta: TrackData = meta
-      ? { ...nextData, project: { name: meta.name, updated_at: meta.updated_at } }
+      ? { ...nextData, project: { name: meta.name, updated_at: meta.updated_at, kind: meta.kind ?? nextData.project?.kind } }
       : stripProjectMeta(nextData)
     commitNormalizedTrackChange(withMeta)
     // 恢复项目保存的“视频格式”与分辨率设置：
@@ -949,8 +949,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             data.frame_rate,
           )
         : Math.max(0, Math.round(requestedStartFrame))
+      const defaultLength = data.project?.kind === 'image'
+        ? 22
+        : Math.max(1, secondsToFrame(5, data.frame_rate))
       const endFrame = requestedEndFrame === undefined
-        ? startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+        ? startFrame + defaultLength
         : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       const nextSegment: MultiTrackSegment = {
         id: uuid(),

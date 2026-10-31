@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MultiTrackPreviewResolutionInput } from '@/lib/multitrack-utils'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
-import type { TrackData } from '@/types/multitrack'
+import type { ProjectKind, TrackData } from '@/types/multitrack'
 import {
   TimelineConflictError,
   createProjectTimeline,
@@ -24,9 +24,22 @@ interface ProjectBarProps {
   /** 载入/新建/删除后由编辑器统一写回（走撤销栈与节点值更新）。 */
   onApply: (
     trackData: TrackData,
-    meta: { name: string; updated_at: number } | null,
+    meta: { name: string; updated_at: number; kind?: ProjectKind } | null,
     snapshot?: { format?: string | null; resolution?: TimelineResolutionSnapshot | null } | null,
   ) => void
+}
+
+const PROJECT_KIND_OPTIONS: Array<{ value: ProjectKind; label: string }> = [
+  { value: 'video', label: '视频项目' },
+  { value: 'audio', label: '音频项目' },
+  { value: 'image', label: '图片项目' },
+]
+
+/** 各类型项目的画布预设：音频固定 64×64；图片与视频一致（不主动改画布）。 */
+const PROJECT_KIND_RESOLUTION: Record<ProjectKind, TimelineResolutionSnapshot | null> = {
+  video: null,
+  image: null,
+  audio: { preset: 'width x height (custom)', width: 64, height: 64 },
 }
 
 type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
@@ -85,6 +98,8 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null)
   const [pendingNew, setPendingNew] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(false)
+  const [newKind, setNewKind] = useState<ProjectKind>('video')
+  const currentKind: ProjectKind = data.project?.kind ?? 'video'
   const createProjectRef = useRef<(name: string) => Promise<boolean>>(async () => false)
   createProjectRef.current = createProjectByName
   const switchProjectRef = useRef<(name: string) => Promise<void>>(async () => {})
@@ -161,6 +176,45 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentName])
 
+  async function handleKindChange(nextKind: ProjectKind) {
+    if (nextKind === currentKind) return
+    const snapshot = PROJECT_KIND_RESOLUTION[nextKind]
+    const nextData: TrackData = data.project
+      ? { ...data, project: { ...data.project, kind: nextKind } }
+      : { ...data, project: { name: '', updated_at: 0, kind: nextKind } }
+    if (!currentName) {
+      onApply(nextData, null, snapshot ? { resolution: snapshot } : null)
+      setMessage(`项目类型已切换为${PROJECT_KIND_OPTIONS.find((item) => item.value === nextKind)?.label ?? nextKind}`)
+      return
+    }
+    setBusy(true)
+    setMessage('')
+    try {
+      const result = await saveProjectTimeline(app, {
+        projectName: currentName,
+        trackData: stripProjectMeta(nextData),
+        projectKind: nextKind,
+        resolution: snapshot ?? resolutionSnapshot(resolution),
+        format: resolution.format ?? null,
+        baseUpdatedAt: lastLoadedAtRef.current,
+      })
+      lastLoadedAtRef.current = result.updated_at
+      const applied: TrackData = { ...stripProjectMeta(nextData), project: { name: currentName, updated_at: result.updated_at, kind: nextKind } }
+      savedSignatureRef.current = projectSignature(applied, snapshot ?? resolutionSnapshot(resolution))
+      onApply(
+        applied,
+        { name: currentName, updated_at: result.updated_at, kind: nextKind },
+        { format: resolution.format ?? null, resolution: snapshot ?? resolutionSnapshot(resolution) },
+      )
+      setMessage(`项目类型已切换为${PROJECT_KIND_OPTIONS.find((item) => item.value === nextKind)?.label ?? nextKind}`)
+      void refreshProjects()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t('multitrack.projectFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const refreshProjects = useCallback(async () => {
     try {
       setProjects(await listTimelineProjects(app))
@@ -184,13 +238,13 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const document_ = await loadProjectTimeline(app, currentName)
       const trackData = {
         ...document_.track_data,
-        project: { name: document_.project_name, updated_at: document_.updated_at },
+        project: { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind },
       }
       savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
       onApply(
         trackData,
-        { name: document_.project_name, updated_at: document_.updated_at },
+        { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind },
         { format: document_.format, resolution: document_.resolution ?? null },
       )
       setMessage(t('multitrack.projectReloaded', { project: currentName }))
@@ -234,6 +288,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const result = await saveProjectTimeline(app, {
         projectName: currentName,
         trackData: stripProjectMeta(data),
+        projectKind: currentKind,
         resolution: resolutionSnapshot(resolution),
         format: resolution.format ?? null,
         baseUpdatedAt: lastLoadedAtRef.current,
@@ -298,13 +353,13 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         return
       }
       setPendingSwitch(null)
-      const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
+      const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind } }
       savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
       autoSaveBlockedRef.current = false
       setAutoSaveState('idle')
       setLastSavedAt(document_.updated_at)
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format, resolution: document_.resolution ?? null })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind }, { format: document_.format, resolution: document_.resolution ?? null })
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
     } catch (error) {
       const text = error instanceof Error ? error.message : ''
@@ -329,17 +384,18 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       const result = await saveProjectTimeline(app, {
         projectName: target,
         trackData: stripProjectMeta(data),
+        projectKind: currentKind,
         resolution: resolutionSnapshot(resolution),
         format: resolution.format ?? null,
         baseUpdatedAt: force ? null : lastLoadedAtRef.current,
       })
-      const trackData = { ...stripProjectMeta(data), project: { name: result.project_name, updated_at: result.updated_at } }
+      const trackData = { ...stripProjectMeta(data), project: { name: result.project_name, updated_at: result.updated_at, kind: currentKind } }
       savedSignatureRef.current = projectSignature(trackData, resolutionSnapshot(resolution))
       lastLoadedAtRef.current = result.updated_at
       autoSaveBlockedRef.current = false
       setAutoSaveState('idle')
       setLastSavedAt(result.updated_at)
-      onApply(trackData, { name: result.project_name, updated_at: result.updated_at })
+      onApply(trackData, { name: result.project_name, updated_at: result.updated_at, kind: currentKind })
       setEditing(null)
       setMessage(t('multitrack.projectSaved', { project: result.project_name }))
       void refreshProjects()
@@ -366,14 +422,15 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     setBusy(true)
     setMessage('')
     try {
-      let document_ = await createProjectTimeline(app, name, createDefaultTrackData())
+      let document_ = await createProjectTimeline(app, name, createDefaultTrackData(), newKind)
       // 新建接口（POST /timeline/new）只接收 track_data，不写分辨率/格式；
       // 这里补一次 PUT，把当前分辨率/格式快照写进新项目，否则新项目快照永远是 null。
-      const createdSnapshot = resolutionSnapshot(resolution)
+      const createdSnapshot = PROJECT_KIND_RESOLUTION[newKind] ?? resolutionSnapshot(resolution)
       try {
         const saved = await saveProjectTimeline(app, {
           projectName: document_.project_name,
           trackData: document_.track_data,
+          projectKind: newKind,
           resolution: createdSnapshot,
           format: resolution.format ?? null,
           baseUpdatedAt: document_.updated_at,
@@ -387,10 +444,10 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       } catch {
         // 补写失败不阻塞新建
       }
-      const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at } }
+      const trackData = { ...document_.track_data, project: { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind } }
       savedSignatureRef.current = projectSignature(trackData, document_.resolution ?? null)
       lastLoadedAtRef.current = document_.updated_at
-      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at }, { format: document_.format, resolution: document_.resolution ?? null })
+      onApply(trackData, { name: document_.project_name, updated_at: document_.updated_at, kind: document_.project_kind ?? currentKind }, { format: document_.format, resolution: document_.resolution ?? null })
       setEditing(null)
       setMessage(t('multitrack.projectLoaded', { project: document_.project_name }))
       void refreshProjects()
@@ -527,9 +584,33 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         ))}
       </select>
       {currentName && dirty ? <span className="text-amber-400" title={t('multitrack.projectUnsaved')}>●</span> : null}
+      <select
+        className="h-7 rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100 disabled:opacity-40"
+        value={currentKind}
+        disabled={busy}
+        title="项目类型（视频 / 音频 / 图片）"
+        onChange={(event) => void handleKindChange(event.target.value as ProjectKind)}
+      >
+        {PROJECT_KIND_OPTIONS.map((item) => (
+          <option key={item.value} value={item.value}>{item.label}</option>
+        ))}
+      </select>
 
       {editing ? (
         <>
+          {editing.mode === 'new' ? (
+            <select
+              className="h-7 rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100"
+              value={newKind}
+              disabled={busy}
+              title="新项目类型预设"
+              onChange={(event) => setNewKind(event.target.value as ProjectKind)}
+            >
+              {PROJECT_KIND_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          ) : null}
           <input
             autoFocus
             className="h-7 w-40 rounded border border-neutral-600 bg-neutral-900 px-2 text-xs text-neutral-100"

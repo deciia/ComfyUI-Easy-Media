@@ -127,6 +127,8 @@ export interface MultiTrack {
   segments: MultiTrackSegment[]
 }
 
+export type ProjectKind = 'video' | 'audio' | 'image'
+
 export interface TrackData {
   tracks: MultiTrack[]
   total_length: number
@@ -139,6 +141,7 @@ export interface TrackData {
   project?: {
     name: string
     updated_at?: number
+    kind?: ProjectKind
   }
 }
 
