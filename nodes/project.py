@@ -1003,36 +1003,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option(
                             "audio_first",
                             [
-                                io.Combo.Input(
-                                    "audio_sampler",
-                                    display_name="音频采样器",
-                                    options=["euler", "multirate"],
-                                    default="euler",
-                                    tooltip=(
-                                        "euler：单速率（每步都提交视频）；multirate："
-                                        "音频每步更新、视频只提交「视频提交步数」次。"
-                                        "仅 audio_first 生效。选 multirate 时只用外接"
-                                        "的 Sigmas，采样器由项目内部接管。"
-                                    ),
-                                ),
                                 io.Int.Input(
                                     "multirate_video_steps",
-                                    display_name="视频提交步数",
+                                    display_name="视频提交次数",
                                     default=1,
                                     min=1,
                                     max=64,
-                                    tooltip="仅 multirate 生效：1 = 整段只提交一次。",
+                                    tooltip=(
+                                        "音频每步更新，视频只在这些次数上提交；"
+                                        "1 = 整段只提交一次。"
+                                    ),
                                 ),
                                 io.Combo.Input(
                                     "audio_first_resolution",
-                                    display_name="采样分辨率",
+                                    display_name="仅音频分辨率",
                                     options=["64x64", "32x32"],
                                     default="64x64",
                                     tooltip=(
-                                        "仅 audio_first 采样模式生效：有声剧占位画面 "
-                                        "64x64（推荐，音质稳定）或 32x32（更快，"
-                                        "视频 token 更少）。真实音频时长由段时长决定，"
-                                        "与本项无关；其他采样模式忽略此项。"
+                                        "audio_first 专用：只影响占位画面，"
+                                        "64x64（推荐，音质稳定）或 32x32（更快）。"
+                                        "真实音频时长仍由段时长决定。"
                                     ),
                                 ),
                             ],
@@ -1268,12 +1258,6 @@ class EasyMultiTrackProject(io.ComfyNode):
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
         is_audio_first = sampling_mode == "audio_first"
-        audio_sampler = str(
-            _first_input(
-                sampling_config.get("audio_sampler"),
-                _first_input(kwargs.get("audio_sampler"), "euler"),
-            )
-        ).lower()
         try:
             multirate_video_steps = int(
                 _first_input(
@@ -1284,7 +1268,8 @@ class EasyMultiTrackProject(io.ComfyNode):
         except (TypeError, ValueError):
             multirate_video_steps = 1
         multirate_video_steps = max(1, multirate_video_steps)
-        use_multirate = is_audio_first and audio_sampler == "multirate"
+        # audio_first 固定走 MultiRate：音频每步更新、视频只提交 N 次
+        use_multirate = is_audio_first
         # 高级输入（2026-10-11）：视频/音频 sigma 偏移覆盖；默认值 = 原本硬编码值，向后兼容
         def _shift_value(raw, fallback: float) -> float:
             """旧工作流 widget 错位可能给到空串/0 等脏值——非法时回落默认，避免采样崩。"""
