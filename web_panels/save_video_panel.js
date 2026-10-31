@@ -253,6 +253,12 @@ function buildPanel() {
   imagePreview.alt = "";
   videoWrap.appendChild(imagePreview);
 
+  const imageGrid = el(
+    "div",
+    "position:absolute;inset:0;display:none;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;padding:8px;overflow:auto;background:#000;align-content:start;",
+  );
+  videoWrap.appendChild(imageGrid);
+
   const audioPlayer = el("audio", "width:100%;height:54px;padding:8px 10px;box-sizing:border-box;background:#000;display:none;");
   audioPlayer.controls = true;
   audioPlayer.preload = "metadata";
@@ -353,6 +359,7 @@ function buildPanel() {
     root,
     video,
     imagePreview,
+    imageGrid,
     audioPlayer,
     videoWrap,
     header,
@@ -421,7 +428,11 @@ function buildPanel() {
     }
     panel.video.style.display = kind === "video" ? "block" : "none";
     panel.video.controls = kind === "video";
-    panel.imagePreview.style.display = kind === "images" && panel.imagePreview.src ? "block" : "none";
+    const multiImages = kind === "images"
+      && panel.imageGrid
+      && (Array.isArray(panel.info?.files) ? panel.info.files.length > 1 : Number(panel.info?.count || 0) > 1);
+    if (panel.imageGrid) panel.imageGrid.style.display = multiImages ? "grid" : "none";
+    panel.imagePreview.style.display = kind === "images" && !multiImages && panel.imagePreview.src ? "block" : "none";
     if (panel.audioPlayer) panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
 
     // 详情与调色台各有独立开关；三角形只控制上方的设置参数
@@ -743,10 +754,36 @@ function applyInfo(panel, info) {  if (!info) return;
     type: info.type || "output",
   });
   if (info.kind === "images") {
-    const name = info.first_filename || String(info.filename || "").split(" … ")[0];
-    if (name) {
-      const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });
-      panel.imagePreview.src = `/view?${q.toString()}&t=${Date.now()}`;
+    const files = Array.isArray(info.files) ? info.files : [];
+    const multi = files.length > 1 || Number(info.count || 0) > 1;
+    if (multi && panel.imageGrid) {
+      panel.imageGrid.innerHTML = "";
+      const stamp = Date.now();
+      for (const file of files) {
+        const q = new URLSearchParams({
+          filename: file,
+          subfolder: info.subfolder || "",
+          type: info.type || "output",
+        });
+        const img = el("img", "width:100%;height:100%;object-fit:contain;background:#111;border:1px solid #333;border-radius:4px;min-height:80px;");
+        img.alt = file;
+        img.title = file;
+        img.src = `/view?${q.toString()}&t=${stamp}`;
+        panel.imageGrid.appendChild(img);
+      }
+      if (!files.length) {
+        const hint = el("div", "color:#888;font-size:12px;padding:8px;", info.filename || "");
+        panel.imageGrid.appendChild(hint);
+      }
+      panel.imageGrid.style.display = "grid";
+      panel.imagePreview.style.display = "none";
+    } else {
+      if (panel.imageGrid) panel.imageGrid.style.display = "none";
+      const name = info.first_filename || String(info.filename || "").split(" … ")[0];
+      if (name) {
+        const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });
+        panel.imagePreview.src = `/view?${q.toString()}&t=${Date.now()}`;
+      }
     }
   } else if (info.kind === "audio") {
     if (info.filename && panel.audioPlayer) {

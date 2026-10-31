@@ -2833,9 +2833,7 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             ],
             hidden=[io.Hidden.unique_id],
             outputs=[
-                io.Video.Output("VIDEO"),
                 io.String.Output("FILENAME_PREFIX"),
-                io.Audio.Output("AUDIO"),
                 io.AnyType.Output("MEDIA"),
             ],
             not_idempotent=True,
@@ -2873,14 +2871,12 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             )
         if not auto_combine:
             blocker = ExecutionBlocker(None)
-            return io.NodeOutput(blocker, blocker, blocker, blocker)
+            return io.NodeOutput(blocker, blocker)
         fresh_data = load_h3_project_data(safe_name)
         if fresh_data.get("image_first"):
             images = compose_h3_project_images(safe_name, data)
             return io.NodeOutput(
-                ExecutionBlocker(None),
                 h3_project_filename_prefix(safe_name),
-                ExecutionBlocker(None),
                 images,
             )
         if fresh_data.get("audio_only"):
@@ -2903,16 +2899,12 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             except (AttributeError, ImportError, RuntimeError, ValueError):
                 pass
             return io.NodeOutput(
-                ExecutionBlocker(None),
                 h3_project_filename_prefix(safe_name),
-                audio_payload,
                 audio_payload,
             )
         composed_path = compose_h3_project_video(safe_name, data)
         composed_video = InputImpl.VideoFromFile(str(composed_path))
         return io.NodeOutput(
-            composed_video,
             h3_project_filename_prefix(safe_name),
-            ExecutionBlocker(None),
             composed_video,
         )

@@ -757,6 +757,7 @@ def _save_media_output(
             "path": os.path.join(full_output_folder, saved[0]),
             "dir": full_output_folder,
             "count": len(saved),
+            "files": list(saved),
             "size_bytes": total_bytes,
             "width": width,
             "height": height,
