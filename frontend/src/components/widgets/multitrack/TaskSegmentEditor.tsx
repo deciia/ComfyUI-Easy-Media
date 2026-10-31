@@ -111,6 +111,7 @@ interface TaskSegmentEditorProps {
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onDurationChange?: (duration: number) => void
   onOpenImagePreview?: (imageId: string) => void
+  projectKind?: 'video' | 'audio' | 'image'
 }
 
 interface SystemPromptResponse {
@@ -242,6 +243,7 @@ export function TaskSegmentEditor({
   onTrackSegmentsChange,
   onDurationChange,
   onOpenImagePreview,
+  projectKind = 'video',
 }: Readonly<TaskSegmentEditorProps>) {
   const t = useT()
   const draggedImageIdRef = useRef<string | null>(null)
@@ -1356,7 +1358,13 @@ export function TaskSegmentEditor({
               {MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax').map((taskMode) => (
                 <SelectItem key={taskMode} value={taskMode}>
                   <span className="text-[10px]">
-                    {t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
+                    {projectKind === 'image'
+                    ? taskMode === 'ref' || taskMode === 'edit'
+                      ? 'edit 参考图编辑'
+                      : images.length > 0
+                        ? 'i2i 首帧图生图'
+                        : 't2i 文生图'
+                    : t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
                   </span>
                 </SelectItem>
               ))}

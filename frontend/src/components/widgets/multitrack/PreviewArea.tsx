@@ -1363,6 +1363,7 @@ export function PreviewArea({
             totalFrames={data.total_length}
             imageIndexOffset={resolutionInput.format === 'MiniMax' ? 1 : 0}
             format={resolutionInput.format}
+            projectKind={data.project?.kind}
             onContentChange={onSelectedSegmentContentChange}
             onTrackSegmentsContentChange={onTrackSegmentsContentChange}
             onTrackSegmentsChange={onTaskTrackSegmentsChange}

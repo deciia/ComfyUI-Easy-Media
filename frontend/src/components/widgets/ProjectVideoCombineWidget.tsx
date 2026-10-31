@@ -47,6 +47,8 @@ function ensureProjectData(value: unknown): ProjectData {
     frame_rate: Number.isFinite(data.frame_rate) && Number(data.frame_rate) > 0 ? Number(data.frame_rate) : 24,
     clips: Array.isArray(data.clips) ? data.clips : [],
     audio_only: data.audio_only === true,
+    image_first: data.image_first === true,
+    image_candidate_frames: typeof data.image_candidate_frames === 'string' ? data.image_candidate_frames : '15',
     auto_combine: data.auto_combine !== false,
     gen_settings: data.gen_settings ?? null,
     updated_at: data.updated_at,
@@ -276,8 +278,19 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     : []
   const isComparing = compareUrls.length === 2 && compareUrls.every(Boolean)
 
+  function candidateFrameOffset(): number {
+    if (!data.image_first) return 0
+    const parsed = String(data.image_candidate_frames || '15')
+      .split(',')
+      .map((item) => Number.parseInt(item.trim(), 10))
+      .filter((value) => Number.isFinite(value) && value >= 0)
+    return parsed.length > 0 ? parsed[0]! : 0
+  }
+
   function selectClip(clip: ProjectClip) {
-    seek(clipStartFrame(data.clips, clip.id))
+    const start = clipStartFrame(data.clips, clip.id)
+    const offset = Math.min(candidateFrameOffset(), Math.max(0, clipDuration(clip) - 1))
+    seek(start + offset)
   }
 
   function selectClipFile(clip: ProjectClip, filePath: string) {

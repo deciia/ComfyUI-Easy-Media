@@ -793,6 +793,9 @@ def initialize_h3_project(
     # 变更后的即将生成分辨率；旧 manifest 无此字段时保持缺失（前端回落）。
     if isinstance(info.get("gen_settings"), dict):
         manifest["gen_settings"] = info["gen_settings"]
+    if info.get("image_first"):
+        manifest["image_first"] = True
+        manifest["图片候选帧"] = str(info.get("图片候选帧") or "15")
     manifest.pop("tracks_info", None)
     manifest.pop("last_render", None)
     if not isinstance(manifest.get("segments"), dict):
@@ -1418,6 +1421,8 @@ def _h3_project_data(
         or (int(manifest.get("width", 0) or 0), int(manifest.get("height", 0) or 0)) == (32, 32),
         # 2026-10-05：上次生成的设置快照（旧项目可能缺失）。
         "gen_settings": gen_settings if isinstance(gen_settings, dict) else None,
+        "image_first": bool(manifest.get("image_first")),
+        "image_candidate_frames": str(manifest.get("图片候选帧") or "15"),
         "updated_at": max(
             float(manifest.get("updated_at", 0) or 0),
             max(

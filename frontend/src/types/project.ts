@@ -46,6 +46,9 @@ export interface ProjectData {
   auto_combine: boolean
   /** audio_first（有声剧）工程：只合成/预览音频 */
   audio_only?: boolean
+  /** image_first 工程：候选帧（逗号分隔） */
+  image_first?: boolean
+  image_candidate_frames?: string
   gen_settings?: ProjectGenSettings | null
   updated_at?: number
 }
