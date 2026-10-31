@@ -1256,7 +1256,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
               </div>
             </div>
           </div>
-          {canvasWarning ? (
+          {canvasWarning && !data.image_first ? (
             <div className="shrink-0 border-t border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">
               <div className="font-medium">
                 分辨率不一致：{canvasWarning.resolutions.map((item) => `${item.width}×${item.height}（段 ${item.clips.join('、')}）`).join('；')}
