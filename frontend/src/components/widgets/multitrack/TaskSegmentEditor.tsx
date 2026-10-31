@@ -193,7 +193,7 @@ function getDefaultSystemPromptForSegment(
   if (projectKind === 'image') {
     promptTaskType = mode === 'ref' || mode === 'edit' ? 'edit' : images.length > 0 ? 'i2i' : 't2i'
   } else if (projectKind === 'audio') {
-    promptTaskType = mode === 'ref' ? 'clone' : 'tts'
+    promptTaskType = mode === 'ref' ? 'clone' : mode === 'edit' ? 'sfx' : 'tts'
   } else {
     const taskType = getMultiTrackTaskType(
       mode,
@@ -1383,7 +1383,9 @@ export function TaskSegmentEditor({
             <SelectContent>
               {(projectKind === 'image'
                 ? MULTITRACK_TASK_MODES.filter((taskMode) => taskMode === 'default' || taskMode === 'ref')
-                : MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax')
+                : projectKind === 'audio'
+                  ? MULTITRACK_TASK_MODES.filter((taskMode) => ['default', 'ref', 'edit'].includes(taskMode))
+                  : MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax')
               ).map((taskMode) => (
                 <SelectItem key={taskMode} value={taskMode}>
                   <span className="text-[10px]">
@@ -1393,7 +1395,13 @@ export function TaskSegmentEditor({
                         : images.length > 0
                           ? 'i2i 首帧图生图'
                           : 't2i 文生图'
-                      : t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
+                      : projectKind === 'audio'
+                        ? taskMode === 'ref'
+                          ? '音频克隆'
+                          : taskMode === 'edit'
+                            ? '声音设计'
+                            : '文生音频'
+                        : t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
                   </span>
                 </SelectItem>
               ))}

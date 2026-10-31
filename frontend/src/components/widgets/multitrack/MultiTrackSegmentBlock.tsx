@@ -33,6 +33,7 @@ type SegmentBlockStyle = CSSProperties & {
 
 interface MultiTrackSegmentBlockProps {
   trackType: MultiTrackType
+  projectKind?: 'video' | 'audio' | 'image'
   segmentIndex: number
   segment: MultiTrackSegment
   totalLength: number
@@ -88,6 +89,7 @@ function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth:
 }
 
 export function MultiTrackSegmentBlock({
+  projectKind,
   trackType,
   segmentIndex,
   segment,
@@ -179,7 +181,15 @@ export function MultiTrackSegmentBlock({
     0,
     (segment.start_frame - sourceOriginFrame) / Math.max(frameRate, 1),
   )
-  const taskModeLabel = getMultiTrackTaskModeLabel(segment.content.task_mode ?? 'default', t)
+  const taskImageCount = activeTaskImages(segment.content.images).length
+  const taskMode = segment.content.task_mode ?? 'default'
+  const taskModeLabel = projectKind === 'image'
+    ? (taskMode === 'ref' || taskMode === 'edit'
+        ? 'edit 参考图编辑'
+        : taskImageCount > 0 ? 'i2i 首帧图生图' : 't2i 文生图')
+    : projectKind === 'audio'
+      ? (taskMode === 'ref' ? '音频克隆' : taskMode === 'edit' ? '声音设计' : '文生音频')
+      : getMultiTrackTaskModeLabel(taskMode, t)
   const label = trackType === 'task'
     ? showTaskIndex
       ? t('multitrackSegment.taskLabel', {

@@ -711,6 +711,7 @@ export function TrackArea({
                   canvasScale={canvasScale}
                   selected={selectedSegmentIds.has(segment.id)}
                   showTaskIndex={(data.task_markers ?? []).length === 0}
+                  projectKind={data.project?.kind}
                   taskOverview={track.type === 'task' && taskOverview}
                   onSelect={onSelectSegment}
                   onDelete={onDeleteSegment}
