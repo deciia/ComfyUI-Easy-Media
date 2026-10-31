@@ -329,6 +329,7 @@ class EasySaveVideo(io.ComfyNode):
                 io.Image.Input(
                     "images",
                     optional=True,
+                    display_name="图像",
                     tooltip="images+audio 模式使用：待编码的图像序列。",
                 ),
                 io.Float.Input(
@@ -342,6 +343,7 @@ class EasySaveVideo(io.ComfyNode):
                 io.Video.Input(
                     "video",
                     optional=True,
+                    display_name="视频",
                     tooltip=(
                         "视频入口（仅 VIDEO）：保存视频、或从其音轨另存音频、或抽帧存图片。"
                         "图片/音频请接 images / audio 槽；类型不确定请接「media 自动判断」槽。"
@@ -350,6 +352,7 @@ class EasySaveVideo(io.ComfyNode):
                 io.Audio.Input(
                     "audio",
                     optional=True,
+                    display_name="音频",
                     tooltip="可选音轨：images+audio 模式作为视频音轨；video 模式替换原音轨。",
                 ),
                 io.Combo.Input(
@@ -420,6 +423,7 @@ class EasySaveVideo(io.ComfyNode):
                     "media",
                     types=[io.Image, io.Audio, io.Video, io.Custom(io_type="EASY_MEDIA")],
                     optional=True,
+                    display_name="多媒体",
                     tooltip=(
                         "自动判断：接什么就存什么——IMAGE=存图片序列、AUDIO=存音频、"
                         "VIDEO=存视频；会根据输入内容自动切换保存类型。"
@@ -440,11 +444,10 @@ class EasySaveVideo(io.ComfyNode):
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,
             outputs=[
-                io.Video.Output(display_name="VIDEO"),
-                io.String.Output(display_name="file_path"),
-                # —— 追加透传输出（位置在末尾，旧的 VIDEO/file_path 索引不变）——
-                io.Image.Output(display_name="images_out", is_output_list=False),
-                io.Audio.Output(display_name="audio_out"),
+                io.Image.Output(display_name="图像透传", is_output_list=False),
+                io.Video.Output(display_name="视频透传"),
+                io.Audio.Output(display_name="音频透传"),
+                io.String.Output(display_name="文件路径"),
             ],
         )
 
@@ -684,13 +687,14 @@ class EasySaveVideo(io.ComfyNode):
         custom_ui = {"easy_video_info": [video_info]}
 
         if hide_preview:
-            return io.NodeOutput(source_video, relative_path, pass_images, pass_audio, ui={"easy_video_info": [video_info]})
+            return io.NodeOutput(pass_images, source_video, pass_audio, relative_path,
+                                 ui={"easy_video_info": [video_info]})
 
         return io.NodeOutput(
-            source_video,
-            relative_path,
             pass_images,
+            source_video,
             pass_audio,
+            relative_path,
             ui=custom_ui,
         )
 
