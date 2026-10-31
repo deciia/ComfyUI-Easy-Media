@@ -35,14 +35,33 @@ const PROJECT_KIND_OPTIONS: Array<{ value: ProjectKind; label: string }> = [
   { value: 'image', label: '图片项目' },
 ]
 
-/** 各类型项目的画布预设：
- *  - 视频/图片：默认预设 MP 9:16 1.0（切回时重置）
- *  - 音频：自定义 64×64
- */
+const MP_PRESET: TimelineResolutionSnapshot = {
+  preset: 'width x height (megapixels)',
+  aspect_ratio: '9:16 (Portrait Widescreen)',
+  megapixels: 1.0,
+}
+const AUDIO_PRESET: TimelineResolutionSnapshot = {
+  preset: 'width x height (custom)',
+  width: 64,
+  height: 64,
+}
+
+/** 新建项目时的画布预设：音频 64×64，视频/图片 MP 9:16 1.0。 */
 const PROJECT_KIND_RESOLUTION: Record<ProjectKind, TimelineResolutionSnapshot | null> = {
-  video: { preset: 'width x height (megapixels)', aspect_ratio: '9:16 (Portrait Widescreen)', megapixels: 1.0 },
-  image: { preset: 'width x height (megapixels)', aspect_ratio: '9:16 (Portrait Widescreen)', megapixels: 1.0 },
-  audio: { preset: 'width x height (custom)', width: 64, height: 64 },
+  video: MP_PRESET,
+  image: MP_PRESET,
+  audio: AUDIO_PRESET,
+}
+
+/** 切换项目类型时的画布规则：
+ *  - 切到音频：64×64
+ *  - 从音频切出：MP 9:16 1.0
+ *  - 视频 ↔ 图片：保留原画布（返回 null，不做任何画布写入）
+ */
+function kindTransitionResolution(from: ProjectKind, to: ProjectKind): TimelineResolutionSnapshot | null {
+  if (to === 'audio') return AUDIO_PRESET
+  if (from === 'audio') return MP_PRESET
+  return null
 }
 
 type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
@@ -181,7 +200,7 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
 
   async function handleKindChange(nextKind: ProjectKind) {
     if (nextKind === currentKind) return
-    const snapshot = PROJECT_KIND_RESOLUTION[nextKind]
+    const snapshot = kindTransitionResolution(currentKind, nextKind)
     const nextData: TrackData = data.project
       ? { ...data, project: { ...data.project, kind: nextKind } }
       : { ...data, project: { name: '', updated_at: 0, kind: nextKind } }
