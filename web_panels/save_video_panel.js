@@ -249,6 +249,13 @@ function buildPanel() {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
   videoWrap.appendChild(video);
 
+  const videoHint = el(
+    "div",
+    "position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;color:#f59e0b;font-size:12px;line-height:1.6;background:rgba(0,0,0,0.85);pointer-events:none;",
+  );
+  videoHint.textContent = "";
+  videoWrap.appendChild(videoHint);
+
   const imagePreview = el("img", "width:100%;height:100%;object-fit:contain;background:#000;display:none;");
   imagePreview.alt = "";
   videoWrap.appendChild(imagePreview);
@@ -368,6 +375,7 @@ function buildPanel() {
     imagePreview,
     imageGrid,
     saveAsBtn,
+    videoHint,
     audioPlayer,
     videoWrap,
     header,
@@ -859,6 +867,15 @@ function applyInfo(panel, info) {  if (!info) return;
       panel.audioPlayer.src = `/view?${params.toString()}&t=${Date.now()}`;
     }
   } else if (info.filename) {
+    if (panel.videoHint) panel.videoHint.style.display = "none";
+    panel.video.onerror = () => {
+      if (!panel.videoHint) return;
+      const tempHint = (info.type || "output") === "temp"
+        ? "上次成片是预览临时文件（temp），已被 ComfyUI 清理。\n把「输出模式」改成「保存」重新生成，即可在刷新后保留预览。"
+        : "成片文件不存在或已被移动。";
+      panel.videoHint.textContent = tempHint;
+      panel.videoHint.style.display = "flex";
+    };
     panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
     // 元数据就绪后再校正一次控件条宽度（此时元素已是最终尺寸）
     panel.video.addEventListener("loadedmetadata", () => relayoutNativeControls(panel), { once: true });
