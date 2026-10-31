@@ -80,6 +80,48 @@ function applyVisibility(node) {
   }
 }
 
+const KIND_MODES = { image: "image_first", audio: "audio_first" };
+
+async function applyKindMode(node) {
+  if (!node || node.comfyClass !== NODE_TYPE || !Array.isArray(node.widgets)) return;
+  const nameWidget = node.widgets.find((widget) => widget.name === "project_name");
+  if (!nameWidget) return;
+  const nameInput = (node.inputs || []).find((input) => input.name === "project_name");
+  if (nameInput && nameInput.link != null) return;
+  const name = String(nameWidget.value || "").trim();
+  if (!name || name === node.__afKindName) return;
+  node.__afKindName = name;
+  try {
+    const response = await fetch(
+      `/easy-media/project/timeline?project_name=${encodeURIComponent(name)}`,
+    );
+    if (!response.ok) return;
+    const timeline = await response.json();
+    const kind = String((timeline && timeline.project_kind) || "").toLowerCase();
+    const target = KIND_MODES[kind];
+    if (!target) return;
+    const mode = node.widgets.find((widget) => widget.name === "sampling_mode");
+    if (!mode || mode.value === target) return;
+    mode.value = target;
+    if (typeof mode.callback === "function") mode.callback(target);
+    node.setDirtyCanvas?.(true, true);
+  } catch (error) {
+    console.debug("[EasyMedia] project kind mode sync skipped", error);
+  }
+}
+
+function hookProjectName(node) {
+  const nameWidget = node.widgets?.find((widget) => widget.name === "project_name");
+  if (!nameWidget || nameWidget.__afKindHooked) return;
+  nameWidget.__afKindHooked = true;
+  const original = nameWidget.callback;
+  nameWidget.callback = function (...args) {
+    const result = original ? original.apply(this, args) : undefined;
+    setTimeout(() => applyKindMode(node), 0);
+    return result;
+  };
+}
+
 function hookNode(node) {
   if (!node || node.comfyClass !== NODE_TYPE || !node.widgets) return;
   const mode = node.widgets.find((widget) => widget.name === "sampling_mode");
@@ -92,7 +134,9 @@ function hookNode(node) {
       return result;
     };
   }
+  hookProjectName(node);
   applyVisibility(node);
+  setTimeout(() => applyKindMode(node), 0);
 }
 
 app.registerExtension({

@@ -41,6 +41,7 @@ from ..utils.h3_project import (
     select_h3_task_entries,
     validate_h3_project_outputs,
 )
+from ..utils.h3_timeline import load_timeline
 from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
 from ..utils.project_memory import (
     BOUNDARY_META,
@@ -375,6 +376,16 @@ def _h3_resolve_context_second_pass_sigmas(
         id="second_pass_context_sigmas",
         sigmas=context_sigmas,
     ).out(0)
+
+
+def _h3_project_kind(project_name: Any) -> str:
+    """从项目 timeline.json 读取项目类型，读不到按 video 处理。"""
+    try:
+        timeline = load_timeline(project_name)
+    except Exception:
+        return "video"
+    kind = str(timeline.get("project_kind") or "video").strip().lower()
+    return kind if kind in {"video", "audio", "image"} else "video"
 
 
 def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
@@ -1260,6 +1271,14 @@ class EasyMultiTrackProject(io.ComfyNode):
         sampling_mode, sampling_config = _h3_sampling_mode_config(
             kwargs.get("sampling_mode")
         )
+        project_kind = _h3_project_kind(_first_input(kwargs.get("project_name"), ""))
+        forced_mode = {"audio": "audio_first", "image": "image_first"}.get(project_kind)
+        if forced_mode and sampling_mode != forced_mode:
+            print(
+                f"[EasyMedia] 项目 {kwargs.get('project_name')!r} 类型为 {project_kind}，"
+                f"采样模式 {sampling_mode} 已强制为 {forced_mode}"
+            )
+            sampling_mode, sampling_config = _h3_sampling_mode_config(forced_mode)
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
