@@ -55,6 +55,7 @@ from ..utils.multitrack import (
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
+TYPE_EASY_MEDIA = io.Custom(io_type="EASY_MEDIA")
 TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
 TYPE_H3_PROJECT_STATIC_DATA = io.Custom(io_type="H3_PROJECT_STATIC_DATA")
 H3_CONTEXT_CONTINUITY_MODES = {"context", "context_drift", "context_swap"}
@@ -2834,7 +2835,7 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             hidden=[io.Hidden.unique_id],
             outputs=[
                 io.String.Output("FILENAME_PREFIX", display_name="文件名前缀"),
-                io.AnyType.Output("MEDIA", display_name="多媒体（图片/音频/视频）"),
+                TYPE_EASY_MEDIA.Output("MEDIA", display_name="多媒体"),
                 io.Video.Output("VIDEO", display_name="视频"),
             ],
             not_idempotent=True,

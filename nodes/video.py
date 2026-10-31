@@ -418,7 +418,7 @@ class EasySaveVideo(io.ComfyNode):
                 ),
                 io.MultiType.Input(
                     "media",
-                    types=[io.Image, io.Audio, io.Video],
+                    types=[io.Image, io.Audio, io.Video, io.Custom(io_type="EASY_MEDIA")],
                     optional=True,
                     tooltip=(
                         "自动判断：接什么就存什么——IMAGE=存图片序列、AUDIO=存音频、"
