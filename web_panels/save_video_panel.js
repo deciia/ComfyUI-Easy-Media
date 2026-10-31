@@ -249,6 +249,12 @@ function buildPanel() {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC";
   videoWrap.appendChild(video);
 
+  const videoMeta = el(
+    "div",
+    "position:absolute;right:10px;top:10px;display:none;z-index:4;padding:2px 8px;border-radius:6px;background:rgba(0,0,0,0.72);color:#e5e5e5;font-size:11px;pointer-events:none;white-space:nowrap;",
+  );
+  videoWrap.appendChild(videoMeta);
+
   const videoHint = el(
     "div",
     "position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;color:#f59e0b;font-size:12px;line-height:1.6;background:rgba(0,0,0,0.85);pointer-events:none;",
@@ -375,6 +381,7 @@ function buildPanel() {
     imagePreview,
     imageGrid,
     saveAsBtn,
+    videoMeta,
     videoHint,
     audioPlayer,
     videoWrap,
@@ -454,6 +461,7 @@ function buildPanel() {
     if (panel.saveAsBtn) {
       panel.saveAsBtn.style.display = kind === "images" && panel.selectedImage ? "block" : "none";
     }
+    if (panel.videoMeta) panel.videoMeta.style.display = "none";
     if (panel.audioPlayer) panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
 
     // 详情与调色台各有独立开关；三角形只控制上方的设置参数
@@ -875,6 +883,21 @@ function applyInfo(panel, info) {  if (!info) return;
         : "成片文件不存在或已被移动。";
       panel.videoHint.textContent = tempHint;
       panel.videoHint.style.display = "flex";
+    };
+    panel.video.onloadedmetadata = () => {
+      if (!panel.videoMeta) return;
+      const duration = panel.video.duration;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        panel.videoMeta.style.display = "none";
+        return;
+      }
+      const fps = Number(info.fps) > 0 ? Number(info.fps) : 24;
+      const frames = Math.max(1, Math.round(duration * fps));
+      const seconds = duration < 60
+        ? `${duration.toFixed(2)} 秒`
+        : `${Math.floor(duration / 60)}分${(duration % 60).toFixed(1)}秒`;
+      panel.videoMeta.textContent = `${seconds} · ${frames} 帧`;
+      panel.videoMeta.style.display = "block";
     };
     panel.video.src = `/view?${params.toString()}&t=${Date.now()}`;
     // 元数据就绪后再校正一次控件条宽度（此时元素已是最终尺寸）
