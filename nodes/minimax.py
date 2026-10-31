@@ -2688,7 +2688,9 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         )
 
         info = parse_tracks_info(tracks_info)
-        audio_only = (info["width"], info["height"]) == (32, 32)
+        audio_only = bool(info.get("audio_only")) or (
+            info["width"], info["height"]
+        ) == (32, 32)
         if audio_only:
             target_media = project_dir / f"audio_{int(segment_index)}_{generation}.wav"
             with log_stage_time(
@@ -2786,6 +2788,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 "task_segments": compact_h3_task_segments(info),
             }
         )
+        if audio_only:
+            manifest["audio_only"] = True
         manifest.pop("tracks_info", None)
         manifest.pop("last_render", None)
         segments = manifest.setdefault("segments", {})

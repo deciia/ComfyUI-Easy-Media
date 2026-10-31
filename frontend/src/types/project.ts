@@ -7,6 +7,7 @@ export interface ProjectVideoFile {
   source_frame_count: number
   width?: number
   height?: number
+  duration?: number
   continuity_mode?: ProjectContinuityMode
 }
 
@@ -21,7 +22,11 @@ export interface ProjectClip {
   source_frame_count: number
   continuity_mode: ProjectContinuityMode
   enabled: boolean
+  /** audio_first 工程的音频段标记 */
+  media_kind?: 'video' | 'audio'
+  duration?: number
   video_files?: ProjectVideoFile[]
+  audio_files?: ProjectVideoFile[]
 }
 
 export interface ProjectGenSettings {
@@ -39,6 +44,8 @@ export interface ProjectData {
   frame_rate: number
   clips: ProjectClip[]
   auto_combine: boolean
+  /** audio_first（有声剧）工程：只合成/预览音频 */
+  audio_only?: boolean
   gen_settings?: ProjectGenSettings | null
   updated_at?: number
 }

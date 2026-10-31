@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+from pathlib import Path
 from typing import Any
 
 import folder_paths
@@ -15,7 +16,9 @@ from ..utils import instrument_node_timing, log_node_info
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     clear_h3_project_segments_from,
+    compose_h3_project_audio,
     compose_h3_project_video,
+    load_h3_project_data,
     h3_active_segment_is_passthrough,
     h3_generation_mode,
     h3_locked_audio_track,
@@ -386,8 +389,13 @@ def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     # Keep workflows saved with the original mode name loadable.
     if sampling_mode == "dual_selflift":
         sampling_mode = "selflift"
-    if sampling_mode not in {"single", "dual", "dual_t8", "selflift", "passthrough"}:
-        raise ValueError("sampling_mode must be 'single', 'dual', 'dual_t8', 'selflift', or 'passthrough'")
+    if sampling_mode not in {
+        "single", "dual", "dual_t8", "selflift", "passthrough", "audio_first",
+    }:
+        raise ValueError(
+            "sampling_mode must be 'single', 'dual', 'dual_t8', 'selflift', "
+            "'passthrough', or 'audio_first'"
+        )
     return sampling_mode, config
 
 
@@ -663,8 +671,8 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=0.001, optional=True),
                 io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
                 io.String.Input("sampling_plan", default="light", optional=True),
-                io.Combo.Input("sampling_mode", options=["single", "dual", "dual_t8", "selflift", "passthrough"], default="single", optional=True,
-                    tooltip="dual_t8: LBH双钟双采(T8 fork)。需要双钟调度+学习放大+Reconcile+DetailMixer时使用; 不接LoRA/滑条照常工作。"),
+                io.Combo.Input("sampling_mode", options=["single", "dual", "dual_t8", "selflift", "passthrough", "audio_first"], default="single", optional=True,
+                    tooltip="dual_t8: LBH双钟双采(T8 fork)。需要双钟调度+学习放大+Reconcile+DetailMixer时使用; 不接LoRA/滑条照常工作。audio_first: 有声剧模式，极小占位画面、只解码音频。"),
                 io.Sampler.Input("sampler", optional=True, raw_link=True),
                 io.Sigmas.Input("sigmas", optional=True, raw_link=True),
                 io.Sampler.Input("sampler_2nd", optional=True, raw_link=True),
@@ -993,6 +1001,21 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option("dual", []),
                         io.DynamicCombo.Option("dual_t8", []),
                         io.DynamicCombo.Option(
+                            "audio_first",
+                            [
+                                io.Combo.Input(
+                                    "audio_first_resolution",
+                                    options=["64x64", "32x32"],
+                                    default="64x64",
+                                    tooltip=(
+                                        "有声剧占位画面：64x64（推荐，音质稳定）或 "
+                                        "32x32（更快，视频 token 更少）。真实音频时长"
+                                        "仍由段时长决定，与本项无关。"
+                                    ),
+                                ),
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
                             "selflift",
                             [
                                 # 2026-10-17：原地替换旧 transition_ratio（槽位/数量不变，
@@ -1222,6 +1245,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
+        is_audio_first = sampling_mode == "audio_first"
         # 高级输入（2026-10-11）：视频/音频 sigma 偏移覆盖；默认值 = 原本硬编码值，向后兼容
         def _shift_value(raw, fallback: float) -> float:
             """旧工作流 widget 错位可能给到空串/0 等脏值——非法时回落默认，避免采样崩。"""
@@ -1382,7 +1406,20 @@ class EasyMultiTrackProject(io.ComfyNode):
 
         first_pass_width = int(info["width"])
         first_pass_height = int(info["height"])
-        audio_only = (first_pass_width, first_pass_height) == (32, 32)
+        if is_audio_first:
+            # 有声剧：把画面压到最低档，算力交给音频；真实音频时长仍由段时长决定。
+            placeholder_size = (
+                32
+                if str(
+                    _first_input(
+                        sampling_config.get("audio_first_resolution"),
+                        _first_input(kwargs.get("audio_first_resolution"), "64x64"),
+                    )
+                ).startswith("32")
+                else 64
+            )
+            first_pass_width = first_pass_height = placeholder_size
+        audio_only = is_audio_first or (first_pass_width, first_pass_height) == (32, 32)
         fps = float(info["frame_rate"])
         target_width, target_height = h3_second_pass_dimensions(
             first_pass_width,
@@ -1396,10 +1433,20 @@ class EasyMultiTrackProject(io.ComfyNode):
         # 2× 段裁到画布左上角（表现为“画面放大了几倍”）。未接 HyperVAE 时不变。
         output_info = {
             **info,
-            "width": target_width * 2 if has_output_vae else target_width,
-            "height": target_height * 2 if has_output_vae else target_height,
+            "width": (
+                target_width
+                if audio_only or not has_output_vae
+                else target_width * 2
+            ),
+            "height": (
+                target_height
+                if audio_only or not has_output_vae
+                else target_height * 2
+            ),
             # 2026-10-05：记录本次生成的关键设置，供合并节点前端推算
             # “参数变更后的即将生成分辨率”并实时预警（无需运行）。
+            "audio_only": bool(audio_only),
+            "sampling_mode": sampling_mode,
             "gen_settings": {
                 "base_width": first_pass_width,
                 "base_height": first_pass_height,
@@ -2687,6 +2734,16 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
 
 
+def _h3_audio_payload(path: Any) -> dict[str, Any]:
+    """把合成好的 WAV 读成 ComfyUI AUDIO 结构：[1, C, T] + sample_rate。"""
+    import soundfile as sf
+    import torch
+
+    waveform, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    tensor = torch.from_numpy(waveform.T).unsqueeze(0)
+    return {"waveform": tensor, "sample_rate": int(sample_rate)}
+
+
 class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
     """Combine a project timeline configured by the React project widget."""
 
@@ -2707,6 +2764,7 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             outputs=[
                 io.Video.Output("VIDEO"),
                 io.String.Output("FILENAME_PREFIX"),
+                io.Audio.Output("AUDIO"),
             ],
             not_idempotent=True,
         )
@@ -2743,9 +2801,35 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             )
         if not auto_combine:
             blocker = ExecutionBlocker(None)
-            return io.NodeOutput(blocker, blocker)
+            return io.NodeOutput(blocker, blocker, blocker)
+        fresh_data = load_h3_project_data(safe_name)
+        if fresh_data.get("audio_only"):
+            composed_audio = compose_h3_project_audio(safe_name, data)
+            audio_payload = _h3_audio_payload(composed_audio)
+            try:
+                from server import PromptServer
+
+                PromptServer.instance.send_sync(
+                    "easy-media.project.audio",
+                    {
+                        "project_name": safe_name,
+                        "path": str(composed_audio),
+                        "filename": composed_audio.name,
+                        "subfolder": composed_audio.parent.relative_to(
+                            Path(folder_paths.get_output_directory())
+                        ).as_posix(),
+                    },
+                )
+            except (AttributeError, ImportError, RuntimeError, ValueError):
+                pass
+            return io.NodeOutput(
+                ExecutionBlocker(None),
+                h3_project_filename_prefix(safe_name),
+                audio_payload,
+            )
         composed_path = compose_h3_project_video(safe_name, data)
         return io.NodeOutput(
             InputImpl.VideoFromFile(str(composed_path)),
             h3_project_filename_prefix(safe_name),
+            ExecutionBlocker(None),
         )

@@ -46,6 +46,7 @@ function ensureProjectData(value: unknown): ProjectData {
     height: Number.isFinite(data.height) ? Math.max(0, Number(data.height)) : 0,
     frame_rate: Number.isFinite(data.frame_rate) && Number(data.frame_rate) > 0 ? Number(data.frame_rate) : 24,
     clips: Array.isArray(data.clips) ? data.clips : [],
+    audio_only: data.audio_only === true,
     auto_combine: data.auto_combine !== false,
     gen_settings: data.gen_settings ?? null,
     updated_at: data.updated_at,
@@ -175,8 +176,9 @@ function projectVideoFileUrl(file: ProjectVideoFile): string | null {
 }
 
 function projectVideoFiles(clip: ProjectClip): ProjectVideoFile[] {
-  const files = clip.video_files?.length
-    ? clip.video_files
+  const candidates = clip.media_kind === 'audio' ? clip.audio_files : clip.video_files
+  const files = candidates?.length
+    ? candidates
     : [{
         file_path: clip.file_path,
         file_name: clip.file_name,
@@ -279,7 +281,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   }
 
   function selectClipFile(clip: ProjectClip, filePath: string) {
-    const file = clip.video_files?.find((candidate) => candidate.file_path === filePath)
+    const file = (clip.video_files ?? clip.audio_files)?.find((candidate) => candidate.file_path === filePath)
     if (!file) return
     onChange({
       ...data,
@@ -967,6 +969,92 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
   function tooltip(label: string, child: ReactNode) {
     return <Tooltip><TooltipTrigger asChild><span className="inline-flex shrink-0">{child}</span></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>
+  }
+
+  // audio_first（有声剧）工程：只做音频预览/管理，不进入视频时间线
+  if (data.audio_only) {
+    const audioClips = data.clips.filter((clip) => clip.enabled !== false)
+    return (
+      <LocaleContext.Provider value={locale}>
+        <TooltipProvider>
+          <div className="flex h-full min-h-[240px] w-full flex-col overflow-hidden rounded-md border border-border bg-background text-foreground">
+            <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
+              <div className="flex items-center gap-1">
+                <Select
+                  disabled={deletingFilePath !== null}
+                  value={data.project_name || 'default'}
+                  onOpenChange={(open) => { if (open) void loadProjects() }}
+                  onValueChange={(name) => void refreshProject(name)}
+                >
+                  <SelectTrigger className="h-7 w-32 text-xs" aria-label={t('projectVideoCombine.selectProject')}><SelectValue /></SelectTrigger>
+                  <SelectContent>{projectOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+                </Select>
+                {tooltip(t('projectVideoCombine.deleteProject'), (
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={isDeleting || isRefreshing || deletingFilePath !== null} aria-label={t('projectVideoCombine.deleteProject')} onClick={() => void deleteProject()}>
+                    {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                {tooltip(t('projectVideoCombine.refresh'), (
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing || deletingFilePath !== null} aria-label={t('projectVideoCombine.refresh')} onClick={() => void refreshProject(data.project_name || 'default')}>
+                    {isRefreshing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                  </Button>
+                ))}
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Checkbox checked={data.auto_combine} onCheckedChange={(checked) => onChange({ ...data, auto_combine: checked === true })} />
+                  {t('projectVideoCombine.autoCombine')}
+                </label>
+                <Button type="button" size="sm" className="h-7 gap-1.5 text-xs" disabled={isCombining || deletingFilePath !== null || data.clips.length === 0} onClick={() => void combineProject()}>
+                  {isCombining ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                  {t('projectVideoCombine.combine')}
+                </Button>
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-2">
+              {audioClips.length === 0 ? (
+                <div className="p-2 text-xs text-muted-foreground">这个有声剧工程还没有生成音频段。</div>
+              ) : audioClips.map((clip) => {
+                const files = projectVideoFiles(clip)
+                const url = projectClipUrl(clip)
+                return (
+                  <div key={clip.id} className="rounded border border-border p-2">
+                    <div className="mb-1 flex items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">#{clip.index + 1}</span>
+                      <Select
+                        value={clip.file_path}
+                        onValueChange={(filePath) => selectClipFile(clip, filePath)}
+                      >
+                        <SelectTrigger className="h-6 min-w-0 flex-1 text-[11px]"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {files.map((file) => <SelectItem key={file.file_path} value={file.file_path}>{file.file_name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive hover:text-destructive"
+                        disabled={deletingFilePath !== null}
+                        aria-label="删除该音频版本"
+                        onClick={() => void deleteClipFile(clip, files.find((file) => file.file_path === clip.file_path) ?? files[0]!)}
+                      >
+                        {deletingFilePath === clip.file_path ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />}
+                      </Button>
+                    </div>
+                    {url ? (
+                      <audio className="h-8 w-full" controls preload="metadata" src={url} />
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground">{clip.file_name}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </TooltipProvider>
+      </LocaleContext.Provider>
+    )
   }
 
   const playableWidth = Math.max(1, scaledTimelineWidth - MULTITRACK_LEFT_GUTTER - MULTITRACK_RIGHT_RESERVE)

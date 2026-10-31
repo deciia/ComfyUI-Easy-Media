@@ -63,10 +63,21 @@ H3_AUDIO_ONLY_COMBINE_ERROR = (
 )
 
 
+def is_h3_audio_only_project(info: dict[str, Any]) -> bool:
+    """audio_first（或 32x32 兼容项目）走纯音频管线。"""
+    if not isinstance(info, dict):
+        return False
+    if info.get("audio_only") is True:
+        return True
+    return (info.get("width"), info.get("height")) == (32, 32)
+
+
 def validate_h3_project_outputs(
     info: dict[str, Any], prompt: Any, node_id: Any
 ) -> None:
-    """Reject connected video-combine nodes before an audio project is changed."""
+    """合并节点现在支持音频工程，音频项目不再被拒绝。"""
+    if is_h3_audio_only_project(info):
+        return
     if (info["width"], info["height"]) != (32, 32):
         return
     prompt = unwrap_list_value(prompt)
@@ -85,6 +96,94 @@ def validate_h3_project_outputs(
             and source[1] == 0
         ):
             raise ValueError(H3_AUDIO_ONLY_COMBINE_ERROR)
+
+
+def _wav_duration_seconds(path: Path) -> float:
+    """读取 WAV 时长；失败时返回 0，避免影响工程列表。"""
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(path))
+        if info.samplerate > 0:
+            return float(info.frames) / float(info.samplerate)
+    except Exception:  # noqa: BLE001 - 列表容错优先
+        pass
+    return 0.0
+
+
+def compose_h3_project_audio(
+    project_name: Any,
+    project_data: Any = None,
+) -> Path:
+    """把工程里启用的音频段按时间线顺序拼成一条 WAV，供合并节点预览/导出。"""
+    import numpy as np
+    import soundfile as sf
+
+    output_dir = Path(folder_paths.get_output_directory()).resolve()
+    data = project_data
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"project_data is not valid JSON: {error}") from error
+    fresh = load_h3_project_data(project_name)
+    safe_name = fresh["project_name"]
+    clips = data.get("clips") if isinstance(data, dict) else None
+    if not isinstance(clips, list) or not clips:
+        clips = fresh["clips"]
+    fresh_by_index = {clip["index"]: clip for clip in fresh["clips"]}
+    ordered: list[dict[str, Any]] = []
+    for clip in clips:
+        if not isinstance(clip, dict) or clip.get("enabled") is False:
+            continue
+        try:
+            index = int(clip.get("index"))
+        except (TypeError, ValueError):
+            continue
+        source_clip = fresh_by_index.get(index)
+        if source_clip is not None and source_clip.get("media_kind") == "audio":
+            ordered.append(source_clip)
+    if not ordered:
+        raise ValueError(f"H3 project {safe_name} has no enabled audio segments to combine")
+
+    target_sr = 0
+    pieces: list[np.ndarray] = []
+    for clip in ordered:
+        clip_path = output_dir / str(clip["file_path"])
+        if not clip_path.is_file():
+            continue
+        waveform, sr = sf.read(str(clip_path), dtype="float32", always_2d=True)
+        if target_sr == 0:
+            target_sr = int(sr)
+        elif int(sr) != target_sr:
+            # 线性重采样（H3 输出同源采样率，这里只做兜底）
+            ratio = target_sr / float(sr)
+            new_length = max(1, int(round(waveform.shape[0] * ratio)))
+            index = np.arange(new_length) / ratio
+            left = np.interp(index, np.arange(waveform.shape[0]), waveform[:, 0])
+            channels = [left]
+            for ch in range(1, waveform.shape[1]):
+                channels.append(np.interp(index, np.arange(waveform.shape[0]), waveform[:, ch]))
+            waveform = np.stack(channels, axis=1).astype(np.float32)
+        pieces.append(waveform)
+    if not pieces:
+        raise ValueError(f"H3 project {safe_name} audio files are missing on disk")
+
+    merged = np.concatenate(pieces, axis=0) if len(pieces) > 1 else pieces[0]
+    if target_sr <= 0:
+        target_sr = 44100
+    project_dir = output_dir / "easy_media" / "projects" / safe_name
+    project_dir.mkdir(parents=True, exist_ok=True)
+    target = project_dir / f"audio_project_{safe_name}.wav"
+    temporary = target.with_name(target.name + ".tmp")
+    try:
+        sf.write(str(temporary), merged, target_sr, format="WAV", subtype="PCM_24")
+        temporary.replace(target)
+    except Exception as error:  # noqa: BLE001
+        if temporary.exists():
+            temporary.unlink()
+        raise RuntimeError(f"Failed to compose H3 project audio: {error}") from error
+    return target
 
 
 def save_h3_audio(audio: dict[str, Any] | None, path: Path) -> None:
@@ -981,15 +1080,23 @@ def delete_h3_project_video(project_name: str, segment_index: int, file_path: st
     ):
         raise ValueError("Project segment was not found")
     generations = segment["generations"]
-    generation_keys = [
-        key for key, generation in generations.items()
-        if isinstance(generation, dict) and generation.get("video")
-        and (project_dir / generation["video"]).relative_to(output_dir).as_posix() == file_path
-    ]
+    generation_keys = []
+    for key, generation in generations.items():
+        if not isinstance(generation, dict):
+            continue
+        media_name = generation.get("video") or generation.get("audio")
+        if not media_name:
+            continue
+        try:
+            candidate = _project_child_path(project_dir, media_name)
+        except FileNotFoundError:
+            continue
+        if candidate.relative_to(output_dir).as_posix() == file_path:
+            generation_keys.append(key)
     if not generation_keys:
-        raise ValueError("Video does not belong to this project segment")
+        raise ValueError("Media does not belong to this project segment")
 
-    artifact_keys = ("video", "locked_audio", "latent", "context_latent", "context_latent_low")
+    artifact_keys = ("video", "audio", "locked_audio", "latent", "context_latent", "context_latent_low")
     artifacts: set[Path] = set()
     for key in generation_keys:
         for field in artifact_keys:
@@ -1069,10 +1176,13 @@ def select_h3_project_video(
 
     selected_generation: str | None = None
     for key, generation in segment["generations"].items():
-        if not isinstance(generation, dict) or not generation.get("video"):
+        if not isinstance(generation, dict):
+            continue
+        media_name = generation.get("video") or generation.get("audio")
+        if not media_name:
             continue
         try:
-            candidate = _project_child_path(project_dir, generation["video"])
+            candidate = _project_child_path(project_dir, media_name)
         except FileNotFoundError:
             continue
         if candidate.relative_to(output_dir).as_posix() == file_path:
@@ -1212,8 +1322,96 @@ def _h3_project_data(
             "continuity_mode": active_file["continuity_mode"],
             "audio_locked": task_segment.get("audio_locked") is True,
             "enabled": True,
+            "media_kind": "video",
             "video_files": video_files,
         })
+
+    # ---- 音频段（audio_first 工程）：generation 里只有 audio ----
+    fps_value = float(manifest.get("fps", 24) or 24)
+    for raw_index, segment in sorted(
+        raw_segments.items(),
+        key=lambda item: int(item[0]) if str(item[0]).isdigit() else 0x7FFFFFFF,
+    ):
+        if not isinstance(segment, dict):
+            continue
+        generations = segment.get("generations", {})
+        if not isinstance(generations, dict):
+            continue
+        has_video_generation = any(
+            isinstance(candidate, dict) and candidate.get("video")
+            for candidate in generations.values()
+        )
+        if has_video_generation:
+            continue
+        active_generation = str(segment.get("active_generation", ""))
+        generation = generations.get(active_generation)
+        if not isinstance(generation, dict) or not generation.get("audio"):
+            continue
+        audio_files: list[dict[str, Any]] = []
+        seen_audio_paths: set[str] = set()
+        for _, candidate in sorted(
+            generations.items(),
+            key=lambda item: int(item[0]) if str(item[0]).isdigit() else 0x7FFFFFFF,
+        ):
+            if not isinstance(candidate, dict) or not candidate.get("audio"):
+                continue
+            try:
+                candidate_source = _project_child_path(project_dir, candidate["audio"])
+            except FileNotFoundError:
+                continue
+            candidate_path = candidate_source.relative_to(output_dir).as_posix()
+            if candidate_path in seen_audio_paths:
+                continue
+            seen_audio_paths.add(candidate_path)
+            duration = _wav_duration_seconds(candidate_source)
+            audio_files.append({
+                "file_path": candidate_path,
+                "file_name": candidate_source.name,
+                "media_revision": str(candidate_source.stat().st_mtime_ns),
+                "duration": duration,
+                "source_frame_count": max(1, round(duration * fps_value)) if duration else 1,
+                "continuity_mode": _h3_continuity_mode(candidate.get(
+                    "continuity_mode",
+                    segment.get("continuity_mode", "shot"),
+                )),
+            })
+        if not audio_files:
+            continue
+        try:
+            active_source = _project_child_path(project_dir, generation["audio"])
+        except FileNotFoundError:
+            continue
+        active_path = active_source.relative_to(output_dir).as_posix()
+        active_file = next(
+            (item for item in audio_files if item["file_path"] == active_path),
+            None,
+        )
+        if active_file is None:
+            continue
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        task_segment = task_segments_by_index.get(index, {})
+        clips.append({
+            "id": f"segment-{index}",
+            "index": index,
+            "media_kind": "audio",
+            "file_path": active_file["file_path"],
+            "file_name": active_file["file_name"],
+            "media_revision": active_file["media_revision"],
+            "source_start_frame": 0,
+            "source_end_frame": active_file["source_frame_count"],
+            "source_frame_count": active_file["source_frame_count"],
+            "duration": active_file["duration"],
+            "updated_at": float(segment.get("updated_at", 0) or 0),
+            "continuity_mode": active_file["continuity_mode"],
+            "audio_locked": task_segment.get("audio_locked") is True,
+            "enabled": True,
+            "audio_files": audio_files,
+        })
+
+    clips.sort(key=lambda clip: int(clip.get("index", 0)))
 
     gen_settings = manifest.get("gen_settings")
     return {
@@ -1222,6 +1420,8 @@ def _h3_project_data(
         "height": int(manifest.get("height", 0) or 0),
         "frame_rate": float(manifest.get("fps", 24) or 24),
         "clips": clips,
+        "audio_only": bool(manifest.get("audio_only"))
+        or (int(manifest.get("width", 0) or 0), int(manifest.get("height", 0) or 0)) == (32, 32),
         # 2026-10-05：上次生成的设置快照（旧项目可能缺失）。
         "gen_settings": gen_settings if isinstance(gen_settings, dict) else None,
         "updated_at": max(
@@ -1326,8 +1526,11 @@ def compose_h3_project_video(
 
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     fresh_data = load_h3_project_data(project_name)
-    if (fresh_data["width"], fresh_data["height"]) == (32, 32):
-        raise ValueError(H3_AUDIO_ONLY_COMBINE_ERROR)
+    if fresh_data.get("audio_only"):
+        raise ValueError(
+            "audio_only projects must be composed by compose_h3_project_audio; "
+            "use the MultiTrack Project Video Combine node in audio mode"
+        )
     requested = project_data
     if isinstance(requested, str):
         try:
