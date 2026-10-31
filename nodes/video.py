@@ -420,6 +420,17 @@ class EasySaveVideo(io.ComfyNode):
                     default="WAV",
                     tooltip="save_kind=audio 时的音频格式。",
                 ),
+                io.MultiType.Input(
+                    "media",
+                    types=[io.Image, io.Audio, io.Video],
+                    optional=True,
+                    tooltip=(
+                        "自动判断：接什么就存什么——IMAGE=存图片序列、AUDIO=存音频、"
+                        "VIDEO=存视频；会根据输入内容自动切换保存类型。"
+                        "与 video 槽的区别：video 槽只是在「视频/图片/音频」三种槽位间复用，"
+                        "保存类型仍由面板选择；本槽会强制跟随输入类型。"
+                    ),
+                ),
                 io.Combo.Input(
                     "notify_sound",
                     options=_list_notify_sounds(),
@@ -460,6 +471,7 @@ class EasySaveVideo(io.ComfyNode):
         save_kind: str = "video",
         image_format: str = "PNG",
         audio_format: str = "WAV",
+        media=None,
     ) -> io.NodeOutput:
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
@@ -477,6 +489,26 @@ class EasySaveVideo(io.ComfyNode):
             payload_out = output_mode
             output_mode = str(payload_out.get("output_mode") or "save")
             save_metadata = bool(payload_out.get("save_metadata", save_metadata))
+
+        # 「自动判断」槽：输入是什么就存什么（强制切换保存类型）
+        if media is not None:
+            if _is_audio_dict(media):
+                audio = media if audio is None else audio
+                save_kind = "audio"
+                media = None
+            elif _is_image_batch(media):
+                images = media if images is None else images
+                save_kind = "images"
+                media = None
+            elif _is_video_object(media):
+                video = media if video is None else video
+                save_kind = "video"
+                media = None
+            else:
+                raise ValueError(
+                    "自动判断槽只接受 IMAGE / AUDIO / VIDEO；当前类型无法识别"
+                    f"（收到 {type(media).__name__}）。"
+                )
 
         # video 槽是 AnyType：按实际接入的类型自动分流，用户不需要手动改 input_mode。
         incoming = video
@@ -503,12 +535,39 @@ class EasySaveVideo(io.ComfyNode):
         if input_mode_key == "video" and video is None:
             # video 槽其实接的是图片/音频：自动退回对应通道
             input_mode_key = "images+audio" if images is not None else "audio"
+        if images is None and video is None and audio is not None:
+            # 只接音频（含 video/media 槽传入音频的情况）：走纯音频通道
+            input_mode_key = "audio"
         output_mode_key: str = str(output_mode or "save")
         hide_preview = output_mode_key in {"hide", "hide&save"}
         write_temp = output_mode_key in {"preview_only", "hide"}
 
         pass_images = None
         kind = str(save_kind or "video").strip().lower()
+
+        # 按实际接入的输入槽决定可保存类型（与前端按钮禁用规则一致）
+        has_audio_input = audio is not None
+        has_image_input = images is not None
+        has_video_input = video is not None
+        if has_video_input:
+            allowed_kinds = {"video", "images", "audio"}
+        elif has_image_input and has_audio_input:
+            allowed_kinds = {"video", "images", "audio"}
+        elif has_image_input:
+            allowed_kinds = {"video", "images"}
+        elif has_audio_input:
+            allowed_kinds = {"audio"}
+        else:
+            allowed_kinds = set()
+        if allowed_kinds and kind not in allowed_kinds:
+            readable = {"video": "视频", "images": "图片", "audio": "音频"}
+            raise ValueError(
+                "当前接线的输入不支持保存为"
+                f"{readable.get(kind, kind)}（可用："
+                + "、".join(readable[k] for k in ("video", "images", "audio") if k in allowed_kinds)
+                + "）。只接音频时只能存音频；只接图片时只能存视频或图片；"
+                "接视频、或图片+音频时三种都可用。"
+            )
         if input_mode_key == "video":
             source_video = video
             if source_video is None:

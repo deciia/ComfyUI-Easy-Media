@@ -552,8 +552,15 @@ function availableKinds(node) {
   const hasImages = connected("images");
   const hasVideo = connected("video");
   const hasAudio = connected("audio");
-  if (!hasImages && !hasVideo && !hasAudio) return ["video", "images", "audio"];
+  // 「自动判断」槽：内容可能是图片/音频/视频，三种保存类型都放开（实际类型由后端识别）
+  const hasAuto = connected("media");
+  if (!hasImages && !hasVideo && !hasAudio && !hasAuto) return ["video", "images", "audio"];
   const allowed = new Set();
+  if (hasAuto) {
+    allowed.add("video");
+    allowed.add("images");
+    allowed.add("audio");
+  }
   if (hasVideo) {
     allowed.add("video");
     allowed.add("images");
