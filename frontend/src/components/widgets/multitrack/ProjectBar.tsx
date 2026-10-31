@@ -53,16 +53,6 @@ const PROJECT_KIND_RESOLUTION: Record<ProjectKind, TimelineResolutionSnapshot | 
   audio: AUDIO_PRESET,
 }
 
-/** 切换项目类型时的画布规则：
- *  - 切到音频：64×64
- *  - 从音频切出：MP 9:16 1.0
- *  - 视频 ↔ 图片：保留原画布（返回 null，不做任何画布写入）
- */
-function kindTransitionResolution(from: ProjectKind, to: ProjectKind): TimelineResolutionSnapshot | null {
-  if (to === 'audio') return AUDIO_PRESET
-  if (from === 'audio') return MP_PRESET
-  return null
-}
 
 type EditingState = { mode: 'new' | 'saveAs'; value: string } | null
 
@@ -197,45 +187,6 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     // 仅在项目名变化时重置基线，避免用户编辑过程中基线被刷新
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentName])
-
-  async function handleKindChange(nextKind: ProjectKind) {
-    if (nextKind === currentKind) return
-    const snapshot = kindTransitionResolution(currentKind, nextKind)
-    const nextData: TrackData = data.project
-      ? { ...data, project: { ...data.project, kind: nextKind } }
-      : { ...data, project: { name: '', updated_at: 0, kind: nextKind } }
-    if (!currentName) {
-      onApply(nextData, null, snapshot ? { resolution: snapshot } : null)
-      setMessage(`项目类型已切换为${PROJECT_KIND_OPTIONS.find((item) => item.value === nextKind)?.label ?? nextKind}`)
-      return
-    }
-    setBusy(true)
-    setMessage('')
-    try {
-      const result = await saveProjectTimeline(app, {
-        projectName: currentName,
-        trackData: stripProjectMeta(nextData),
-        projectKind: nextKind,
-        resolution: snapshot ?? resolutionSnapshot(resolution),
-        format: resolution.format ?? null,
-        baseUpdatedAt: lastLoadedAtRef.current,
-      })
-      lastLoadedAtRef.current = result.updated_at
-      const applied: TrackData = { ...stripProjectMeta(nextData), project: { name: currentName, updated_at: result.updated_at, kind: nextKind } }
-      savedSignatureRef.current = projectSignature(applied, snapshot ?? resolutionSnapshot(resolution))
-      onApply(
-        applied,
-        { name: currentName, updated_at: result.updated_at, kind: nextKind },
-        { format: resolution.format ?? null, resolution: snapshot ?? resolutionSnapshot(resolution) },
-      )
-      setMessage(`项目类型已切换为${PROJECT_KIND_OPTIONS.find((item) => item.value === nextKind)?.label ?? nextKind}`)
-      void refreshProjects()
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : t('multitrack.projectFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -606,17 +557,6 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
         ))}
       </select>
       {currentName && dirty ? <span className="text-amber-400" title={t('multitrack.projectUnsaved')}>●</span> : null}
-      <select
-        className="h-7 rounded border border-neutral-600 bg-neutral-800 px-1 text-xs text-neutral-100 disabled:opacity-40"
-        value={currentKind}
-        disabled={busy}
-        title="项目类型（视频 / 音频 / 图片）"
-        onChange={(event) => void handleKindChange(event.target.value as ProjectKind)}
-      >
-        {PROJECT_KIND_OPTIONS.map((item) => (
-          <option key={item.value} value={item.value}>{item.label}</option>
-        ))}
-      </select>
 
       {editing ? (
         <>
