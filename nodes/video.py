@@ -339,16 +339,12 @@ class EasySaveVideo(io.ComfyNode):
                     step=1.0,
                     tooltip="images+audio 模式的帧率；video 模式忽略。",
                 ),
-                io.MultiType.Input(
+                io.Video.Input(
                     "video",
-                    types=[io.Video, io.Image, io.Audio],
                     optional=True,
                     tooltip=(
-                        "直接保存/透传的媒体，兼容三种类型并自动判断："
-                        "VIDEO=按视频保存；IMAGE=当作图像序列（单帧可配音频成片）；AUDIO=并到音轨。"
-                        "槽类型是 VIDEO,IMAGE,AUDIO 多类型槽而非 AnyType(*)："
-                        "ComfyUI 的 bypass 透传对 AnyType 下游按槽序号取输入（会把上游第 0 个输入当成视频），"
-                        "多类型槽按类型匹配，上游被 bypass 也不会接错。"
+                        "视频入口（仅 VIDEO）：保存视频、或从其音轨另存音频、或抽帧存图片。"
+                        "图片/音频请接 images / audio 槽；类型不确定请接「media 自动判断」槽。"
                     ),
                 ),
                 io.Audio.Input(
@@ -532,6 +528,9 @@ class EasySaveVideo(io.ComfyNode):
                 )
 
         input_mode_key: str = str(input_mode or "images+audio")
+        if input_mode_key != "video" and video is not None and images is None:
+            # 只接视频（含 media 槽传入视频）：自动进入 video 通道
+            input_mode_key = "video"
         if input_mode_key == "video" and video is None:
             # video 槽其实接的是图片/音频：自动退回对应通道
             input_mode_key = "images+audio" if images is not None else "audio"
