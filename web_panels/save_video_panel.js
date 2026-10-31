@@ -255,9 +255,16 @@ function buildPanel() {
 
   const imageGrid = el(
     "div",
-    "position:absolute;inset:0;display:none;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;padding:8px;overflow:auto;background:#000;align-content:start;",
+    "position:absolute;inset:0;display:none;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;padding:8px 8px 56px 8px;overflow:auto;background:#000;align-content:start;",
   );
   videoWrap.appendChild(imageGrid);
+  const saveAsBtn = el(
+    "button",
+    "position:absolute;right:10px;bottom:10px;display:none;z-index:5;padding:5px 10px;border-radius:6px;border:1px solid #555;background:#222;color:#eee;font-size:12px;cursor:pointer;",
+  );
+  saveAsBtn.type = "button";
+  saveAsBtn.textContent = "另存为…";
+  videoWrap.appendChild(saveAsBtn);
 
   const audioPlayer = el("audio", "width:100%;height:54px;padding:8px 10px;box-sizing:border-box;background:#000;display:none;");
   audioPlayer.controls = true;
@@ -360,6 +367,7 @@ function buildPanel() {
     video,
     imagePreview,
     imageGrid,
+    saveAsBtn,
     audioPlayer,
     videoWrap,
     header,
@@ -386,6 +394,7 @@ function buildPanel() {
     paramsHidden: false,
     detailsOpen: false,
     colorOpen: false,
+    selectedImage: null,
   };
   panelRef = panel;
 
@@ -530,6 +539,7 @@ function buildPanel() {
   });
 
   panel.refreshLayout = refreshLayout;
+  saveAsBtn.addEventListener("click", () => saveSelectedImageAs(panel));
   return panel;
 }
 
@@ -740,6 +750,35 @@ function relayoutNativeControls(panel) {
   }));
 }
 
+function saveSelectedImageAs(panel) {
+  const info = panel.info || {};
+  const filename = panel.selectedImage || info.first_filename
+    || String(info.filename || "").split(" … ")[0];
+  if (!filename) return;
+  const defaultTarget = info.dir ? `${info.dir}\\${filename}` : filename;
+  const typed = window.prompt("另存为（完整目标路径，含文件名）", defaultTarget);
+  if (!typed) return;
+  fetch("/easy-media/asset/save-as", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename,
+      subfolder: info.subfolder || "",
+      type: info.type || "output",
+      target: typed,
+    }),
+  })
+    .then((response) => response.json())
+    .then((result) => {
+      if (result && result.ok) {
+        window.alert(`已另存为：${result.path}`);
+      } else {
+        window.alert(`另存失败：${(result && result.error) || "unknown error"}`);
+      }
+    })
+    .catch((error) => window.alert(`另存失败：${error}`));
+}
+
 function applyInfo(panel, info) {  if (!info) return;
   panel.info = info;
   // 持久化到 node.properties：切换工作流标签页会重建节点，内存里的 _easyVideoInfo 会丢；
@@ -769,6 +808,14 @@ function applyInfo(panel, info) {  if (!info) return;
         img.alt = file;
         img.title = file;
         img.src = `/view?${q.toString()}&t=${stamp}`;
+        img.style.cursor = "pointer";
+        img.dataset.filename = file;
+        img.addEventListener("click", () => {
+          panel.selectedImage = file;
+          for (const node of panel.imageGrid.querySelectorAll("img")) {
+            node.style.outline = node === img ? "2px solid #3b82f6" : "none";
+          }
+        });
         panel.imageGrid.appendChild(img);
       }
       if (!files.length) {
@@ -777,8 +824,14 @@ function applyInfo(panel, info) {  if (!info) return;
       }
       panel.imageGrid.style.display = "grid";
       panel.imagePreview.style.display = "none";
+      panel.selectedImage = panel.selectedImage && files.includes(panel.selectedImage) ? panel.selectedImage : files[0];
+      for (const node of panel.imageGrid.querySelectorAll("img")) {
+        node.style.outline = node.dataset.filename === panel.selectedImage ? "2px solid #3b82f6" : "none";
+      }
+      panel.saveAsBtn.style.display = "block";
     } else {
       if (panel.imageGrid) panel.imageGrid.style.display = "none";
+      if (panel.saveAsBtn) panel.saveAsBtn.style.display = "block";
       const name = info.first_filename || String(info.filename || "").split(" … ")[0];
       if (name) {
         const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });

@@ -125,6 +125,45 @@ async def handle_h3_project(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Failed to load H3 project: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/asset/save-as")
+async def handle_asset_save_as(request: web.Request) -> web.Response:
+    """把已保存的输出文件复制到用户指定路径（图片另存为）。"""
+    import shutil
+    from pathlib import Path as _Path
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    filename = str(payload.get("filename") or "").strip()
+    subfolder = str(payload.get("subfolder") or "").strip().strip("/\\")
+    kind = str(payload.get("type") or "output").strip() or "output"
+    target = str(payload.get("target") or "").strip()
+    if not filename:
+        return web.json_response({"error": "filename is required"}, status=400)
+    if not target:
+        return web.json_response({"error": "target is required"}, status=400)
+    try:
+        source_dir = _Path(folder_paths.get_output_directory()).resolve()
+        if kind != "output":
+            input_dir = _Path(folder_paths.get_input_directory()).resolve()
+            source_dir = input_dir
+        source = (source_dir / subfolder / filename).resolve()
+        if not str(source).startswith(str(source_dir)):
+            return web.json_response({"error": "source outside allowed directory"}, status=400)
+        if not source.is_file():
+            return web.json_response({"error": f"source not found: {source}"}, status=404)
+        destination = _Path(target).expanduser().resolve()
+        if destination.is_dir():
+            destination = destination / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return web.json_response({"ok": True, "path": str(destination)})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"save-as failed: {error}"}, status=500)
+
+
 @PromptServer.instance.routes.get("/easy-media/project/canvas_inspect")
 async def handle_h3_project_canvas_inspect(request: web.Request) -> web.Response:
     """Detect per-segment resolution mismatches for the combine widget warning.
