@@ -1005,12 +1005,14 @@ class EasyMultiTrackProject(io.ComfyNode):
                             [
                                 io.Combo.Input(
                                     "audio_first_resolution",
+                                    display_name="采样分辨率",
                                     options=["64x64", "32x32"],
                                     default="64x64",
                                     tooltip=(
-                                        "有声剧占位画面：64x64（推荐，音质稳定）或 "
-                                        "32x32（更快，视频 token 更少）。真实音频时长"
-                                        "仍由段时长决定，与本项无关。"
+                                        "仅 audio_first 采样模式生效：有声剧占位画面 "
+                                        "64x64（推荐，音质稳定）或 32x32（更快，"
+                                        "视频 token 更少）。真实音频时长由段时长决定，"
+                                        "与本项无关；其他采样模式忽略此项。"
                                     ),
                                 ),
                             ],
