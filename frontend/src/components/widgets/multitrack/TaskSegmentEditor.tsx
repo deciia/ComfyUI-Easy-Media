@@ -420,15 +420,23 @@ export function TaskSegmentEditor({
     setCombinedPromptInput((current) => current === combinedPromptValue ? current : combinedPromptValue)
   }, [combinedPromptValue])
 
-  // 图片项目：任务类型跟随参考图数量（0/1 图=文生图/图生图，多图=参考编辑）
+  // 图片项目：无图默认文生图；多图默认参考编辑；单图保留用户选择（i2i / 参考生图都允许）
   const imageTaskImageCount = images.length
   useEffect(() => {
     if (projectKind !== 'image') return
     const currentMode = segment.content.task_mode ?? 'default'
-    const targetMode = imageTaskImageCount >= 2 ? 'ref' : 'default'
-    if (currentMode === targetMode) return
-    if (currentMode !== 'default' && currentMode !== 'ref') return
-    handleDropdownContentChange({ task_mode: targetMode })
+    if (imageTaskImageCount === 0) {
+      if (currentMode === 'default') return
+      if (currentMode !== 'ref') return
+      handleDropdownContentChange({ task_mode: 'default' })
+      return
+    }
+    if (imageTaskImageCount >= 2) {
+      if (currentMode === 'ref') return
+      handleDropdownContentChange({ task_mode: 'ref' })
+      return
+    }
+    // 单图：i2i 与参考生图都合法，不自动切换
   }, [projectKind, imageTaskImageCount, segment.id, segment.content.task_mode])
 
   function commitDuration() {
