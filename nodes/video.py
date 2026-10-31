@@ -469,6 +469,8 @@ class EasySaveVideo(io.ComfyNode):
         audio_format: str = "WAV",
         media=None,
     ) -> io.NodeOutput:
+        if not str(filename_prefix or "").strip() or str(filename_prefix).strip() == "ComfyUI":
+            filename_prefix = "easy_media/save"
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
             payload = input_mode
