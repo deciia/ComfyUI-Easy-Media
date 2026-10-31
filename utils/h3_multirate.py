@@ -171,8 +171,10 @@ def _sigma_values(sigmas) -> list[float]:
 
 def _model_shifts(model) -> tuple[float, float]:
     """偏移值来自模型层（项目侧统一施加），节点本身不提供偏移设置。"""
-    options = getattr(getattr(model, "model_options", None), "get", None)
-    transformer_options = (options.get("transformer_options", {}) if callable(options) else {}) or {}
+    model_options = getattr(model, "model_options", None)
+    transformer_options = {}
+    if isinstance(model_options, dict):
+        transformer_options = model_options.get("transformer_options", {}) or {}
     try:
         shift_video = float(transformer_options.get("minimax_h3_sigma_shift_video", 12.0))
     except (TypeError, ValueError):
