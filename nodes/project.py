@@ -2833,9 +2833,9 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             ],
             hidden=[io.Hidden.unique_id],
             outputs=[
-                io.String.Output("FILENAME_PREFIX"),
-                io.AnyType.Output("MEDIA"),
-                io.Video.Output("VIDEO"),
+                io.String.Output("FILENAME_PREFIX", display_name="文件名前缀"),
+                io.AnyType.Output("MEDIA", display_name="多媒体（图片/音频/视频）"),
+                io.Video.Output("VIDEO", display_name="视频"),
             ],
             not_idempotent=True,
         )
