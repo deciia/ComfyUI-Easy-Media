@@ -442,6 +442,10 @@ function buildPanel() {
       && (Array.isArray(panel.info?.files) ? panel.info.files.length > 1 : Number(panel.info?.count || 0) > 1);
     if (panel.imageGrid) panel.imageGrid.style.display = multiImages ? "grid" : "none";
     panel.imagePreview.style.display = kind === "images" && !multiImages && panel.imagePreview.src ? "block" : "none";
+    if (kind !== "images") panel.selectedImage = null;
+    if (panel.saveAsBtn) {
+      panel.saveAsBtn.style.display = kind === "images" && panel.selectedImage ? "block" : "none";
+    }
     if (panel.audioPlayer) panel.audioPlayer.style.display = kind === "audio" ? "block" : "none";
 
     // 详情与调色台各有独立开关；三角形只控制上方的设置参数
@@ -540,6 +544,12 @@ function buildPanel() {
 
   panel.refreshLayout = refreshLayout;
   saveAsBtn.addEventListener("click", () => saveSelectedImageAs(panel));
+  imagePreview.addEventListener("click", () => {
+    if (!panel.singleImageName) return;
+    panel.selectedImage = panel.singleImageName;
+    imagePreview.style.outline = "2px solid #3b82f6";
+    saveAsBtn.style.display = "block";
+  });
   return panel;
 }
 
@@ -815,6 +825,7 @@ function applyInfo(panel, info) {  if (!info) return;
           for (const node of panel.imageGrid.querySelectorAll("img")) {
             node.style.outline = node === img ? "2px solid #3b82f6" : "none";
           }
+          panel.saveAsBtn.style.display = "block";
         });
         panel.imageGrid.appendChild(img);
       }
@@ -824,14 +835,19 @@ function applyInfo(panel, info) {  if (!info) return;
       }
       panel.imageGrid.style.display = "grid";
       panel.imagePreview.style.display = "none";
-      panel.selectedImage = panel.selectedImage && files.includes(panel.selectedImage) ? panel.selectedImage : files[0];
+      if (panel.selectedImage && !files.includes(panel.selectedImage)) panel.selectedImage = null;
       for (const node of panel.imageGrid.querySelectorAll("img")) {
         node.style.outline = node.dataset.filename === panel.selectedImage ? "2px solid #3b82f6" : "none";
       }
-      panel.saveAsBtn.style.display = "block";
+      panel.saveAsBtn.style.display = panel.selectedImage ? "block" : "none";
     } else {
       if (panel.imageGrid) panel.imageGrid.style.display = "none";
-      if (panel.saveAsBtn) panel.saveAsBtn.style.display = "block";
+      panel.singleImageName = info.first_filename
+        || String(info.filename || "").split(" … ")[0]
+        || null;
+      if (panel.saveAsBtn) {
+        panel.saveAsBtn.style.display = panel.selectedImage ? "block" : "none";
+      }
       const name = info.first_filename || String(info.filename || "").split(" … ")[0];
       if (name) {
         const q = new URLSearchParams({ filename: name, subfolder: info.subfolder || "", type: info.type || "output" });
