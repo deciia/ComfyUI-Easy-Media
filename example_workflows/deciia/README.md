@@ -21,9 +21,9 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 |---|---|---|
 | **ComfyUI_Deciia_EasyUse** | `DeciiaVideoModelLoader` 四合一模型加载、`DeciiaSamplerPreset` ×2 采样预设、`DeciiaSparseSolAttn` 稀疏注意力、`DeciiaVramSafeLoraStack` ×3 显存安全 LoRA 串；**并收录了下述班长captain 的 6 个节点**（`banzhang_nodes/` 子包） | https://github.com/deciia/ComfyUI_Deciia_EasyUse |
 
-### 班长captain 节点（已收录于 ComfyUI_Deciia_EasyUse）
+### 班长captain 分享的节点（已收录于 ComfyUI_Deciia_EasyUse）
 
-以下 6 个节点来自 **班长captain**（B站昵称）的「BanZhang 全家桶」插件。该插件未整体开源；经作者同意，工作流用到的这 6 个节点已收录进 **ComfyUI_Deciia_EasyUse**（`banzhang_nodes/` 子包，代码与原插件一致并注明来源）。**安装 EasyUse 即可用，无需另装班长插件。**
+以下 6 个节点是 **班长captain**（B站昵称）**分享**的节点/功能，出自其「BanZhang 全家桶」插件（该插件中也集成了其他作者的功能，这里的署名表示分享来源，不代表节点原作者）。插件未整体开源；经班长captain 同意，把这 6 个节点收录进 **ComfyUI_Deciia_EasyUse**（`banzhang_nodes/` 子包，代码与原插件一致并注明来源）。**安装 EasyUse 即可用，无需另装班长插件。**
 
 | 节点 | 说明 |
 |---|---|
@@ -96,7 +96,7 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 
 ## 5. 致谢
 
-- **班长captain**（B站昵称）——显存守卫 / H3 预览覆盖 / 活动监视器 / RTX 超分 / RIFE 插帧 / 系统净化等节点原作者，上述节点经其同意收录进 ComfyUI_Deciia_EasyUse；
+- **班长captain**（B站昵称）——显存守卫 / H3 预览覆盖 / 活动监视器 / RTX 超分 / RIFE 插帧 / 系统净化等节点的分享者（其插件亦集成其他作者的功能，特此说明），上述节点经其同意收录进 ComfyUI_Deciia_EasyUse；
 - **孤海 goohai**（Goohaitools 图像/视频对比、忽略多组）；
 - **MajoorWaldi**（OmniCam 相机编排）、**T8mars**（H3 语义桥 T8）、**kijai**（KJNodes）、**tl2012tl**（TE-Speed-VOSR2）、**LAOGOU-666**（Memory Cleanup）、**Suzie1**（Comfyroll）；
 - **yolain/ComfyUI-Easy-Media** 上游项目。
