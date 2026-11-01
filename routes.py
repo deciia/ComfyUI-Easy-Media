@@ -209,6 +209,56 @@ async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
     except Exception as error:
         return web.json_response({"error": f"copy playblast failed: {error}"}, status=500)
     camera["playblast"] = target.relative_to(output_root).as_posix()
+    # 同步一条相机参考视频轨，让多轨项目在 reference 模式下自动把它当参考视频
+    segment_start = 0
+    segment_end = 0
+    for track in (timeline.get("track_data") or {}).get("tracks") or []:
+        if not isinstance(track, dict) or track.get("type") != "camera":
+            continue
+        for segment in track.get("segments") or []:
+            if str(segment.get("id")) == segment_id:
+                segment_start = int(segment.get("start_frame") or 0)
+                segment_end = int(segment.get("end_frame") or segment_start)
+    camera_track = None
+    for track in (timeline.get("track_data") or {}).get("tracks") or []:
+        if isinstance(track, dict) and track.get("type") == "video" and track.get("name") == "相机参考":
+            camera_track = track
+            break
+    if camera_track is None:
+        camera_track = {
+            "id": f"camera-ref-{segment_id[:8]}",
+            "name": "相机参考",
+            "type": "video",
+            "color": "var(--multitrack-video-border, var(--accent))",
+            "muted": False,
+            "locked": False,
+            "segments": [],
+        }
+        (timeline.setdefault("track_data", {}).setdefault("tracks", [])).append(camera_track)
+    relative = camera["playblast"]
+    existing = None
+    for segment in camera_track.get("segments") or []:
+        if str((segment.get("content") or {}).get("file_path")) == relative:
+            existing = segment
+            break
+    reference_segment = {
+        "id": f"camera-ref-seg-{segment_id[:8]}",
+        "start_frame": segment_start,
+        "end_frame": segment_end,
+        "origin_start_frame": segment_start,
+        "content": {
+            "media_type": "video",
+            "source_type": "output",
+            "file_path": relative,
+            "file_name": target.name,
+            "reference_mode": "aligned",
+            "shared_reference": False,
+        },
+    }
+    if existing is not None:
+        existing.update(reference_segment)
+    else:
+        camera_track.setdefault("segments", []).append(reference_segment)
     try:
         save_timeline(project_name, timeline)
     except Exception as error:

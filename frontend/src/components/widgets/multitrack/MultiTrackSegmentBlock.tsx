@@ -192,7 +192,7 @@ export function MultiTrackSegmentBlock({
       ? (taskMode === 'ref' ? '音频克隆' : taskMode === 'edit' ? '声音设计' : '文生音频')
       : getMultiTrackTaskModeLabel(taskMode, t)
   const cameraLabel = trackType === 'camera'
-    ? cameraPresetLabel(segment.content.camera?.preset)
+    ? `${cameraPresetLabel(segment.content.camera?.preset)}${segment.content.camera?.playblast ? ' 🎞' : ''}`
     : ''
   const label = trackType === 'camera'
     ? cameraLabel

@@ -609,6 +609,66 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'get_camera_track',
+        description: '读取当前项目的相机轨（只读）：按任务段列运镜预设、关键帧、预演文件。Index 留空列出全部相机段。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '任务段号，1 起；留空看全部' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'set_camera_track',
+        description: '给任务段写运镜：自动找到重叠的相机段（没有就创建），设置预设/缓动/关键帧并编译运镜描述。关键帧帧号相对段起点。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '任务段号，1 起' },
+            preset: { type: 'string', description: 'static/push_in/pull_out/pan_left/pan_right/tilt_up/tilt_down/truck_left/truck_right/follow/orbit/crane_up/crane_down/handheld/zoom_in/zoom_out' },
+            easing: { type: 'string', enum: ['linear', 'ease_in', 'ease_out', 'ease_in_out'] },
+            keyframes: {
+              type: 'array',
+              description: '段内关键帧（相对段起点，第一帧应为 0）',
+              items: {
+                type: 'object',
+                properties: {
+                  frame: { type: 'number' },
+                  preset: { type: 'string' },
+                  easing: { type: 'string' },
+                },
+                required: ['frame', 'preset'],
+              },
+            },
+            compiled_prompt: { type: 'string', description: '直接指定运镜描述（留空则自动编译）' },
+            clear: { type: 'boolean', description: 'true 时删除该段的相机数据' },
+          },
+          required: ['index'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'attach_camera_playblast',
+        description: '把 OmniCam 3D 编辑器录制的预演挂到某段相机：复制进项目 camera 目录、写回相机段，并自动生成「相机参考」视频轨。',
+        parameters: {
+          type: 'object',
+          properties: {
+            index: { type: 'number', description: '任务段号，1 起' },
+            recording_path: { type: 'string', description: '预演文件绝对路径（Director 节点的 recording_path）' },
+          },
+          required: ['index', 'recording_path'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'write_prompt',
         description: '把一段的提示词写回脚本。只写 target 指定的那一种稿子：target=fragment 只写片段稿，target=final 只写最终提示词。默认不写任务轨、不改另一种稿子、不改其它段；这些都要显式传参或用户明确要求才做。',
         parameters: {
@@ -2707,6 +2767,139 @@ export function AgentRail({
         saved: flush.saved,
         note: errors.length ? '已按 force 强写，注意仍有 error。' : '已写入并通过校验。',
       }
+    }
+
+    if (name === 'get_camera_track' || name === 'set_camera_track' || name === 'attach_camera_playblast') {
+      const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
+      if (!projectName) return { error: '当前没有打开的项目' }
+      const loadTimeline = async () => {
+        const response = await fetch(`/easy-media/project/timeline?project_name=${encodeURIComponent(projectName)}`)
+        if (!response.ok) throw new Error(`load timeline failed: ${response.status}`)
+        return await response.json() as Record<string, unknown>
+      }
+      const saveTimeline = async (timeline: Record<string, unknown>) => {
+        const response = await fetch('/easy-media/project/timeline', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_name: projectName, timeline }),
+        })
+        if (!response.ok) throw new Error(`save timeline failed: ${response.status}`)
+        return await response.json() as Record<string, unknown>
+      }
+      const timeline = await loadTimeline()
+      const trackData = (timeline.track_data ?? {}) as { tracks?: Array<Record<string, unknown>>; frame_rate?: number }
+      const tracks = (trackData.tracks ?? []) as Array<Record<string, unknown>>
+      const taskSegments = tracks
+        .filter((track) => track.type === 'task')
+        .flatMap((track) => (track.segments ?? []) as Array<Record<string, unknown>>)
+        .sort((left, right) => Number(left.start_frame ?? 0) - Number(right.start_frame ?? 0))
+      const index = Number(args.index ?? 0)
+      const task = index > 0 ? taskSegments[index - 1] : undefined
+      if (index > 0 && !task) return { error: `段 ${index} 不存在` }
+      const startFrame = Number(task?.start_frame ?? 0)
+      const endFrame = Number(task?.end_frame ?? startFrame + 120)
+      const frames = Math.max(2, endFrame - startFrame)
+      const cameraTrack = tracks.find((track) => track.type === 'camera') as Record<string, unknown> | undefined
+      const cameraSegments = ((cameraTrack?.segments ?? []) as Array<Record<string, unknown>>)
+      const cameraSegment = cameraSegments.find((segment) => (
+        Number(segment.start_frame ?? 0) < endFrame && Number(segment.end_frame ?? 0) > startFrame
+      ))
+
+      if (name === 'get_camera_track') {
+        return {
+          project: projectName,
+          tasks: taskSegments.map((segment, position) => ({
+            index: position + 1,
+            start_frame: Number(segment.start_frame ?? 0),
+            end_frame: Number(segment.end_frame ?? 0),
+            camera: cameraSegments.find((item) => (
+              Number(item.start_frame ?? 0) < Number(segment.end_frame ?? 0)
+              && Number(item.end_frame ?? 0) > Number(segment.start_frame ?? 0)
+            ))?.content ?? null,
+          })).filter((item) => index <= 0 || item.index === index),
+        }
+      }
+
+      if (name === 'attach_camera_playblast') {
+        if (!task) return { error: 'attach_camera_playblast 需要 index' }
+        const recordingPath = String(args.recording_path ?? '').trim()
+        if (!recordingPath) return { error: 'recording_path 不能为空' }
+        const response = await fetch('/easy-media/camera/attach-playblast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project_name: projectName, segment_id: String(cameraSegment?.id ?? ''), recording_path: recordingPath }),
+        })
+        const result = await response.json() as Record<string, unknown>
+        if (!response.ok) return { error: String(result.error ?? 'attach failed') }
+        return { ok: true, ...result }
+      }
+
+      // set_camera_track
+      if (!task) return { error: 'set_camera_track 需要 index' }
+      if (args.clear === true) {
+        if (cameraTrack && cameraSegment) {
+          cameraTrack.segments = cameraSegments.filter((segment) => segment !== cameraSegment)
+          await saveTimeline(timeline)
+        }
+        return { ok: true, cleared: true, index }
+      }
+      const content = (cameraSegment?.content ?? {}) as Record<string, unknown>
+      const camera = { ...((content.camera ?? {}) as Record<string, unknown>) }
+      if (typeof args.preset === 'string' && args.preset) camera.preset = args.preset
+      if (typeof args.easing === 'string' && args.easing) camera.easing = args.easing
+      if (Array.isArray(args.keyframes)) {
+        camera.keyframes = (args.keyframes as Array<Record<string, unknown>>).map((key) => ({
+          frame: Math.max(0, Math.round(Number(key.frame ?? 0))),
+          preset: String(key.preset ?? camera.preset ?? 'static'),
+          easing: String(key.easing ?? camera.easing ?? 'ease_in_out'),
+        })).sort((left, right) => left.frame - right.frame)
+      }
+      if (typeof args.compiled_prompt === 'string' && args.compiled_prompt.trim()) {
+        camera.compiled_prompt = String(args.compiled_prompt)
+      } else {
+        const compiled = await fetch('/easy-media/camera/compile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera, fps: Number(trackData.frame_rate ?? 24), frames }),
+        })
+        if (compiled.ok) {
+          const compiledResult = await compiled.json() as { prompt?: string }
+          if (compiledResult.prompt) camera.compiled_prompt = compiledResult.prompt
+        }
+      }
+      if (!camera.keyframes && typeof camera.preset === 'string' && camera.preset !== 'static') {
+        camera.keyframes = [
+          { frame: 0, preset: camera.preset, easing: camera.easing ?? 'ease_in_out' },
+          { frame: frames - 1, preset: camera.preset, easing: camera.easing ?? 'ease_in_out' },
+        ]
+      }
+      if (!cameraTrack) {
+        tracks.push({
+          id: 'camera-track',
+          name: 'Camera',
+          type: 'camera',
+          color: 'var(--multitrack-video-border, var(--accent))',
+          muted: false,
+          locked: false,
+          segments: [{
+            id: `cam-${Date.now()}`,
+            start_frame: startFrame,
+            end_frame: endFrame,
+            content: { media_type: 'none', camera },
+          }],
+        })
+      } else if (!cameraSegment) {
+        cameraTrack.segments = [...cameraSegments, {
+          id: `cam-${Date.now()}`,
+          start_frame: startFrame,
+          end_frame: endFrame,
+          content: { media_type: 'none', camera },
+        }]
+      } else {
+        cameraSegment.content = { ...content, camera }
+      }
+      await saveTimeline(timeline)
+      return { ok: true, index, camera }
     }
 
     if (name === 'retoken_prompts') {

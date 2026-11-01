@@ -258,6 +258,11 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
             if not text:
                 text = _compile_camera_from_keyframes(camera)
             if text:
+                if camera.get("playblast"):
+                    text = (
+                        f"{text} Follow the camera motion of the reference video; "
+                        "do not copy its appearance."
+                    )
                 pieces.append(text)
     seen: set[str] = set()
     unique: list[str] = []

@@ -255,6 +255,17 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             >
               从 3D 编辑器取回
             </Button>
+            {camera.playblast ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => patchCamera({ playblast: undefined })}
+              >
+                清除预演
+              </Button>
+            ) : null}
           </div>
         </div>
       )}
