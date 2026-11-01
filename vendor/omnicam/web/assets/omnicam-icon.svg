@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Majoor OmniCam</title>
+  <!-- Vector twin of web/assets/omnicam-icon.png: same mark, ~1 KB so the
+       eagerly-loaded node-branding chunk stays cheap. Keep the two in sync. -->
+  <circle cx="128" cy="128" r="102" fill="#031228"/>
+  <circle cx="128" cy="128" r="53" fill="#f7f6ff"/>
+  <circle cx="128" cy="128" r="43" fill="#8873fd"/>
+</svg>
