@@ -69,7 +69,7 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 ## 3. 快速上手
 
 1. 按上表装齐插件、下齐模型。
-2. **替换参考素材**（脱敏后为占位名）：
+2. **替换参考素材**（默认为 `example_*` 占位名）：
    - 图片：`example_ref_01.png`（四视图）、`example_ref_02/03.jpg`（人物）、`example_ref_04.jpg`（场景）→ 在各 `LoadImage` 里选你自己的图；
    - 音频：`example_voice_ref_10s.wav` → `LoadAudio` 里选你自己的参考音色（约 10 秒干声最佳）。
    - 多轨编辑器任务段提示词里的 `<Picture n>` / `<Audio 1>` 令牌编号会随挂载顺序自动对齐，无需手改。
