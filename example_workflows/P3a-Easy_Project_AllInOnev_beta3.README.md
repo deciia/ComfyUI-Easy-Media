@@ -1,0 +1,97 @@
+# P3a · Easy Project All-in-One（beta3）参考工作流
+
+MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一条链路里包含：多轨编辑器项目时间线、参考图/音/视频挂载、OmniCam 相机编排运动层、语义桥（T8）+ HyperVAE 2× 超级解码、一采/二采双阶段采样与 LoRA 加速、以及 **RTX / VOSR2 / SeedVR2 三条超分出口**。
+
+> 工作流文件：[P3a-Easy_Project_AllInOnev_beta3.json](./P3a-Easy_Project_AllInOnev_beta3.json) · 预览：[P3a-Easy_Project_AllInOnev_beta3.jpg](./P3a-Easy_Project_AllInOnev_beta3.jpg)
+> 已脱敏：项目名、LoRA 预设名、参考素材文件名均改为 `example_*` 占位，删掉了孤立的 bypass 辅助节点与本机成片缓存信息。**参考素材需要换成你自己的**（见下方「快速上手」）。
+
+---
+
+## 1. 依赖插件清单
+
+### 本插件（必装）
+
+| 插件 | 用到的节点 | 地址 |
+|---|---|---|
+| **ComfyUI_Deciia_EasyMedia**（本仓库） | `easy multiTrackEditor` 多轨编辑器、`easy multitrackProject` 项目生成、`easy multitrackProjectVideoCombine` 项目合并、`easy saveVideo` ×4（保存媒体）、`easy clipTiming`、`easy makeImageList / makeVideoList / makeAudioList`、`easy modelLoaderPack`、`easy multiTrackAddSubtitleToVIdeo`、`easy deciiaH3SemanticBridgeConfig` ×2、`easy deciiaH3HyperVAE2xLoader` | https://github.com/deciia/ComfyUI-Easy-Media |
+
+### 配套 Deciia 插件（必装）
+
+| 插件 | 用到的节点 | 地址 |
+|---|---|---|
+| **ComfyUI_Deciia_EasyUse** | `DeciiaVideoModelLoader` 四合一模型加载、`DeciiaSamplerPreset` ×2 采样预设、`DeciiaSparseSolAttn` 稀疏注意力、`DeciiaVramSafeLoraStack` ×3 显存安全 LoRA 串 | https://github.com/deciia/ComfyUI_Deciia_EasyUse |
+
+### 班长插件（原作者已授权开源）
+
+| 插件 | 用到的节点 | 地址 |
+|---|---|---|
+| **ComfyUI_Deciia_Banzhang**（班长插件 fork） | 🛡️⚡ **显存守卫** `BanZhang_VRAM_Guard`、📈 **活动监视器·内存显存** `BanZhang_Mem_Graph`、**班长 MiniMax H3 预览覆盖** `MiniMaxH3PreviewOverride`（taeh3 实时预览）、🔍 RTX 超分降噪 `BanZhang_RTX_SuperResolution`、🎞️ RIFE 插帧 `BanZhang_RIFE_Interpolation`、🧹 全能系统净化 `BanZhang_VRAM_Cleaner` | https://github.com/deciia/ComfyUI_Deciia_Banzhang |
+
+> 🛡️⚡ 显存守卫、班长 MiniMax H3 预览覆盖、📈 活动监视器·内存显存 三个节点已获得原作者 **班长captain** 授权开源（B站：https://space.bilibili.com/15838129 ），后续会合并进 EasyUse / EasyMedia 发布，届时可去掉此依赖。
+
+### 第三方插件
+
+| 插件 | 用到的节点 | 地址 |
+|---|---|---|
+| **Goohaitools**（孤海） | `GH_ImageVideoComparer` ×3 图像/视频对比、`忽略多组` （按组批量 bypass） | https://github.com/goohai/Goohaitools-comfyui |
+| **ComfyUI-Majoor-OmniCam**（运动层相机编排） | `MajoorOmniCamDirector` 导演、`MajoorOmniCamExtractor` 提取器、`MajoorOmniCamMonitor` 监视器（h3_native） | https://github.com/MajoorWaldi/ComfyUI-Majoor-OmniCam |
+| **ComfyUI-KJNodes**（kijai） | `MiniMaxChunkFeedForward`、`MiniMaxLowVRAMAttention`、`MiniMaxH3MemoryEfficientSageAttentionPatch`（H3 省显存三件套） | https://github.com/kijai/ComfyUI-KJNodes |
+| **comfyui-minimax-h3-audio-T8**（T8mars） | `MiniMaxH3SemanticBridgeComposeT8` 语义桥多桥组合 | https://github.com/T8mars/comfyui-minimax-h3-audio-T8 |
+| **TE-Speed-VOSR2**（VOSR2 超分） | `TESpeedVOSR2Loader / Settings / Image` | https://github.com/tl2012tl/TE-Speed-VOSR2 |
+| **Comfyui-Memory_Cleanup**（LAOGOU-666） | `RAMCleanup`、`VRAMCleanup`（临时清内存显存组） | https://github.com/LAOGOU-666/Comfyui-Memory_Cleanup |
+| **ComfyUI_Comfyroll_CustomNodes**（Suzie1） | `CR Prompt Text`（台词/旁白文本） | https://github.com/Suzie1/ComfyUI_Comfyroll_CustomNodes |
+| SeedVR2 超分子图（**默认 bypass，可选**） | `SeedVR2Preprocess / Conditioning / PostProcessing` —— ComfyUI **内置**节点（`comfy_extras/nodes_seedvr.py`，需较新版本 ComfyUI），启用时需自备 SeedVR2 模型权重 | ComfyUI 内置 |
+
+其余 `LoadImage / LoadVideo / LoadAudio / SaveVideo / GetVideoComponents / LoraLoaderBypassModelOnly / ModelAttentionBackend / ResizeImageMaskNode / SplitImageWithAlpha / MaskToImage` 均为 ComfyUI 内置节点。
+
+## 2. 模型与权重清单
+
+| 类型 | 文件 | 说明 |
+|---|---|---|
+| diffusion_models | `MiniMax-H3/minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` | H3 hybrid FL2VA+Ref2VA int8 主模型 |
+| text_encoders | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | Qwen3-VL 32B NVFP4 |
+| vae | `minimax_h3_video_vae_int8_convrot.safetensors`、`minimax_h3_audio_vae_fp32.safetensors` | 视频 / 音频 VAE |
+| loras（一采加速） | `MiniMax-H3/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | 4 步 turbo |
+| loras（二采） | `MiniMax-H3/minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` | 4 步 DMAD |
+| loras（超采） | `hyperVAEKrea2Minimax_v20MinimaxX2Upscale.safetensors` | HyperVAE 2×（T8 fork 超级解码） |
+| loras（上采样器） | `h3_upscaler_lms_v0.1.safetensors` | multitrackProject 上采样 |
+| vae（预览） | `taeh3.safetensors` | 班长 H3 预览覆盖用的迷你 VAE |
+| loras（LoRA 串预设中的可选行） | `MMH3-MPOV`、`H3_Combat_V2`、`Motion_Repair_V2`、`Bunny_weapon_combatV1`、`minimax_h3_dmad_full_dareties…` 等 | 预设里默认大多关闭，按需自备 |
+| RTX 超分 | NVIDIA Maxine VFX（nvvfx） | 班长插件内 `Install_RTX_VFX_Deps.bat` 一键装依赖 |
+| RIFE 插帧 | v4.26 权重 | 首次运行自动下载 |
+| VOSR2 / SeedVR2 | 各自模型权重 | 启用对应超分出口时需要 |
+
+## 3. 快速上手
+
+1. 按上表装齐插件、下齐模型。
+2. **替换参考素材**（脱敏后为占位名）：
+   - 图片：`example_ref_01.png`（四视图）、`example_ref_02/03.jpg`（人物）、`example_ref_04.jpg`（场景）→ 在各 `LoadImage` 里选你自己的图；
+   - 音频：`example_voice_ref_10s.wav` → `LoadAudio` 里选你自己的参考音色（约 10 秒干声最佳）。
+   - 多轨编辑器任务段提示词里的 `<Picture n>` / `<Audio 1>` 令牌编号会随挂载顺序自动对齐，无需手改。
+3. 常用开关：
+   - 显存紧张 → 打开 🛡️⚡ 显存守卫（阈值 0.2）与「临时清内存显存」组；
+   - 想要实时预览 → 保持「班长 MiniMax H3 预览覆盖」开启（taeh3 迷你 VAE）；
+   - 超分出口三选一：RTX（快）/ VOSR2（平滑，适合人脸）/ SeedVR2（细节锐利，适合景观巨构），不用的保持 bypass。
+4. 生成入口在 `easy multitrackProject`（项目名已脱敏为 `example_project`，可自行改）；四路 `easy saveVideo` 分别直存、RTX、VOSR2、SeedVR2 出口。
+
+## 4. 脱敏改动清单（相对原版）
+
+| 位置 | 原值 | 改为 |
+|---|---|---|
+| multitrackProject 项目名 | `YZ金鱼工作流测试` | `example_project` |
+| LoRA 串预设名 | `YZ金鱼Selflift双采（-武戏）` | `Selflift双采（-武戏）` |
+| MarkdownNote | `YZ金鱼文武戏设置` | `文武戏设置` |
+| 参考图片文件名 | 4 个个人素材文件名 | `example_ref_01~04` |
+| 参考音频文件名 | `lz_ref_mid_68_10s.wav` | `example_voice_ref_10s.wav` |
+| easy saveVideo ×4 | `properties.easyVideoInfo`（含本机绝对路径） | 已整段删除 |
+| 孤立节点 | 6 个 bypass 的 `SetNode/GetNode`（OmniCam 辅助，无下游） | 已删除（3 条死链一并清理） |
+| 文件名前缀 | `ComfyUI_RTX超分␣` 等尾部空格 | 已 trim |
+
+节点数 87 → 81，连线 89 → 86；其余布局、分组、参数与原版一致。
+
+## 5. 致谢
+
+- **班长captain**（B站 https://space.bilibili.com/15838129 ）——显存守卫 / H3 预览覆盖 / 活动监视器 / RTX 超分 / RIFE 插帧 / 系统净化等节点原作者，已授权开源；
+- **孤海 goohai**（Goohaitools 图像/视频对比、忽略多组）；
+- **MajoorWaldi**（OmniCam 相机编排）、**T8mars**（H3 语义桥 T8）、**kijai**（KJNodes）、**tl2012tl**（TE-Speed-VOSR2）、**LAOGOU-666**（Memory Cleanup）、**Suzie1**（Comfyroll）；
+- **yolain/ComfyUI-Easy-Media** 上游项目。
