@@ -210,7 +210,7 @@ async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
         return web.json_response({"error": f"copy playblast failed: {error}"}, status=500)
     camera["playblast"] = target.relative_to(output_root).as_posix()
     try:
-        save_timeline(timeline)
+        save_timeline(project_name, timeline)
     except Exception as error:
         return web.json_response({"error": f"save timeline failed: {error}"}, status=500)
     return web.json_response({"playblast": camera["playblast"]})
