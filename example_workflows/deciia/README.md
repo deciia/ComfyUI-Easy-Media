@@ -3,7 +3,7 @@
 MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一条链路里包含：多轨编辑器项目时间线、参考图/音/视频挂载、OmniCam 相机编排运动层、语义桥（T8）+ HyperVAE 2× 超级解码、一采/二采双阶段采样与 LoRA 加速、以及 **RTX / VOSR2 / SeedVR2 三条超分出口**。
 
 > 工作流文件：[Easy_Project_AllInOnev_deciia_beta3.json](./Easy_Project_AllInOnev_deciia_beta3.json) · 预览：[Easy_Project_AllInOnev_deciia_beta3.jpg](./Easy_Project_AllInOnev_deciia_beta3.jpg)
-> 已脱敏：项目名、LoRA 预设名、参考素材文件名均改为 `example_*` 占位，删掉了孤立的 bypass 辅助节点与本机成片缓存信息。**参考素材需要换成你自己的**（见下方「快速上手」）。
+> 已脱敏：项目名、LoRA 预设名、笔记中的个人代号、参考素材文件名均改为 `example_*` 等中性占位，并清除了节点里缓存的本机成片路径信息；**节点与连线与原版完全一致（含 bypass 的辅助节点）**。**参考素材需要换成你自己的**（见下方「快速上手」）。
 
 ---
 
@@ -81,18 +81,19 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 
 ## 4. 脱敏改动清单（相对原版）
 
-| 位置 | 原值 | 改为 |
-|---|---|---|
-| multitrackProject 项目名 | `YZ金鱼工作流测试` | `example_project` |
-| LoRA 串预设名 | `YZ金鱼Selflift双采（-武戏）` | `Selflift双采（-武戏）` |
-| MarkdownNote | `YZ金鱼文武戏设置` | `文武戏设置` |
-| 参考图片文件名 | 4 个个人素材文件名 | `example_ref_01~04` |
-| 参考音频文件名 | `lz_ref_mid_68_10s.wav` | `example_voice_ref_10s.wav` |
-| easy saveVideo ×4 | `properties.easyVideoInfo`（含本机绝对路径） | 已整段删除 |
-| 孤立节点 | 6 个 bypass 的 `SetNode/GetNode`（OmniCam 辅助，无下游） | 已删除（3 条死链一并清理） |
-| 文件名前缀 | `ComfyUI_RTX超分␣` 等尾部空格 | 已 trim |
+> 只做**重命名与缓存清除**，不增删任何节点和连线（含 bypass 的辅助节点，原样保留）。
 
-节点数 87 → 81，连线 89 → 86；其余布局、分组、参数与原版一致。
+| 位置 | 处理 |
+|---|---|
+| multitrackProject 项目名 | 个人项目名 → `example_project` |
+| LoRA 串预设名 ×2 | 去掉预设名中的个人代号 |
+| MarkdownNote | 去掉笔记中的个人代号 |
+| 参考图片文件名 ×4 | 个人素材文件名 → `example_ref_01~04` |
+| 参考音频文件名 | 个人参考音频文件名 → `example_voice_ref_10s.wav` |
+| easy saveVideo ×4 | 删除 `properties.easyVideoInfo`（缓存的本机成片绝对路径） |
+| 文件名前缀 | 去掉尾部多余空格 |
+
+节点数与连线数与原版一致（87 / 89）；布局、分组、参数与原版一致。
 
 ## 5. 致谢
 
