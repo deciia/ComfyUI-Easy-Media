@@ -1323,7 +1323,7 @@ describe('TaskSegmentEditor', () => {
       expect(systemPrompt.textContent).toBe('MiniMax reference template')
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith('/easy-media/prompt/system-prompts')
+    expect(fetchMock).toHaveBeenCalledWith('/easy-media/prompt/system-prompts?project_kind=video')
 
     unmount()
     render(<TaskSegmentEditor segment={refSegment} onContentChange={onContentChange} />)
