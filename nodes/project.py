@@ -2871,6 +2871,88 @@ class EasyH3CameraPromptInject(io.ComfyNode):
         return io.NodeOutput(inject_h3_camera_prompt(prompt, camera))
 
 
+class EasyH3CameraPlayblast(io.ComfyNode):
+    """读取项目相机轨的预演视频，输出视频/帧/运镜提示词（层B 手工接线用）。"""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy h3CameraPlayblast",
+            display_name="相机预演（OmniCam）",
+            category="EasyMedia",
+            description="读取相机轨的预演视频与运镜描述，可接到 H3 的参考视频/参考帧。",
+            inputs=[
+                io.String.Input("project_name", default=""),
+                io.Int.Input("start_frame", default=0, min=0),
+                io.Int.Input("end_frame", default=0, min=0),
+                io.String.Input("playblast_path", default="", optional=True),
+            ],
+            outputs=[
+                io.Video.Output(display_name="预演视频"),
+                io.Image.Output(display_name="预演帧"),
+                io.String.Output(display_name="运镜提示词"),
+                io.String.Output(display_name="轨迹 JSON"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, project_name: str = "", start_frame: int = 0, end_frame: int = 0,
+                playblast_path: str = "") -> io.NodeOutput:
+        import json as _json
+        import os
+
+        from ..utils.camera_omnicam import compile_camera_motion_scene, compile_camera_prompt
+        from ..utils.h3_project import inject_h3_camera_prompt  # noqa: F401
+        from ..utils.h3_timeline import load_timeline
+
+        camera: dict = {}
+        frames = max(2, int(end_frame or 0) - int(start_frame or 0) or 120)
+        try:
+            timeline = load_timeline(project_name)
+            tracks = (timeline.get("track_data") or {}).get("tracks") or []
+            for track in tracks:
+                if not isinstance(track, dict) or track.get("type") != "camera":
+                    continue
+                for segment in track.get("segments") or []:
+                    seg_start = int(segment.get("start_frame") or 0)
+                    seg_end = int(segment.get("end_frame") or seg_start)
+                    if seg_end <= int(start_frame) or seg_start >= int(end_frame):
+                        continue
+                    camera = segment.get("camera") or (segment.get("content") or {}).get("camera") or {}
+        except Exception:
+            camera = camera if isinstance(camera, dict) else {}
+        prompt = str((camera or {}).get("compiled_prompt") or "").strip()
+        if not prompt:
+            prompt = compile_camera_prompt(camera, fps=24, frames=frames)
+        scene = compile_camera_motion_scene(camera, fps=24, frames=frames)
+
+        video = None
+        path = str(playblast_path or (camera or {}).get("playblast") or "").strip()
+        if path:
+            from comfy_api.latest import InputImpl
+            import folder_paths
+
+            candidates = [
+                path,
+                os.path.join(folder_paths.get_input_directory(), path),
+                os.path.join(folder_paths.get_output_directory(), path),
+            ]
+            for candidate in candidates:
+                if os.path.isfile(candidate):
+                    try:
+                        video = InputImpl.VideoFromFile(candidate)
+                    except Exception:
+                        video = None
+                    break
+        frames_out = None
+        if video is not None:
+            try:
+                frames_out, _audio, _fps = video.get_components()
+            except Exception:
+                frames_out = None
+        return io.NodeOutput(video, frames_out, prompt, _json.dumps(scene, ensure_ascii=False))
+
+
 class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
     """Combine a project timeline configured by the React project widget."""
 

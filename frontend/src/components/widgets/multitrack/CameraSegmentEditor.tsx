@@ -100,10 +100,28 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       })
       if (!response.ok) return
       const result = await response.json() as { prompt?: string }
-      patchCamera({
+      const patch: Record<string, unknown> = {
         omnicam_state: stateJson as unknown as Record<string, unknown>,
         ...(result.prompt ? { compiled_prompt: result.prompt } : {}),
-      })
+      }
+      const recordingPath = widgets.find((item) => item.name === 'recording_path')?.value
+      const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
+      if (typeof recordingPath === 'string' && recordingPath.trim() && projectName) {
+        try {
+          const attach = await fetch('/easy-media/camera/attach-playblast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_name: projectName, segment_id: segment.id, recording_path: recordingPath }),
+          })
+          if (attach.ok) {
+            const attached = await attach.json() as { playblast?: string }
+            if (attached.playblast) patch.playblast = attached.playblast
+          }
+        } catch (error) {
+          console.debug('[EasyMedia] attach playblast failed', error)
+        }
+      }
+      patchCamera(patch as Partial<CameraData>)
     } catch (error) {
       console.debug('[EasyMedia] import OmniCam state failed', error)
     }
@@ -250,6 +268,11 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       <div className="text-[9px] text-muted-foreground">
         提示词预览：{compileCameraPrompt(camera)}
       </div>
+      {camera.playblast ? (
+        <div className="truncate text-[9px] text-muted-foreground" title={camera.playblast}>
+          预演：{camera.playblast}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -164,6 +164,58 @@ async def handle_asset_save_as(request: web.Request) -> web.Response:
         return web.json_response({"error": f"save-as failed: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/attach-playblast")
+async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
+    """把 OmniCam 录制的预演复制进项目 camera 目录，并写回相机段。"""
+    import shutil
+
+    from .utils.h3_timeline import load_timeline, save_timeline
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    project_name = str(payload.get("project_name") or "").strip()
+    segment_id = str(payload.get("segment_id") or "").strip()
+    recording_path = str(payload.get("recording_path") or "").strip()
+    if not project_name or not segment_id or not recording_path:
+        return web.json_response({"error": "project_name / segment_id / recording_path are required"}, status=400)
+    if not Path(recording_path).is_file():
+        return web.json_response({"error": f"recording not found: {recording_path}"}, status=404)
+    try:
+        timeline = load_timeline(project_name)
+    except Exception as error:
+        return web.json_response({"error": f"load timeline failed: {error}"}, status=404)
+    camera = None
+    for track in (timeline.get("track_data") or {}).get("tracks") or []:
+        if not isinstance(track, dict) or track.get("type") != "camera":
+            continue
+        for segment in track.get("segments") or []:
+            if str(segment.get("id")) != segment_id:
+                continue
+            camera = segment.setdefault("content", {}).setdefault("camera", {})
+    if camera is None:
+        return web.json_response({"error": "camera segment not found"}, status=404)
+    output_root = Path(folder_paths.get_output_directory()).resolve()
+    project_dir = output_root / "easy_media" / "projects" / "".join(
+        ch for ch in project_name if ch not in '\\/:*?"<>|'
+    ).strip()
+    camera_dir = project_dir / "camera"
+    camera_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(recording_path).suffix or ".mp4"
+    target = camera_dir / f"playblast_{segment_id[:12]}{suffix}"
+    try:
+        shutil.copy2(recording_path, target)
+    except Exception as error:
+        return web.json_response({"error": f"copy playblast failed: {error}"}, status=500)
+    camera["playblast"] = target.relative_to(output_root).as_posix()
+    try:
+        save_timeline(timeline)
+    except Exception as error:
+        return web.json_response({"error": f"save timeline failed: {error}"}, status=500)
+    return web.json_response({"playblast": camera["playblast"]})
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/editor-state")
 async def handle_camera_editor_state(request: web.Request) -> web.Response:
     """EasyMedia 相机 → OmniCam 编辑器 state_json（用于打开 3D 编辑器）。"""
