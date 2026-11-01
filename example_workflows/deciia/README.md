@@ -2,7 +2,7 @@
 
 MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一条链路里包含：多轨编辑器项目时间线、参考图/音/视频挂载、OmniCam 相机编排运动层、语义桥（T8）+ HyperVAE 2× 超级解码、一采/二采双阶段采样与 LoRA 加速、以及 **RTX / VOSR2 / SeedVR2 三条超分出口**。
 
-> 工作流文件：[P3a-Easy_Project_AllInOnev_beta3.json](./P3a-Easy_Project_AllInOnev_beta3.json) · 预览：[P3a-Easy_Project_AllInOnev_beta3.jpg](./P3a-Easy_Project_AllInOnev_beta3.jpg)
+> 工作流文件：[Easy_Project_AllInOnev_deciia_beta3.json](./Easy_Project_AllInOnev_deciia_beta3.json) · 预览：[Easy_Project_AllInOnev_deciia_beta3.jpg](./Easy_Project_AllInOnev_deciia_beta3.jpg)
 > 已脱敏：项目名、LoRA 预设名、参考素材文件名均改为 `example_*` 占位，删掉了孤立的 bypass 辅助节点与本机成片缓存信息。**参考素材需要换成你自己的**（见下方「快速上手」）。
 
 ---

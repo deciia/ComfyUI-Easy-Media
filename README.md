@@ -30,7 +30,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 After installing, open ComfyUI and find the bundled example workflows in the **Templates** panel on the left sidebar — look for entries under **ComfyUI-Easy-Media**.
 
-**⭐ Advanced reference: [P3a · Easy Project All-in-One (beta3)](./example_workflows/P3a-Easy_Project_AllInOnev_beta3/)** (Chinese) — a full pipeline combining two-stage sampling, the multitrack project timeline, the OmniCam motion layer, the semantic-bridge super-decode, and RTX / VOSR2 / SeedVR2 upscale outlets. Dependencies and required models are listed in its README.
+**⭐ Advanced reference: [P3a · Easy Project All-in-One (beta3)](./example_workflows/deciia/)** (Chinese) — a full pipeline combining two-stage sampling, the multitrack project timeline, the OmniCam motion layer, the semantic-bridge super-decode, and RTX / VOSR2 / SeedVR2 upscale outlets. Dependencies and required models are listed in its README.
 
 <a id="multitrack-workflow-skill"></a>
 

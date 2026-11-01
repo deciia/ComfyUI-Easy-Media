@@ -32,7 +32,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 安装完成后，打开 ComfyUI，在左侧侧边栏的 `Templates（模板）` 面板中即可找到内置的示例工作流，查找 `ComfyUI-Easy-Media` 相关条目。
 
-**⭐ 进阶参考：[P3a · Easy Project All-in-One（beta3）](./example_workflows/P3a-Easy_Project_AllInOnev_beta3/)** —— 一采/二采双阶段采样 + 多轨项目时间线 + OmniCam 运动层 + 语义桥超级解码 + RTX/VOSR2/SeedVR2 三条超分出口的完整参考工作流（已脱敏），依赖插件与模型清单见其 README。
+**⭐ 进阶参考：[P3a · Easy Project All-in-One（beta3）](./example_workflows/deciia/)** —— 一采/二采双阶段采样 + 多轨项目时间线 + OmniCam 运动层 + 语义桥超级解码 + RTX/VOSR2/SeedVR2 三条超分出口的完整参考工作流（已脱敏），依赖插件与模型清单见其 README。
 
 <a id="multitrack-workflow-skill"></a>
 
