@@ -77,6 +77,8 @@ export interface CameraData {
   playblast?: string
   camera_embedding?: string
   native_tracks?: string
+  /** OmniCam 3D 编辑器原始 state_json */
+  omnicam_state?: string | Record<string, unknown>
 }
 
 export interface MultiTrackSegmentContent {

@@ -45,6 +45,70 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     patchCamera({ keyframes })
   }
 
+  async function openOmniCamEditor() {
+    try {
+      const response = await fetch('/easy-media/camera/editor-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
+      })
+      if (!response.ok) return
+      const result = await response.json() as { state?: Record<string, unknown> }
+      if (!result.state) return
+      const win = window as unknown as {
+        app?: { graph?: { _nodes?: Array<Record<string, unknown>>; add?: (node: unknown) => void; setDirtyCanvas?: (a: boolean, b: boolean) => void } }
+        LiteGraph?: { createNode?: (type: string) => Record<string, unknown> }
+      }
+      const app = win.app
+      const graph = app?.graph
+      if (!graph || !win.LiteGraph?.createNode) return
+      let node = graph._nodes?.find((item) => item.comfyClass === 'MajoorOmniCamDirector')
+      if (!node) {
+        node = win.LiteGraph.createNode('MajoorOmniCamDirector')
+        graph.add?.(node)
+      }
+      const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+      const setWidget = (name: string, value: unknown) => {
+        const widget = widgets.find((item) => item.name === name)
+        if (widget) widget.value = value
+      }
+      setWidget('state_json', JSON.stringify(result.state))
+      setWidget('width', 1280)
+      setWidget('height', 720)
+      setWidget('fps', 24)
+      setWidget('duration_seconds', durationFrames / 24)
+      setWidget('render_mode', 'omni_ref')
+      node.properties = { ...(node.properties as Record<string, unknown> | undefined), easyCameraSegmentId: segment.id }
+      graph.setDirtyCanvas?.(true, true)
+    } catch (error) {
+      console.debug('[EasyMedia] open OmniCam editor failed', error)
+    }
+  }
+
+  async function importFromOmniCamEditor() {
+    try {
+      const win = window as unknown as { app?: { graph?: { _nodes?: Array<Record<string, unknown>> } } }
+      const node = win.app?.graph?._nodes?.find((item) => item.comfyClass === 'MajoorOmniCamDirector')
+      if (!node) return
+      const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+      const stateJson = widgets.find((item) => item.name === 'state_json')?.value
+      if (typeof stateJson !== 'string' || !stateJson.trim()) return
+      const response = await fetch('/easy-media/camera/compile-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: stateJson }),
+      })
+      if (!response.ok) return
+      const result = await response.json() as { prompt?: string }
+      patchCamera({
+        omnicam_state: stateJson as unknown as Record<string, unknown>,
+        ...(result.prompt ? { compiled_prompt: result.prompt } : {}),
+      })
+    } catch (error) {
+      console.debug('[EasyMedia] import OmniCam state failed', error)
+    }
+  }
+
   async function compileWithOmniCam() {
     try {
       const response = await fetch('/easy-media/camera/compile', {
@@ -154,6 +218,26 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           >
             生成运镜描述（OmniCam）
           </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => { void openOmniCamEditor() }}
+            >
+              打开 3D 编辑器
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => { void importFromOmniCamEditor() }}
+            >
+              从 3D 编辑器取回
+            </Button>
+          </div>
         </div>
       )}
 

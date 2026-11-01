@@ -1,0 +1,121 @@
+"""LTX-2.5 Motion Track profile.
+
+Targets the Motion Track IC-LoRA (trained on LTX-2.3, documented by Lightricks
+as reused unchanged with LTX-2.5) through LTXVDrawTracks, exactly as the
+official ``LTX-2.5_ICLoRA_Motion_Track_Distilled.json`` wires it.
+"""
+
+from __future__ import annotations
+
+from ..adapters.ltx_prompt import build_ltx_prompt
+from ..adapters.ltx_tracks import ltx25_frame_count
+from ..core.motion_resolution import resolve_motion_scene_tracks
+from ..guides.prompt_ir import PromptCompileIR, build_prompt_compile_ir
+from ..monitor.result import Check, CompiledMotion, PromptCompilation, ResolvedTimeline, raise_on_blocked
+from .base import CompileRequest
+from .shots import multi_shot_check, multi_shot_error
+from .track_json import encoding_check, tracks_json, visible_prefix_tracks
+
+
+class LtxMotionProfile:
+    id = "ltx25_motion_track"
+    display_name = "LTX 2.5 Motion Track"
+    semantic = "screen_tracks"
+    frame_policy = "8n_plus_1"
+
+    def resolve_timeline(self, request: CompileRequest) -> ResolvedTimeline:
+        frame_count = ltx25_frame_count(request.duration_seconds, request.target_fps)
+        return ResolvedTimeline(
+            width=request.target_width,
+            height=request.target_height,
+            fps=request.target_fps,
+            duration_seconds=frame_count / request.target_fps,
+            frame_count=frame_count,
+            frame_policy=self.frame_policy,
+        )
+
+    def _sampled_tracks(self, request: CompileRequest):
+        """Resolve the layers once, so preflight judges what compile encodes."""
+        timeline = self.resolve_timeline(request)
+        return resolve_motion_scene_tracks(
+            request.motion_scene,
+            sample_count=timeline.frame_count,
+            out_seconds=request.source_last_frame_time,
+            width=timeline.width,
+            height=timeline.height,
+        )
+
+    def preflight(self, request: CompileRequest) -> list[Check]:
+        tracks = self._sampled_tracks(request)
+        enabled_count = sum(layer.enabled for layer in request.motion_scene.motion_layers)
+        timeline = self.resolve_timeline(request)
+        return [
+            Check(
+                id="motion_layers",
+                label=f"Enabled motion layers: {enabled_count}",
+                state="PASS" if enabled_count else "BLOCKED",
+                message=(
+                    "LTX Motion requires at least one enabled motion layer. In the Director, "
+                    "draw one with the motion track tool, or use Project to follow a scene "
+                    "point through the camera."
+                )
+                if not enabled_count
+                else "",
+            ),
+            Check(
+                id="target_length",
+                label=f"LTX target length: {timeline.frame_count} (8n+1)",
+                state="PASS",
+            ),
+            Check(
+                id="target_size",
+                label=f"LTX target size: {timeline.width}x{timeline.height}",
+                state="PASS" if timeline.width % 32 == 0 and timeline.height % 32 == 0 else "WARNING",
+                message=""
+                if timeline.width % 32 == 0 and timeline.height % 32 == 0
+                else (
+                    "LTX-2.5 renders at multiples of 32. Feed target_width/height from the "
+                    "resized image LTXVDrawTracks draws on, or the tracks will not line up."
+                ),
+            ),
+            multi_shot_check(
+                request.motion_scene,
+                display_name="LTX Motion Track",
+                can_represent=False,
+            ),
+            encoding_check(tracks, display_name="LTX Motion Track"),
+        ]
+
+    def compile_prompt(self, request: CompileRequest, ir: PromptCompileIR) -> PromptCompilation:
+        del request  # every clause comes from ir; base_prompt is ir.base_prompt
+        return PromptCompilation(text=build_ltx_prompt(ir))
+
+    def compile(self, request: CompileRequest) -> CompiledMotion:
+        checks = self.preflight(request)
+        # A blocked gate has to stop compilation, not just colour the panel.
+        if request.motion_scene.is_multi_shot:
+            raise ValueError(multi_shot_error(request.motion_scene, "LTX Motion Track"))
+        if checks[0].state == "BLOCKED":
+            raise ValueError("LTX Motion requires at least one enabled motion layer")
+        # Any other BLOCKED gate stops here too, so a check added to preflight
+        # is binding without also having to be enumerated in compile.
+        raise_on_blocked(checks)
+
+        timeline = self.resolve_timeline(request)
+        sampled = self._sampled_tracks(request)
+
+        encoded = visible_prefix_tracks(sampled, width=timeline.width, height=timeline.height)
+        if not encoded:
+            raise ValueError("LTX Motion has no trajectory visible on its first sample")
+
+        ir = build_prompt_compile_ir(request)
+        return CompiledMotion(
+            profile_id=self.id,
+            semantic=self.semantic,
+            timeline=timeline,
+            final_prompt=self.compile_prompt(request, ir).text,
+            tracks_json=tracks_json(encoded),
+            checks=tuple(checks),
+        )
+
+LTX_MOTION_PROFILE = LtxMotionProfile()

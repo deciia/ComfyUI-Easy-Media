@@ -177,3 +177,54 @@ def compile_camera_motion_scene(camera: dict[str, Any] | None, *, fps: float, fr
         return track.to_dict()
     except Exception:
         return {}
+
+
+def build_editor_state(camera: dict[str, Any] | None, *, fps: float, frames: int,
+                       width: int = 1280, height: int = 720) -> dict[str, Any]:
+    """EasyMedia 相机数据 → OmniCam 编辑器 state_json（供 Director 节点直接使用）。"""
+    from dataclasses import asdict
+
+    try:
+        track = build_omnicam_track(camera, fps=fps, frames=frames, width=width, height=height)
+    except Exception:
+        return {}
+    keyframes = [
+        {"frame": key.frame, "camera": asdict(key.camera), "interpolation": key.interpolation}
+        for key in track.keyframes
+    ]
+    objects = [obj.to_dict() if hasattr(obj, "to_dict") else obj for obj in (track.objects or [])]
+    return {
+        "schema_version": 1,
+        "fps": float(fps),
+        "duration_frames": int(frames),
+        "cameras": [{
+            "id": "camera_1",
+            "name": "Camera 1",
+            "enabled": True,
+            "camera": keyframes[0]["camera"],
+            "keyframes": keyframes,
+        }],
+        "objects": objects,
+        "active_camera_id": "camera_1",
+        "playblast_camera_id": "camera_1",
+    }
+
+
+def compile_from_editor_state(state: dict[str, Any], *, fps: float | None = None) -> dict[str, Any]:
+    """OmniCam 编辑器 state_json → 运镜描述 + motion_scene。"""
+    if not isinstance(state, dict) or not state.get("cameras"):
+        return {"prompt": "", "motion_scene": {}}
+    try:
+        from ..vendor.omnicam.core.compiler import compile_editor_scene
+        from ..vendor.omnicam.guides.analysis import build_camera_motion_block
+
+        scene = compile_editor_scene(state)
+        track = None
+        for camera in scene.cameras:
+            if camera.id == scene.playblast_camera_id:
+                track = camera.track
+                break
+        prompt = build_camera_motion_block(track) if track is not None else ""
+        return {"prompt": prompt, "motion_scene": scene.to_dict()}
+    except Exception:
+        return {"prompt": "", "motion_scene": {}}

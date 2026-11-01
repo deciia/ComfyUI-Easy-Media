@@ -22,7 +22,7 @@ PLUGIN = Path(__file__).resolve().parent.parent
 OMNICAM_DISABLED = PLUGIN.parent / "ComfyUI-Majoor-OmniCam.disabled"
 VENDOR = PLUGIN / "vendor" / "omnicam"
 
-ENGINE_DIRS = ("core", "guides")
+ENGINE_DIRS = ("core", "guides", "nodes", "comfy_compat", "extractor", "reconstruction", "exchange", "assets", "agent")
 ENGINE_FILES = (
     "adapters/h3.py",
     "adapters/h3_sections.py",
@@ -75,6 +75,12 @@ def main() -> int:
         _copy(OMNICAM_DISABLED / "omnicam" / name, VENDOR / name, args.dry_run, changes)
     for rel in ENGINE_FILES:
         _copy(OMNICAM_DISABLED / "omnicam" / rel, VENDOR / rel, args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "routes.py", VENDOR / "routes.py", args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "routes_chunks.py", VENDOR / "routes_chunks.py", args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "routes_scenes.py", VENDOR / "routes_scenes.py", args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "capabilities.py", VENDOR / "capabilities.py", args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "node_registry.py", VENDOR / "node_registry.py", args.dry_run, changes)
+    _copy(OMNICAM_DISABLED / "omnicam" / "http_json.py", VENDOR / "http_json.py", args.dry_run, changes)
     for name in WEB_DIRS:
         _copy(OMNICAM_DISABLED / name, VENDOR / name, args.dry_run, changes)
     _copy(OMNICAM_DISABLED / "LICENSE", VENDOR / "LICENSE", args.dry_run, changes)

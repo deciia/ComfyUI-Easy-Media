@@ -1,0 +1,250 @@
+"""In-memory session broker for OmniCam Agent v1.
+
+A live Director browser registers a session here and receives a bearer
+token back. An external Agent process then targets that session with
+bounded queries/transactions, which this broker forwards to the exact
+browser client id over ComfyUI's existing WebSocket connection
+(``PromptServer.instance.send_sync``) and awaits a reply the browser posts
+back through ``/reply``.
+
+Nothing here is persisted: a server restart drops every session, and the
+browser's heartbeat/re-register loop is expected to recover from that.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import secrets
+import time
+import uuid
+from dataclasses import dataclass
+from typing import Any
+
+from ..comfy_compat.server import PromptServer
+from .protocol import (
+    AGENT_EVENT,
+    AGENT_PROTOCOL,
+    AGENT_SCHEMA_VERSION,
+    MAX_PENDING_REQUESTS,
+    MAX_SESSIONS,
+    REQUEST_TIMEOUT_SECONDS,
+    SESSION_TTL_SECONDS,
+    AgentProtocolError,
+)
+from .transaction_journal import TransactionJournal
+
+
+@dataclass(slots=True)
+class AgentSession:
+    session_id: str
+    token: str
+    client_id: str
+    node_id: str
+    label: str
+    director_api: int
+    revision: int
+    operations: tuple[str, ...]
+    queries: tuple[str, ...]
+    touched_at: float
+    # The ComfyUI user who registered this session (routes.py's
+    # agent_session_register()). Plan/apply-plan bind to it so one user's
+    # instruction can never be planned or applied against another user's
+    # live Director session (design spec section 13's owner scoping, now
+    # extended from plans to the session itself).
+    owner_id: str = ""
+    target: dict[str, str] | None = None
+
+
+@dataclass(slots=True)
+class PendingRequest:
+    session_id: str
+    future: asyncio.Future[dict[str, Any]]
+
+
+class AgentBroker:
+    """Owns every live session and in-flight request. One instance per process."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, AgentSession] = {}
+        self._pending: dict[str, PendingRequest] = {}
+        self._transactions = TransactionJournal()
+
+    # -- internal ---------------------------------------------------------
+
+    def _prune_expired(self, *, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        expired = [sid for sid, session in self._sessions.items() if now - session.touched_at > SESSION_TTL_SECONDS]
+        for sid in expired:
+            self._drop_session(sid)
+
+    def _drop_session(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
+        stale = [rid for rid, pending in self._pending.items() if pending.session_id == session_id]
+        for rid in stale:
+            pending = self._pending.pop(rid, None)
+            if pending is not None and not pending.future.done():
+                pending.future.set_exception(
+                    AgentProtocolError("SESSION_CLOSED", "The Director session was closed", 410)
+                )
+        self._transactions.drop_session(session_id)
+
+    def require_session(self, session_id: str) -> AgentSession:
+        self._prune_expired()
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise AgentProtocolError("UNKNOWN_SESSION", "No such OmniCam Agent session", 404)
+        return session
+
+    def verify_token(self, session: AgentSession, token: str) -> None:
+        if not secrets.compare_digest(session.token, token):
+            raise AgentProtocolError("BAD_SESSION_TOKEN", "Invalid OmniCam Agent session token", 403)
+
+    # -- public API ---------------------------------------------------------
+
+    def register(
+        self,
+        *,
+        client_id: str,
+        node_id: str,
+        label: str,
+        director_api: int,
+        revision: int,
+        operations: tuple[str, ...],
+        queries: tuple[str, ...],
+        owner_id: str = "",
+        target: dict[str, str] | None = None,
+    ) -> AgentSession:
+        self._prune_expired()
+
+        # The same browser Director re-registering (a reload, a client id
+        # rotation) invalidates whatever session it held before -- there is
+        # never more than one live session per (client_id, node_id).
+        stale = [
+            sid
+            for sid, session in self._sessions.items()
+            if session.client_id == client_id and session.node_id == node_id
+            and session.target == target
+        ]
+        for sid in stale:
+            self._drop_session(sid)
+
+        if len(self._sessions) >= MAX_SESSIONS:
+            raise AgentProtocolError("AGENT_BUSY", "Too many live OmniCam Director sessions", 503)
+
+        session = AgentSession(
+            session_id=uuid.uuid4().hex,
+            token=secrets.token_hex(32),
+            client_id=client_id,
+            node_id=node_id,
+            label=label,
+            director_api=director_api,
+            revision=revision,
+            operations=operations,
+            queries=queries,
+            touched_at=time.monotonic(),
+            owner_id=owner_id,
+            target=target,
+        )
+        self._sessions[session.session_id] = session
+        return session
+
+    def heartbeat(self, session_id: str, token: str, revision: int) -> None:
+        session = self.require_session(session_id)
+        self.verify_token(session, token)
+        session.revision = revision
+        session.touched_at = time.monotonic()
+
+    def close(self, session_id: str, token: str) -> None:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return
+        self.verify_token(session, token)
+        self._drop_session(session_id)
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        self._prune_expired()
+        return [
+            {
+                "session_id": session.session_id,
+                "node_id": session.node_id,
+                "label": session.label,
+                "director_api": session.director_api,
+                "revision": session.revision,
+                "operations": list(session.operations),
+                "queries": list(session.queries),
+                "target": session.target,
+            }
+            for session in self._sessions.values()
+        ]
+
+    async def dispatch(self, session_id: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        session = self.require_session(session_id)
+        record = self._transactions.find(session_id, payload) if kind == "transaction" else None
+        if record is not None:
+            return await self._await_reply(record.future, record)
+
+        if len(self._pending) >= MAX_PENDING_REQUESTS:
+            raise AgentProtocolError("AGENT_BUSY", "Too many OmniCam Agent requests are pending", 503)
+
+        request_id = uuid.uuid4().hex
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        if kind == "transaction":
+            record = self._transactions.create(session_id, payload, request_id, future)
+
+        self._pending[request_id] = PendingRequest(session_id=session.session_id, future=future)
+
+        message = {
+            "schema_version": AGENT_SCHEMA_VERSION,
+            "protocol": AGENT_PROTOCOL,
+            "session_id": session.session_id,
+            "request_id": request_id,
+            "node_id": session.node_id,
+            "kind": kind,
+            "payload": payload,
+            "target": session.target,
+            "deadline_ms": round((time.time() + REQUEST_TIMEOUT_SECONDS) * 1000),
+        }
+
+        try:
+            PromptServer.instance.send_sync(AGENT_EVENT, message, session.client_id)
+            return await self._await_reply(future, record)
+        finally:
+            self._pending.pop(request_id, None)
+
+    async def _await_reply(self, future, record=None):
+        try:
+            # An HTTP timeout/disconnect must not cancel outcome recovery.
+            return await asyncio.wait_for(asyncio.shield(future) if record else future, timeout=REQUEST_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError as exc:
+            if record is not None and record.result is None:
+                record.status = "unknown"
+            raise AgentProtocolError(
+                "AGENT_BROWSER_TIMEOUT", "The live OmniCam Director did not answer in time; recover transaction status before retrying", 504
+            ) from exc
+
+    def transaction_status(self, session_id: str, transaction_id: str, validate_only: bool = False) -> dict:
+        self.require_session(session_id)
+        return self._transactions.status(session_id, transaction_id, validate_only)
+
+    def reply(self, session_id: str, token: str, request_id: str, result: dict[str, Any]) -> None:
+        session = self.require_session(session_id)
+        self.verify_token(session, token)
+
+        pending = self._pending.get(request_id)
+        record = self._transactions.by_request(request_id)
+        if pending is None and record is not None:
+            pending = PendingRequest(record.session_id, record.future)
+        if pending is None:
+            raise AgentProtocolError("UNKNOWN_REQUEST", "No such pending OmniCam Agent request", 404)
+        if pending.session_id != session_id:
+            raise AgentProtocolError("REQUEST_SESSION_MISMATCH", "Request does not belong to this Director session", 403)
+
+        if not pending.future.done():
+            if record is not None:
+                record.status = "completed"
+                record.result = result
+            pending.future.set_result(result)
+
+
+BROKER = AgentBroker()

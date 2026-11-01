@@ -233,6 +233,16 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
             if not isinstance(camera, dict):
                 continue
             text = str(camera.get("compiled_prompt") or "").strip()
+            state = camera.get("omnicam_state")
+            if not text and isinstance(state, (dict, str)) and state:
+                try:
+                    import json as _json
+                    from .camera_omnicam import compile_from_editor_state
+
+                    state_obj = state if isinstance(state, dict) else _json.loads(state)
+                    text = str(compile_from_editor_state(state_obj).get("prompt") or "").strip()
+                except Exception:
+                    text = ""
             if not text:
                 try:
                     from .camera_omnicam import compile_camera_prompt

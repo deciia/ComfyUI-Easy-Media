@@ -57,8 +57,21 @@ if os.path.exists(dist_path):
     _panels_dir = os.path.join(root_path, "web_panels")
     if os.path.exists(_panels_dir):
         _nodes.EXTENSION_WEB_DIRS[f"{project_name}_panels"] = _panels_dir
+        # OmniCam 渲染器（vendored）：独立扩展目录，UI 与节点来自本地副本
+        _omnicam_web = os.path.join(root_path, "vendor", "omnicam", "web")
+        if os.path.isdir(_omnicam_web):
+            _nodes.EXTENSION_WEB_DIRS[f"{project_name}_omnicam"] = _omnicam_web
 else:
     print(f"Warning: Dist directory not found for {project_name}. Frontend assets will not be served.")
+
+# OmniCam（vendored）：独立插件启用时跳过，避免路由重复注册
+_standalone_omnicam = os.path.join(os.path.dirname(root_path), "ComfyUI-Majoor-OmniCam")
+if not os.path.isdir(_standalone_omnicam):
+    try:
+        from .vendor.omnicam import routes as _omnicam_routes  # noqa: F401
+    except Exception as _omnicam_error:  # noqa: BLE001
+        print(f"[EasyMedia] OmniCam vendored routes unavailable: {_omnicam_error}")
+
 
 # Register extension
 class EasyMediaExtension(ComfyExtension):
@@ -166,6 +179,12 @@ class EasyMediaExtension(ComfyExtension):
         except ImportError:
             nodes.extend([BerniniConditioning])
         nodes.extend(get_minimax_h3_fallback_nodes())
+        if not os.path.isdir(_standalone_omnicam):
+            try:
+                from .vendor.omnicam.node_registry import get_registered_nodes as _omnicam_nodes
+                nodes.extend(list(_omnicam_nodes()))
+            except Exception as _omnicam_error:  # noqa: BLE001
+                print(f"[EasyMedia] OmniCam vendored nodes unavailable: {_omnicam_error}")
         return nodes
 async def comfy_entrypoint() -> EasyMediaExtension:
     return EasyMediaExtension()

@@ -164,6 +164,47 @@ async def handle_asset_save_as(request: web.Request) -> web.Response:
         return web.json_response({"error": f"save-as failed: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/editor-state")
+async def handle_camera_editor_state(request: web.Request) -> web.Response:
+    """EasyMedia 相机 → OmniCam 编辑器 state_json（用于打开 3D 编辑器）。"""
+    from .utils.camera_omnicam import build_editor_state
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    camera = payload.get("camera")
+    if not isinstance(camera, dict):
+        return web.json_response({"error": "camera must be an object"}, status=400)
+    fps = float(payload.get("fps") or 24)
+    frames = max(2, int(payload.get("frames") or 120))
+    width = max(64, int(payload.get("width") or 1280))
+    height = max(64, int(payload.get("height") or 720))
+    state = build_editor_state(camera, fps=fps, frames=frames, width=width, height=height)
+    return web.json_response({"state": state})
+
+
+@PromptServer.instance.routes.post("/easy-media/camera/compile-state")
+async def handle_camera_compile_state(request: web.Request) -> web.Response:
+    """OmniCam 编辑器 state_json → 运镜描述与 motion_scene。"""
+    from .utils.camera_omnicam import compile_from_editor_state
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    state = payload.get("state")
+    if isinstance(state, str):
+        try:
+            state = json.loads(state)
+        except Exception as error:
+            return web.json_response({"error": f"state is not valid JSON: {error}"}, status=400)
+    if not isinstance(state, dict):
+        return web.json_response({"error": "state must be an object"}, status=400)
+    result = compile_from_editor_state(state)
+    return web.json_response({"prompt": result.get("prompt") or "", "motion_scene": result.get("motion_scene") or {}})
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/compile")
 async def handle_camera_compile(request: web.Request) -> web.Response:
     """把相机关键帧编译成 OmniCam 运镜描述与 motion_scene。"""

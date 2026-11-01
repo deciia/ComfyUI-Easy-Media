@@ -68,5 +68,6 @@ export function normalizeCamera(camera: CameraData | undefined): CameraData {
     ...(camera?.playblast ? { playblast: camera.playblast } : {}),
     ...(camera?.camera_embedding ? { camera_embedding: camera.camera_embedding } : {}),
     ...(camera?.native_tracks ? { native_tracks: camera.native_tracks } : {}),
+    ...(camera?.omnicam_state ? { omnicam_state: camera.omnicam_state } : {}),
   }
 }
