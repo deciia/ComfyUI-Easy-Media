@@ -1,0 +1,482 @@
+"""Strict validation and clamping for OmniCam canonical tracks and editor state.
+
+The parsing layer (track.py) is lenient and coerces values so old workflows keep
+loading. This module is the strict layer used before queueing, importing external
+captures, or persisting migrated documents:
+
+- rejects NaN and Infinity in every numeric field;
+- clamps FOV, roll, zoom, near/far, fps, dimensions and duration;
+- whitelists projection, interpolation, render, object and material modes;
+- validates object ids, names, transforms, keyframes and media annotations;
+- clamps out-of-range keyframes to the track duration;
+- enforces configurable limits on cameras, objects, keys and payload size.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import dataclass
+from typing import Any
+
+from .migrations import CURRENT_VERSIONS, TRACK_SCHEMA
+from .sequence import SEQUENCE_TARGET
+
+INTERPOLATION_MODES = frozenset({
+    "ease", "smooth", "bezier", "linear", "ease_in", "ease_out", "hold",
+    "sine", "cubic", "quintic", "expo", "back",
+    "ease_sine", "ease_cubic", "ease_quintic", "ease_expo", "ease_back",
+})
+# "beauty" is the only mode that records the lit studio viewport instead of a
+# flat proxy. It is opt-in because a conditioning model can copy appearance
+# from a pretty reference, which is exactly what the proxy exists to avoid.
+RENDER_MODES = frozenset({"omni_ref", "card_grid", "graybox", "textured", "grid", "point_field", "wireframe", "wireframe_texture", "beauty"})
+CAMERA_TYPES = frozenset({"perspective", "orthographic"})
+LIGHT_TYPES = frozenset({"sun_light", "point_light", "spot_light"})
+OBJECT_TYPES = frozenset({"card", "cube", "sphere", "cylinder", "torus", "human", "null", "ground", "model", "glb", "pyramid"}) | LIGHT_TYPES
+LIGHT_ROLES = frozenset({"auto", "key", "fill", "rim", "background", "practical", "environment"})
+MATERIAL_MODES = frozenset({"textured", "checker", "neutral", "wireframe", "wireframe_texture", "wireframe_neutral", "matte"})
+ASSET_KINDS = frozenset({"character", "prop", "environment", "vehicle", "helper"})
+PROJECTION_MODES = CAMERA_TYPES
+TANGENT_MODES = frozenset({"auto", "clamped", "vector", "free", "aligned", "flat"})
+
+FOV_RANGE = (5.0, 150.0)
+ROLL_RANGE = (-180.0, 180.0)
+FPS_RANGE = (1, 120)
+DIMENSION_RANGE = (64, 4096)
+MAX_TEXT_LENGTH = 4096
+"""Documented in docs/SECURITY.md. Metadata rides in every workflow and every
+adapter payload, so an unbounded string there is unbounded everywhere."""
+MAX_METADATA_ENTRIES = 64
+#: Nesting ceiling for metadata objects. Deeper levels are dropped, not raised on.
+MAX_METADATA_DEPTH = 16
+MIN_NEAR = 1e-4
+
+
+class ValidationError(ValueError):
+    """Raised when an OmniCam payload cannot be repaired safely."""
+
+
+@dataclass(slots=True)
+class TrackLimits:
+    max_cameras: int = 16
+    max_objects: int = 256
+    max_keys_per_track: int = 10000
+    max_state_bytes: int = 2 * 1024 * 1024
+    max_duration_frames: int = 120 * 120  # two minutes at 120 fps
+
+
+DEFAULT_LIMITS = TrackLimits()
+
+
+def require_finite(value: Any, path: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{path} must be a number, got {value!r}") from exc
+    if not math.isfinite(number):
+        raise ValidationError(f"{path} must be finite, got {value!r}")
+    return number
+
+
+def clamp_number(value: Any, lo: float, hi: float, path: str) -> float:
+    return max(lo, min(hi, require_finite(value, path)))
+
+
+def _clamp_int(value: Any, lo: int, hi: int, path: str) -> int:
+    return int(max(lo, min(hi, round(clamp_number(value, lo, hi, path)))))
+
+
+def validate_vec3(value: Any, path: str) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValidationError(f"{path} must be a [x, y, z] vector")
+    return [require_finite(component, f"{path}[{index}]") for index, component in enumerate(value)]
+
+
+LOOK_AT_STATUSES = frozenset({"active", "missing_target", "disabled_target"})
+
+
+def whitelist(value: Any, allowed: frozenset[str], path: str) -> str:
+    text = str(value)
+    if text not in allowed:
+        raise ValidationError(f"{path} must be one of {sorted(allowed)}, got {text!r}")
+    return text
+
+
+def validate_camera(payload: dict[str, Any], path: str = "camera") -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{path} must be an object")
+    camera = dict(payload)
+    camera["position"] = validate_vec3(camera.get("position", [6.0, 4.0, 6.0]), f"{path}.position")
+    camera["target"] = validate_vec3(camera.get("target", [0.0, 1.5, 0.0]), f"{path}.target")
+    camera["fov"] = clamp_number(camera.get("fov", 35.0), *FOV_RANGE, f"{path}.fov")
+    camera["roll"] = clamp_number(camera.get("roll", 0.0), *ROLL_RANGE, f"{path}.roll")
+    camera["zoom"] = max(0.01, require_finite(camera.get("zoom", 1.0), f"{path}.zoom"))
+    near = max(MIN_NEAR, require_finite(camera.get("near", 0.01), f"{path}.near"))
+    camera["near"] = near
+    camera["far"] = max(near + MIN_NEAR, require_finite(camera.get("far", 10000.0), f"{path}.far"))
+    camera["camera_type"] = whitelist(camera.get("camera_type", "perspective"), CAMERA_TYPES, f"{path}.camera_type")
+    if "up" in camera:
+        camera["up"] = validate_vec3(camera["up"], f"{path}.up")
+    return camera
+
+
+def validate_tangents(payload: Any, path: str) -> dict[str, Any] | None:
+    """Editable Bézier handles: normalized segment offsets around the key value (per-key or per-channel)."""
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{path} must be an object")
+    validated: dict[str, Any] = {
+        "mode": whitelist(payload.get("mode", "auto"), TANGENT_MODES, f"{path}.mode"),
+        "out_x": clamp_number(payload.get("out_x", 1 / 3), 0.01, 0.99, f"{path}.out_x"),
+        "out_y": require_finite(payload.get("out_y", 0.0), f"{path}.out_y"),
+        "in_x": clamp_number(payload.get("in_x", -1 / 3), -0.99, -0.01, f"{path}.in_x"),
+        "in_y": require_finite(payload.get("in_y", 0.0), f"{path}.in_y"),
+    }
+    channels = payload.get("channels")
+    if isinstance(channels, dict):
+        validated_channels = {}
+        for ch_id, ch_payload in channels.items():
+            if isinstance(ch_payload, dict):
+                validated_channels[str(ch_id)[:40]] = {
+                    "mode": whitelist(ch_payload.get("mode", validated["mode"]), TANGENT_MODES, f"{path}.channels[{ch_id}].mode"),
+                    "out_x": clamp_number(ch_payload.get("out_x", 1 / 3), 0.01, 0.99, f"{path}.channels[{ch_id}].out_x"),
+                    "out_y": require_finite(ch_payload.get("out_y", 0.0), f"{path}.channels[{ch_id}].out_y"),
+                    "in_x": clamp_number(ch_payload.get("in_x", -1 / 3), -0.99, -0.01, f"{path}.channels[{ch_id}].in_x"),
+                    "in_y": require_finite(ch_payload.get("in_y", 0.0), f"{path}.channels[{ch_id}].in_y"),
+                }
+        if validated_channels:
+            validated["channels"] = validated_channels
+    return validated
+
+
+def validate_reference(payload: Any, path: str) -> dict[str, Any]:
+    """An image/card reference influencing a frame or frame range."""
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{path} must be an object")
+    asset = payload.get("asset")
+    if not isinstance(asset, str) or not asset:
+        raise ValidationError(f"{path}.asset must be a media annotation string")
+    if len(asset) > 512:
+        raise ValidationError(f"{path}.asset annotation is too long")
+    role = payload.get("role", "range")
+    if role not in {"start", "middle", "end", "range"}:
+        raise ValidationError(f"{path}.role must be start/middle/end/range")
+    return {
+        "asset": asset,
+        "role": role,
+        "influence": clamp_number(payload.get("influence", 1.0), 0.0, 1.0, f"{path}.influence"),
+        "fade_frames": max(0, _clamp_int(payload.get("fade_frames", 0), 0, 100000, f"{path}.fade_frames")),
+    }
+
+
+def validate_camera_keyframes(keyframes: Any, duration_frames: int, path: str, limits: TrackLimits) -> list[dict[str, Any]]:
+    if not isinstance(keyframes, list):
+        raise ValidationError(f"{path} must be a list")
+    if len(keyframes) > limits.max_keys_per_track:
+        raise ValidationError(f"{path} has {len(keyframes)} keys, above the {limits.max_keys_per_track} limit")
+    validated: list[dict[str, Any]] = []
+    for index, key in enumerate(keyframes):
+        if not isinstance(key, dict):
+            raise ValidationError(f"{path}[{index}] must be an object")
+        # Keys past the end of the timeline are kept, not folded onto the last
+        # frame. Clamping here collapsed every dormant key onto duration-1, and
+        # the dedupe below then kept only one of them: a shot shortened in the
+        # editor exported a trajectory whose final frame held the wrong camera.
+        # The key count is already capped above, so an unbounded frame is safe.
+        frame = _clamp_int(key.get("frame", 0), 0, limits.max_duration_frames, f"{path}[{index}].frame")
+        references = key.get("references")
+        validated.append(
+            {
+                "frame": frame,
+                "camera": validate_camera(key_camera if isinstance(key_camera := key.get("camera"), dict) else key, f"{path}[{index}].camera"),
+                "interpolation": whitelist(key.get("interpolation", "ease"), INTERPOLATION_MODES, f"{path}[{index}].interpolation"),
+                **({"tangents": tangents} if (tangents := validate_tangents(key.get("tangents"), f"{path}[{index}].tangents")) else {}),
+                **({"references": [validate_reference(ref, f"{path}[{index}].references[{r}]") for r, ref in enumerate(references)]} if isinstance(references, list) else {}),
+            }
+        )
+    dedup = {key["frame"]: key for key in validated}
+    return [dedup[frame] for frame in sorted(dedup)]
+
+
+def validate_transform(transform: Any, path: str) -> dict[str, Any]:
+    if not isinstance(transform, dict):
+        raise ValidationError(f"{path} must be an object")
+    raw_size = transform.get("size", [1, 1, 1])
+    if isinstance(raw_size, (list, tuple)) and len(raw_size) == 2:
+        raw_size = [raw_size[0], raw_size[1], 0.01]
+    size = validate_vec3(raw_size, f"{path}.size")
+    return {
+        "position": validate_vec3(transform.get("position", [0, 0, 0]), f"{path}.position"),
+        "rotation": validate_vec3(transform.get("rotation", [0, 0, 0]), f"{path}.rotation"),
+        "size": [max(0.01, component) for component in size],
+    }
+
+
+def validate_object(payload: dict[str, Any], duration_frames: int, path: str, limits: TrackLimits) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{path} must be an object")
+    obj = dict(payload)
+    object_id = str(obj.get("id") or "")
+    if not object_id or len(object_id) > 80:
+        raise ValidationError(f"{path}.id must be a non-empty id of at most 80 characters")
+    obj["id"] = object_id
+    obj["name"] = str(obj.get("name") or object_id)[:80]
+    obj["type"] = whitelist(obj.get("type", "card"), OBJECT_TYPES, f"{path}.type")
+    if "light_role" in obj:
+        if obj["type"] not in LIGHT_TYPES:
+            raise ValidationError(f"{path}.light_role is only valid on light objects")
+        obj["light_role"] = whitelist(obj.get("light_role", "auto"), LIGHT_ROLES, f"{path}.light_role")
+    obj["material_mode"] = whitelist(obj.get("material_mode", "textured"), MATERIAL_MODES, f"{path}.material_mode")
+    transform = validate_transform(obj, path)
+    obj["position"], obj["rotation"], obj["size"] = transform["position"], transform["rotation"], transform["size"]
+    keys = obj.get("keyframes") or []
+    if not isinstance(keys, list):
+        raise ValidationError(f"{path}.keyframes must be a list")
+    if len(keys) > limits.max_keys_per_track:
+        raise ValidationError(f"{path}.keyframes exceeds the {limits.max_keys_per_track} key limit")
+    validated_keys: list[dict[str, Any]] = []
+    for index, key in enumerate(keys):
+        if not isinstance(key, dict):
+            raise ValidationError(f"{path}.keyframes[{index}] must be an object")
+        validated_keys.append(
+            {
+                "frame": _clamp_int(key.get("frame", 0), 0, max(0, duration_frames - 1), f"{path}.keyframes[{index}].frame"),
+                "transform": validate_transform(key.get("transform", {}), f"{path}.keyframes[{index}].transform"),
+                "interpolation": whitelist(key.get("interpolation", "ease"), INTERPOLATION_MODES, f"{path}.keyframes[{index}].interpolation"),
+                **({"tangents": tangents} if (tangents := validate_tangents(key.get("tangents"), f"{path}.keyframes[{index}].tangents")) else {}),
+            }
+        )
+    deduped = {key["frame"]: key for key in validated_keys}
+    obj["keyframes"] = [deduped[frame] for frame in sorted(deduped)]
+    asset = obj.get("asset")
+    if asset is not None and not isinstance(asset, str):
+        raise ValidationError(f"{path}.asset must be a media annotation string")
+    if isinstance(asset, str) and len(asset) > 512:
+        raise ValidationError(f"{path}.asset annotation is too long")
+    recon = obj.get("reconstruction")
+    if recon is not None:
+        if not isinstance(recon, dict):
+            raise ValidationError(f"{path}.reconstruction must be an object")
+        recon_dict = dict(recon)
+        if "confidence" in recon_dict:
+            recon_dict["confidence"] = clamp_number(recon_dict["confidence"], 0.0, 1.0, f"{path}.reconstruction.confidence")
+        for str_key in ("provider", "role", "source_kind", "completion_provider"):
+            if str_key in recon_dict:
+                val = str(recon_dict[str_key])
+                if len(val) > 80:
+                    raise ValidationError(f"{path}.reconstruction.{str_key} must be at most 80 characters")
+                recon_dict[str_key] = val
+        if "semantic" in recon_dict:
+            semantic = str(recon_dict["semantic"])
+            if len(semantic) > 64:
+                raise ValidationError(f"{path}.reconstruction.semantic must be at most 64 characters")
+            recon_dict["semantic"] = semantic
+        axis_confidence = recon_dict.get("axis_confidence")
+        if axis_confidence is not None:
+            if not isinstance(axis_confidence, dict):
+                raise ValidationError(f"{path}.reconstruction.axis_confidence must be an object")
+            recon_dict["axis_confidence"] = {
+                str(axis): clamp_number(value, 0.0, 1.0, f"{path}.reconstruction.axis_confidence.{axis}")
+                for axis, value in axis_confidence.items()
+            }
+        obj["reconstruction"] = recon_dict
+    # Unified-catalog linkage + semantic tags (unified-assets design spec
+    # sections 11-12). Additive and bounded; a plain object carries none of it.
+    if "asset_id" in obj:
+        obj["asset_id"] = str(obj["asset_id"])[:120]
+    if "asset_kind" in obj:
+        obj["asset_kind"] = whitelist(obj.get("asset_kind", "prop"), ASSET_KINDS, f"{path}.asset_kind")
+    if "tags" in obj:
+        raw_tags = obj.get("tags")
+        if not isinstance(raw_tags, list):
+            raise ValidationError(f"{path}.tags must be a list")
+        seen_tags: set[str] = set()
+        clean_tags: list[str] = []
+        for tag in raw_tags[:32]:
+            slug = str(tag).strip().lower()[:64]
+            if slug and slug not in seen_tags:
+                seen_tags.add(slug)
+                clean_tags.append(slug)
+        obj["tags"] = clean_tags
+    if "intensity" in obj:
+        obj["intensity"] = clamp_number(obj["intensity"], 0.0, 1000.0, f"{path}.intensity")
+    if "color" in obj:
+        obj["color"] = str(obj["color"])[:32]
+    if "cast_shadow" in obj:
+        obj["cast_shadow"] = bool(obj["cast_shadow"])
+    if "cone_angle" in obj:
+        obj["cone_angle"] = clamp_number(obj["cone_angle"], 1.0, 90.0, f"{path}.cone_angle")
+    if "penumbra" in obj:
+        obj["penumbra"] = clamp_number(obj["penumbra"], 0.0, 1.0, f"{path}.penumbra")
+    return obj
+
+
+def validate_object_hierarchy(objects: list[dict[str, Any]]) -> None:
+    """Reject missing parents, self-parenting and cycles of any length."""
+    by_id = {obj["id"]: obj for obj in objects}
+    for object_id, obj in by_id.items():
+        parent_id = obj.get("parent_id")
+        if parent_id in (None, ""):
+            continue
+        if not isinstance(parent_id, str) or parent_id not in by_id:
+            raise ValidationError(f"object {object_id!r} references missing parent {parent_id!r}")
+        if parent_id == object_id:
+            raise ValidationError(f"object {object_id!r} cannot parent itself")
+    resolved: set[str] = set()
+    for object_id in by_id:
+        chain: set[str] = set()
+        current = object_id
+        while current and current not in resolved:
+            if current in chain:
+                raise ValidationError(f"object hierarchy contains a cycle through {current!r}")
+            chain.add(current)
+            current = str(by_id[current].get("parent_id") or "")
+        resolved.update(chain)
+
+
+def _encoded_size(payload: Any, what: str) -> int:
+    """Measure a payload, reporting pathological nesting as a client error.
+
+    ``json.dumps`` recurses, so a deeply nested document raises RecursionError
+    here -- before any depth guard downstream can apply. That is a malformed
+    payload, not a server fault, so it has to surface as a ValidationError.
+    """
+    try:
+        return len(json.dumps(payload, default=str).encode("utf-8"))
+    except RecursionError as exc:
+        raise ValidationError(f"{what} is nested too deeply to validate") from exc
+
+
+def validate_track_payload(payload: dict[str, Any], limits: TrackLimits | None = None) -> dict[str, Any]:
+    """Validate and clamp a canonical MAJOOR_OMNICAM_TRACK payload. Returns a cleaned copy."""
+    limits = limits or DEFAULT_LIMITS
+    if not isinstance(payload, dict):
+        raise ValidationError("OmniCam track must be a JSON object")
+    encoded_size = _encoded_size(payload, "track payload")
+    if encoded_size > limits.max_state_bytes:
+        raise ValidationError(f"track payload is {encoded_size} bytes, above the {limits.max_state_bytes} limit")
+    track = dict(payload)
+    track["fps"] = _clamp_int(track.get("fps", 24), *FPS_RANGE, "fps")
+    track["duration_frames"] = _clamp_int(track.get("duration_frames", track["fps"] * 5), 1, limits.max_duration_frames, "duration_frames")
+    track["width"] = _clamp_int(track.get("width", 1280), *DIMENSION_RANGE, "width")
+    track["height"] = _clamp_int(track.get("height", 720), *DIMENSION_RANGE, "height")
+    track["render_mode"] = whitelist(track.get("render_mode", "graybox"), RENDER_MODES, "render_mode")
+    track["keyframes"] = validate_camera_keyframes(track.get("keyframes", []), track["duration_frames"], "keyframes", limits)
+    objects = track.get("objects", [])
+    if not isinstance(objects, list):
+        raise ValidationError("objects must be a list")
+    if len(objects) > limits.max_objects:
+        raise ValidationError(f"objects has {len(objects)} entries, above the {limits.max_objects} limit")
+    seen_ids: set[str] = set()
+    validated_objects = []
+    for index, obj in enumerate(objects):
+        validated = validate_object(obj, track["duration_frames"], f"objects[{index}]", limits)
+        if validated["id"] in seen_ids:
+            raise ValidationError(f"objects[{index}].id duplicates {validated['id']!r}")
+        seen_ids.add(validated["id"])
+        validated_objects.append(validated)
+    track["objects"] = validated_objects
+    validate_object_hierarchy(validated_objects)
+    constraints = track.get("constraints")
+    if constraints is not None:
+        if not isinstance(constraints, dict):
+            raise ValidationError("constraints must be an object")
+        look_at = constraints.get("look_at")
+        if look_at is not None:
+            if not isinstance(look_at, dict):
+                raise ValidationError("constraints.look_at must be an object")
+            object_id = str(look_at.get("object_id") or "")
+            if not object_id or len(object_id) > 80:
+                raise ValidationError("constraints.look_at.object_id must be a non-empty id of at most 80 characters")
+            status = whitelist(look_at.get("status", "active"), LOOK_AT_STATUSES, "constraints.look_at.status")
+            track["constraints"] = {**constraints, "look_at": {**look_at, "object_id": object_id, "offset": validate_vec3(look_at.get("offset", [0, 0, 0]), "constraints.look_at.offset"), "space": "world", "status": status}}
+    if "camera" in track and isinstance(track["camera"], dict):
+        track["camera"] = validate_camera(track["camera"], "camera")
+    track["metadata"] = validate_metadata(track.get("metadata"))
+    # Stamp the contract version. Without it a validated payload is
+    # indistinguishable from a version-0 document, so migrate_payload() would
+    # run the v0 -> v1 migration over data that is already current.
+    track["schema_version"] = CURRENT_VERSIONS[TRACK_SCHEMA]
+    return track
+
+
+def validate_metadata(metadata: Any, depth: int = 0) -> dict[str, Any]:
+    """Bound free-form metadata to the limits SECURITY.md advertises.
+
+    Values are truncated rather than rejected: metadata is descriptive, and
+    losing the tail of an over-long note is friendlier than refusing to queue.
+
+    ``depth`` bounds nesting. Without it a deeply nested object recursed until
+    Python raised RecursionError, which reaches the route layer as a 500 -- the
+    wrong answer for a payload the client got wrong.
+    """
+    if not isinstance(metadata, dict) or depth >= MAX_METADATA_DEPTH:
+        return {}
+    bounded: dict[str, Any] = {}
+    for key, value in list(metadata.items())[:MAX_METADATA_ENTRIES]:
+        name = str(key)[:MAX_TEXT_LENGTH]
+        if isinstance(value, str):
+            bounded[name] = value[:MAX_TEXT_LENGTH]
+        elif isinstance(value, bool) or value is None:
+            bounded[name] = value
+        elif isinstance(value, (int, float)):
+            bounded[name] = value if math.isfinite(value) else 0.0
+        elif isinstance(value, dict):
+            bounded[name] = validate_metadata(value, depth + 1)
+        elif isinstance(value, (list, tuple)):
+            bounded[name] = [
+                item[:MAX_TEXT_LENGTH] if isinstance(item, str) else item
+                for item in list(value)[:MAX_METADATA_ENTRIES]
+            ]
+        else:
+            bounded[name] = str(value)[:MAX_TEXT_LENGTH]
+    return bounded
+
+
+def validate_editor_state(payload: dict[str, Any], limits: TrackLimits | None = None) -> dict[str, Any]:
+    """Validate an OMNICAM_EDITOR_STATE document (multi-camera editor document)."""
+    limits = limits or DEFAULT_LIMITS
+    if not isinstance(payload, dict):
+        raise ValidationError("OmniCam editor state must be a JSON object")
+    state = validate_track_payload(payload, limits)
+    cameras = payload.get("cameras")
+    if cameras is not None:
+        if not isinstance(cameras, list):
+            raise ValidationError("cameras must be a list")
+        if len(cameras) > limits.max_cameras:
+            raise ValidationError(f"cameras has {len(cameras)} entries, above the {limits.max_cameras} limit")
+        seen: set[str] = set()
+        validated_cameras = []
+        for index, camera_track in enumerate(cameras):
+            if not isinstance(camera_track, dict):
+                raise ValidationError(f"cameras[{index}] must be an object")
+            camera_id = str(camera_track.get("id") or f"camera_{index + 1}")
+            if camera_id in seen:
+                raise ValidationError(f"cameras[{index}].id duplicates {camera_id!r}")
+            seen.add(camera_id)
+            validated_cameras.append(
+                {
+                    **camera_track,
+                    "id": camera_id,
+                    "name": str(camera_track.get("name") or f"Camera {index + 1}")[:80],
+                    "camera": validate_camera(camera_track.get("camera", {}), f"cameras[{index}].camera"),
+                    "keyframes": validate_camera_keyframes(
+                        camera_track.get("keyframes", []), state["duration_frames"], f"cameras[{index}].keyframes", limits
+                    ),
+                }
+            )
+        state["cameras"] = validated_cameras
+        ids = {camera["id"] for camera in validated_cameras}
+        for role in ("active_camera_id", "playblast_camera_id"):
+            # The multi-camera edit is a legitimate playblast target: its proxy
+            # is one video cut across several cameras, so it names no camera.
+            if role == "playblast_camera_id" and state.get(role) == SEQUENCE_TARGET:
+                continue
+            if role in state and state[role] not in ids:
+                raise ValidationError(f"{role} references an unknown camera {state[role]!r}")
+    encoded_size = _encoded_size(state, "editor state")
+    if encoded_size > limits.max_state_bytes:
+        raise ValidationError(f"editor state is {encoded_size} bytes, above the {limits.max_state_bytes} limit")
+    return state

@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import math
+
+from .camera_math import camera_basis
+from .track import CameraState
+
+
+def sub(a, b):
+    return [a[i] - b[i] for i in range(3)]
+
+
+def add(a, b):
+    return [a[i] + b[i] for i in range(3)]
+
+
+def mul(a, s):
+    return [a[i] * s for i in range(3)]
+
+
+def dot(a, b):
+    return sum(a[i] * b[i] for i in range(3))
+
+
+def cross(a, b):
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+
+
+def norm(v):
+    mag = math.sqrt(max(1e-12, dot(v, v)))
+    return [x / mag for x in v]
+
+
+def basis(camera: CameraState):
+    return camera_basis(camera.position, camera.target, camera.roll)
+
+
+def project_point(point, camera: CameraState, width: int, height: int):
+    right, up, forward = basis(camera)
+    rel = sub(point, camera.position)
+    z = dot(rel, forward)
+    if z <= max(1e-4, camera.near) or z >= camera.far:
+        return None
+    x = dot(rel, right)
+    y = dot(rel, up)
+    if camera.camera_type == "orthographic":
+        half_height = 5.0 / max(0.01, camera.zoom)
+        half_width = half_height * width / max(1, height)
+        sx = width * (0.5 + x / (2.0 * half_width))
+        sy = height * (0.5 - y / (2.0 * half_height))
+        return [sx, sy, z]
+    f = 0.5 * height / math.tan(math.radians(max(1e-3, camera.fov)) * 0.5)
+    sx = width * 0.5 + x * f / z
+    sy = height * 0.5 - y * f / z
+    return [sx, sy, z]
+
+
+def make_reference_points(
+    count: int = 16,
+    radius: float = 2.5,
+    height: float = 3.0,
+    distribution: str = "balanced",
+    center: list[float] | None = None,
+) -> list[list[float]]:
+    count = max(4, int(count))
+    points = []
+    cx, cy, cz = center if center and len(center) >= 3 else [0.0, 0.0, 0.0]
+    rings = max(2, int(math.sqrt(count)))
+
+    dist = (distribution or "balanced").lower()
+
+    if dist == "subject_focus":
+        # Tight concentration around target subject
+        for i in range(count):
+            angle = (2.0 * math.pi * i) / count
+            r = radius * 0.4 * (0.2 + 0.8 * ((i % rings) / max(1, rings - 1)))
+            y = cy + (height * 0.4) * (((i * 0.61803398875) % 1.0) - 0.5)
+            points.append([cx + math.cos(angle) * r, y, cz + math.sin(angle) * r])
+    elif dist == "ground_parallax":
+        # Dense ground plane points with stratified depth for maximum parallax estimation
+        for i in range(count):
+            angle = (2.0 * math.pi * i) / count
+            r = radius * (0.3 + 1.2 * ((i % rings) / max(1, rings - 1)))
+            y = 0.05 + 0.4 * ((i * 0.381966) % 1.0)  # Near floor
+            points.append([cx + math.cos(angle) * r, y, cz + math.sin(angle) * r])
+    else:
+        # Balanced cylinder & dome distribution
+        for i in range(count):
+            angle = (2.0 * math.pi * i) / count
+            ring = i % rings
+            r = radius * (0.45 + 0.55 * (ring / max(1, rings - 1)))
+            y = 0.25 + height * ((i * 0.61803398875) % 1.0)
+            points.append([cx + math.cos(angle) * r, y, cz + math.sin(angle) * r])
+
+    return points

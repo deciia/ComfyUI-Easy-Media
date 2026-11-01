@@ -164,6 +164,50 @@ async def handle_asset_save_as(request: web.Request) -> web.Response:
         return web.json_response({"error": f"save-as failed: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/compile")
+async def handle_camera_compile(request: web.Request) -> web.Response:
+    """把相机关键帧编译成 OmniCam 运镜描述与 motion_scene。"""
+    import hashlib
+
+    from .utils.camera_omnicam import compile_camera_motion_scene, compile_camera_prompt
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    camera = payload.get("camera")
+    if not isinstance(camera, dict):
+        return web.json_response({"error": "camera must be an object"}, status=400)
+    fps = float(payload.get("fps") or 24)
+    frames = max(2, int(payload.get("frames") or 120))
+    width = max(64, int(payload.get("width") or 1280))
+    height = max(64, int(payload.get("height") or 720))
+    prompt = compile_camera_prompt(camera, fps=fps, frames=frames, width=width, height=height)
+    scene = compile_camera_motion_scene(camera, fps=fps, frames=frames, width=width, height=height)
+    saved_path = None
+    project_name = str(payload.get("project_name") or "").strip()
+    if project_name and scene:
+        try:
+            safe_name = "".join(ch for ch in project_name if ch not in '\\/:*?"<>|').strip() or "project"
+            project_dir = Path(folder_paths.get_output_directory()).resolve() / "easy_media" / "projects" / safe_name
+            camera_dir = project_dir / "camera"
+            camera_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha1(
+                json.dumps(camera, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()[:8]
+            target = camera_dir / f"motion_scene_{frames}_{digest}.json"
+            target.write_text(json.dumps(scene, ensure_ascii=False, indent=2), encoding="utf-8")
+            saved_path = str(target)
+        except Exception as error:
+            traceback.print_exc()
+            return web.json_response({"error": f"save motion scene failed: {error}"}, status=500)
+    return web.json_response({
+        "prompt": prompt,
+        "motion_scene": scene,
+        "saved_path": saved_path,
+    })
+
+
 @PromptServer.instance.routes.get("/easy-media/project/canvas_inspect")
 async def handle_h3_project_canvas_inspect(request: web.Request) -> web.Response:
     """Detect per-segment resolution mismatches for the combine widget warning.

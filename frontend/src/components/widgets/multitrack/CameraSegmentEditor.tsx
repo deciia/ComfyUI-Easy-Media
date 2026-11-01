@@ -45,6 +45,30 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     patchCamera({ keyframes })
   }
 
+  async function compileWithOmniCam() {
+    try {
+      const response = await fetch('/easy-media/camera/compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          camera,
+          fps: 24,
+          frames: durationFrames,
+        }),
+      })
+      if (response.ok) {
+        const result = await response.json() as { prompt?: string }
+        if (result.prompt) {
+          patchCamera({ compiled_prompt: result.prompt })
+          return
+        }
+      }
+    } catch (error) {
+      console.debug('[EasyMedia] OmniCam compile failed, falling back to local compile', error)
+    }
+    patchCamera({ compiled_prompt: compileCameraPrompt(camera) })
+  }
+
   function removeKeyframe(index: number) {
     const keyframes = (camera.keyframes ?? []).filter((_, i) => i !== index)
     patchCamera({ keyframes })
@@ -126,9 +150,9 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             size="sm"
             variant="outline"
             className="h-6 w-fit px-2 text-[10px]"
-            onClick={() => patchCamera({ compiled_prompt: compileCameraPrompt(camera) })}
+            onClick={() => { void compileWithOmniCam() }}
           >
-            生成运镜描述
+            生成运镜描述（OmniCam）
           </Button>
         </div>
       )}

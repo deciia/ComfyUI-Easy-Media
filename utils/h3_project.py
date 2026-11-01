@@ -229,8 +229,22 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
                 continue
             camera = segment.get("camera")
             if not isinstance(camera, dict):
+                camera = (segment.get("content") or {}).get("camera")
+            if not isinstance(camera, dict):
                 continue
             text = str(camera.get("compiled_prompt") or "").strip()
+            if not text:
+                try:
+                    from .camera_omnicam import compile_camera_prompt
+
+                    seg_frames = max(2, seg_end - seg_start)
+                    text = compile_camera_prompt(
+                        camera,
+                        fps=float((timeline.get("track_data") or {}).get("frame_rate") or 24),
+                        frames=seg_frames,
+                    )
+                except Exception:
+                    text = ""
             if not text:
                 text = _compile_camera_from_keyframes(camera)
             if text:

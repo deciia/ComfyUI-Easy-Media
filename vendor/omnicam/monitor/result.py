@@ -1,0 +1,249 @@
+"""Typed timeline, preflight and compiled-output values shared by profiles."""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any
+
+from ..guides.model import validate_mapping_quality
+from ..profiles.base import validate_frame_policy, validate_profile_id, validate_semantic
+
+CHECK_STATES = frozenset({"PASS", "WARNING", "BLOCKED", "RISK"})
+
+
+def _non_empty(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _positive_int(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _positive_finite(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive finite number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a positive finite number") from error
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return number
+
+
+#: Static, hand-authored recovery text keyed by a Check's optional ``code``.
+#: This is the only source of ``suggestions`` a Check may carry -- never
+#: generated per instance -- so the same code always yields the exact same
+#: guidance, and a code missing here yields none rather than inventing any.
+KNOWN_CHECK_SUGGESTIONS: dict[str, tuple[str, ...]] = {
+    "TARGET_NODE_MISSING": (
+        "Install the missing custom node pack through ComfyUI Manager.",
+        "Reload the workflow after installing so ComfyUI re-registers the node.",
+    ),
+    "PLAYBLAST_STALE": (
+        "Re-record the playblast from the Director before compiling.",
+        "Confirm the Director's motion_scene_fingerprint matches the current edit.",
+    ),
+    "PROFILE_UNAVAILABLE": (
+        "Choose a different target_profile the current build supports.",
+        "Check docs/COMPATIBILITY.md for this profile's requirements.",
+    ),
+    "CAMERA_CONDITIONING_UNAVAILABLE": (
+        "Install the adapter this profile's camera conditioning depends on.",
+        "Fall back to a reference-video profile, which does not need it.",
+    ),
+}
+
+
+def suggestions_for_code(code: str | None) -> tuple[str, ...]:
+    """The static recovery text for ``code``, or an empty tuple.
+
+    A code outside ``KNOWN_CHECK_SUGGESTIONS`` deliberately gets nothing here
+    -- there is no dynamic/generated fallback to fabricate suggestions for a
+    code nobody has reviewed and written guidance for.
+    """
+    if not code:
+        return ()
+    return KNOWN_CHECK_SUGGESTIONS.get(code, ())
+
+
+@dataclass(frozen=True, slots=True)
+class Check:
+    id: str
+    label: str
+    state: str
+    message: str = ""
+    code: str | None = None
+    recoverable: bool = False
+    suggestions: tuple[str, ...] = ()
+    mapping_quality: str | None = None
+
+    def __post_init__(self) -> None:
+        _non_empty(self.id, "id")
+        _non_empty(self.label, "label")
+        if self.state not in CHECK_STATES:
+            raise ValueError(f"state must be one of {sorted(CHECK_STATES)}")
+        if not isinstance(self.message, str):
+            raise TypeError("message must be a string")
+        if self.code is not None and not isinstance(self.code, str):
+            raise TypeError("code must be a string or None")
+        if not isinstance(self.recoverable, bool):
+            raise TypeError("recoverable must be a bool")
+        suggestions = tuple(self.suggestions)
+        if not all(isinstance(item, str) for item in suggestions):
+            raise TypeError("suggestions must contain strings")
+        object.__setattr__(self, "suggestions", suggestions)
+        if self.mapping_quality is not None:
+            validate_mapping_quality(self.mapping_quality)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptCompilation:
+    """One profile's dialect-rendered prompt text, plus any warnings it raised.
+
+    The single result type ``compile_prompt`` returns. A real execution's
+    ``compile()`` folds ``.text`` into ``CompiledMotion.final_prompt``; the
+    Monitor's live-preflight route calls ``compile_prompt`` directly (no
+    ``compile()``, no video decode) to preview the identical text.
+    """
+
+    text: str
+    checks: tuple[Check, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.text, str):
+            raise TypeError("text must be a string")
+        checks = tuple(self.checks)
+        if not all(isinstance(check, Check) for check in checks):
+            raise TypeError("checks must contain Check values")
+        object.__setattr__(self, "checks", checks)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedTimeline:
+    width: int
+    height: int
+    fps: float
+    duration_seconds: float
+    frame_count: int
+    frame_policy: str
+
+    def __post_init__(self) -> None:
+        _positive_int(self.width, "width")
+        _positive_int(self.height, "height")
+        object.__setattr__(self, "fps", _positive_finite(self.fps, "fps"))
+        object.__setattr__(
+            self,
+            "duration_seconds",
+            _positive_finite(self.duration_seconds, "duration_seconds"),
+        )
+        _positive_int(self.frame_count, "frame_count")
+        validate_frame_policy(self.frame_policy)
+
+    @property
+    def target_length(self) -> int:
+        return self.frame_count
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledMotion:
+    """Static Monitor output superset plus the exact resolved contract."""
+
+    profile_id: str
+    semantic: str
+    timeline: ResolvedTimeline
+    final_prompt: str = ""
+    reference_video: Any | None = None
+    reference_frames: Any | None = None
+    camera_embedding: Any | None = None
+    native_tracks: Any | None = None
+    tracks_json: str = ""
+    h3edit_options: dict[str, object] | None = None
+    checks: tuple[Check, ...] = ()
+
+    def __post_init__(self) -> None:
+        validate_profile_id(self.profile_id)
+        validate_semantic(self.semantic)
+        if not isinstance(self.timeline, ResolvedTimeline):
+            raise TypeError("timeline must be a ResolvedTimeline")
+        if not isinstance(self.final_prompt, str):
+            raise TypeError("final_prompt must be a string")
+        if not isinstance(self.tracks_json, str):
+            raise TypeError("tracks_json must be a string")
+        if self.h3edit_options is not None and not isinstance(self.h3edit_options, dict):
+            raise TypeError("h3edit_options must be a dict or None")
+        checks = tuple(self.checks)
+        if not all(isinstance(check, Check) for check in checks):
+            raise TypeError("checks must contain Check values")
+        object.__setattr__(self, "checks", checks)
+
+    @property
+    def target_width(self) -> int:
+        return self.timeline.width
+
+    @property
+    def target_height(self) -> int:
+        return self.timeline.height
+
+    @property
+    def target_length(self) -> int:
+        return self.timeline.frame_count
+
+
+
+def panel_payload(
+    checks: Any, capabilities: dict[str, Any], target_profile: str, *, final_prompt: str = "", semantics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The payload the Monitor panel renders, blocked or not.
+
+    Shared by a real execution's ``ui`` output and the live preflight route:
+    both are the same report of the same checks, and the panel does not need
+    to know which one produced it. ``final_prompt`` defaults to "" so a
+    blocked/errored compile still serializes the same shape, just empty.
+    """
+    return {
+        "preflight": [
+            {
+                "id": check.id,
+                "label": check.label,
+                "state": check.state,
+                "message": check.message,
+                # Optional recovery fields: present (and non-default) only for
+                # checks that were actually constructed with them, so an
+                # older-style Check(id, label, state, message) still
+                # serializes exactly as it always has.
+                **({"code": check.code} if getattr(check, "code", None) else {}),
+                **({"recoverable": True} if getattr(check, "recoverable", False) else {}),
+                **({"suggestions": list(check.suggestions)} if getattr(check, "suggestions", ()) else {}),
+                **(
+                    {"mapping_quality": check.mapping_quality}
+                    if getattr(check, "mapping_quality", None)
+                    else {}
+                ),
+            }
+            for check in checks
+        ],
+        "capabilities": capabilities,
+        "target_profile": target_profile,
+        "final_prompt": final_prompt,
+        **({"semantics": semantics} if semantics else {}),
+    }
+
+
+def raise_on_blocked(checks: Any) -> None:
+    """Stop on the first BLOCKED check, using its own message as the error.
+
+    Every profile used to enumerate the specific causes it would raise for, so a
+    BLOCKED check nobody had remembered to enumerate -- a reference the API
+    rejects, a downstream that is not installed -- coloured the panel red and
+    compiled anyway. Enumerating causes is the bug; the invariant is that no
+    BLOCKED check ever reaches a payload.
+    """
+    for check in checks:
+        if getattr(check, "state", None) == "BLOCKED":
+            raise ValueError(getattr(check, "message", "") or check.label)
