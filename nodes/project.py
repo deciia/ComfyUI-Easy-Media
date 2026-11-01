@@ -27,6 +27,8 @@ from ..utils.h3_project import (
     minimax_frame_count,
     h3_project_filename_prefix,
     h3_second_pass_dimensions,
+    h3_camera_prompt_for_range,
+    inject_h3_camera_prompt,
     has_h3_context_latent,
     has_h3_first_pass_checkpoint,
     h3_task_entries,
@@ -1953,9 +1955,17 @@ class EasyMultiTrackProject(io.ComfyNode):
                     **{"values.a": task_length},
                 ).out(1)
             report_segment_step(0.10)
+            camera_prompt_node = graph.node(
+                "easy h3CameraPromptInject",
+                id=f"camera_prompt_{task_index}",
+                prompt=task_output.out(1),
+                project_name=safe_project_name,
+                start_frame=task_start_frame,
+                end_frame=task_end_frame,
+            )
             conditioning_inputs = {
                 "clip": clip, "vae": vae, "audio_vae": audio_vae,
-                "images": task_output.out(4), "prompt": task_output.out(1),
+                "images": task_output.out(4), "prompt": camera_prompt_node.out(0),
                 "mode": generation_mode,
                 "width": target_width if is_selflift else first_pass_width,
                 "height": target_height if is_selflift else first_pass_height,
@@ -2833,6 +2843,32 @@ def _h3_audio_payload(path: Any) -> dict[str, Any]:
     waveform, sample_rate = sf.read(str(path), dtype="float32", always_2d=True)
     tensor = torch.from_numpy(waveform.T).unsqueeze(0)
     return {"waveform": tensor, "sample_rate": int(sample_rate)}
+
+
+class EasyH3CameraPromptInject(io.ComfyNode):
+    """把项目相机轨里与当前段重叠的运镜描述注入提示词（不改变其它字段）。"""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy h3CameraPromptInject",
+            display_name="相机提示词注入",
+            category="EasyMedia",
+            description="读取项目相机轨，把运镜描述插入 detailed_description 开头。",
+            inputs=[
+                io.String.Input("prompt"),
+                io.String.Input("project_name", default=""),
+                io.Int.Input("start_frame", default=0, min=0),
+                io.Int.Input("end_frame", default=0, min=0),
+            ],
+            outputs=[io.String.Output(display_name="提示词")],
+        )
+
+    @classmethod
+    def execute(cls, prompt: str, project_name: str = "", start_frame: int = 0,
+                end_frame: int = 0) -> io.NodeOutput:
+        camera = h3_camera_prompt_for_range(project_name, start_frame, end_frame)
+        return io.NodeOutput(inject_h3_camera_prompt(prompt, camera))
 
 
 class EasyMultiTrackProjectVideoCombine(io.ComfyNode):

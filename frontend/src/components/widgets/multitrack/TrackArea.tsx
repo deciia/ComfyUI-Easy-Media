@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Captions, Film, ListTree, Clapperboard, Layers2, Loader2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
+import { Camera, Captions, Film, ListTree, Clapperboard, Layers2, Loader2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
@@ -245,6 +245,7 @@ export function TrackArea({
   const videoTrackLimitReached = data.tracks.filter((track) => track.type === 'video').length >= MULTITRACK_MEDIA_TRACK_LIMIT
   const audioTrackLimitReached = data.tracks.filter((track) => track.type === 'audio').length >= MULTITRACK_MEDIA_TRACK_LIMIT
   const subtitleTrackLimitReached = data.tracks.filter((track) => track.type === 'subtitle').length >= MULTITRACK_MEDIA_TRACK_LIMIT
+const cameraTrackLimitReached = data.tracks.some((track) => track.type === 'camera')
   const trackBounds = data.tracks.reduce<Array<{ id: string, top: number, bottom: number }>>((bounds, track) => {
     const top = bounds.at(-1)?.bottom ?? 0
     bounds.push({ id: track.id, top, bottom: top + getMultiTrackTrackHeight(track.type, taskOverview) })
@@ -843,6 +844,22 @@ export function TrackArea({
             </Button>
           </TooltipTrigger>
           <TooltipContent>{t('multitrack.addSubtitleTrack')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 cursor-pointer disabled:cursor-not-allowed"
+              disabled={cameraTrackLimitReached}
+              aria-label="添加相机轨"
+              onClick={() => onAddTrack('camera')}
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>添加相机轨</TooltipContent>
         </Tooltip>
       </div>
       {dragPlaceholderRect ? (

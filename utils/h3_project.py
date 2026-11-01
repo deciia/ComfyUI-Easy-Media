@@ -148,6 +148,118 @@ def _h3_extract_video_frame(video_path: Path, frame_index: int, ffmpeg: str):
         return Image.open(out).convert("RGB").copy()
 
 
+CAMERA_PRESET_PHRASES = {
+    "static": "a locked-off static camera",
+    "push_in": "a slow push-in toward the subject",
+    "pull_out": "a slow pull-out away from the subject",
+    "pan_left": "a smooth pan to the left",
+    "pan_right": "a smooth pan to the right",
+    "tilt_up": "a smooth tilt upward",
+    "tilt_down": "a smooth tilt downward",
+    "truck_left": "a lateral truck to the left",
+    "truck_right": "a lateral truck to the right",
+    "follow": "a tracking follow with the subject",
+    "orbit": "an orbiting move around the subject",
+    "crane_up": "a crane rise upward",
+    "crane_down": "a crane descend downward",
+    "handheld": "a subtle handheld camera",
+    "zoom_in": "a zoom in",
+    "zoom_out": "a zoom out",
+}
+CAMERA_EASING_PHRASES = {
+    "linear": "linear",
+    "ease_in": "ease-in",
+    "ease_out": "ease-out",
+    "ease_in_out": "ease-in-out",
+}
+
+
+def _compile_camera_from_keyframes(camera: dict[str, Any]) -> str:
+    """把相机关键帧编译成一段英文运镜描述。"""
+    keyframes = camera.get("keyframes")
+    parts: list[str] = []
+    if isinstance(keyframes, list) and keyframes:
+        ordered = sorted(
+            (k for k in keyframes if isinstance(k, dict)),
+            key=lambda k: float(k.get("frame") or 0),
+        )
+        for index, key in enumerate(ordered):
+            preset = str(key.get("preset") or camera.get("preset") or "static").strip()
+            phrase = CAMERA_PRESET_PHRASES.get(preset, preset.replace("_", " "))
+            easing = CAMERA_EASING_PHRASES.get(
+                str(key.get("easing") or camera.get("easing") or "ease_in_out"),
+                "ease-in-out",
+            )
+            if index == 0:
+                parts.append(f"Camera: the shot opens with {phrase} ({easing} easing)")
+            else:
+                parts.append(f"then transitions to {phrase} ({easing} easing)")
+        if len(parts) == 1:
+            return parts[0] + "."
+        return parts[0] + ", " + ", ".join(parts[1:]) + "."
+    preset = str(camera.get("preset") or "static").strip()
+    phrase = CAMERA_PRESET_PHRASES.get(preset, preset.replace("_", " "))
+    easing = CAMERA_EASING_PHRASES.get(str(camera.get("easing") or "ease_in_out"), "ease-in-out")
+    return f"Camera: {phrase} ({easing} easing)."
+
+
+def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: Any) -> str:
+    """取与 [start_frame, end_frame) 重叠的相机段，拼成一段英文运镜描述。"""
+    try:
+        from .h3_timeline import load_timeline
+
+        timeline = load_timeline(project_name)
+    except Exception:
+        return ""
+    start = int(start_frame or 0)
+    end = int(end_frame or start)
+    if end <= start:
+        return ""
+    track_data = timeline.get("track_data") or {}
+    pieces: list[str] = []
+    for track in track_data.get("tracks") or []:
+        if not isinstance(track, dict) or track.get("type") != "camera":
+            continue
+        for segment in track.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            seg_start = int(segment.get("start_frame") or 0)
+            seg_end = int(segment.get("end_frame") or seg_start)
+            if seg_end <= start or seg_start >= end:
+                continue
+            camera = segment.get("camera")
+            if not isinstance(camera, dict):
+                continue
+            text = str(camera.get("compiled_prompt") or "").strip()
+            if not text:
+                text = _compile_camera_from_keyframes(camera)
+            if text:
+                pieces.append(text)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for piece in pieces:
+        if piece in seen:
+            continue
+        seen.add(piece)
+        unique.append(piece)
+    return " ".join(unique)
+
+
+def inject_h3_camera_prompt(prompt: Any, camera_text: Any) -> str:
+    """把相机描述插到 detailed_description 开头；没有该字段则前置一段。"""
+    text = str(prompt or "")
+    camera = str(camera_text or "").strip()
+    if not camera:
+        return text
+    import re
+
+    match = re.search(r"(?im)^(\s*detailed_description\s*:)", text)
+    if match:
+        insert_at = match.end()
+        return text[:insert_at] + "\n" + camera + text[insert_at:]
+    return camera + "\n\n" + text
+
+
 def compose_h3_project_images(project_name: Any, project_data: Any = None):
     """图片工程：每段取 1 帧，返回 ComfyUI IMAGE 批次 [N,H,W,C]。"""
     import numpy as np

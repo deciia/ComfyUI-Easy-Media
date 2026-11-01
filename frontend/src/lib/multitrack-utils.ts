@@ -96,6 +96,7 @@ export const MULTITRACK_TRACK_COLORS: Record<MultiTrack['type'], string> = {
   video: 'var(--primary)',
   audio: 'var(--highlight)',
   subtitle: 'var(--accent)',
+  camera: 'var(--multitrack-video-border, var(--accent))',
 }
 
 export function getMultiTrackTaskModeLabel(
@@ -1819,6 +1820,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     video: 0,
     audio: 0,
     subtitle: 0,
+    camera: 0,
   }
   const namedTracks = tracks.map((track) => {
     const index = trackCounts[track.type]

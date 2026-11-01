@@ -1,6 +1,6 @@
 export type MultiTrackReferenceMode = 'off' | 'aligned' | 'global'
 
-export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle'
+export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle' | 'camera'
 
 export type MultiTrackTaskMode = 'default' | 'l2v' | 'ref' | 'edit' | 'passthrough'
 
@@ -35,6 +35,48 @@ export interface MultiTrackTaskImage {
   shared_reference?: boolean
   shared_reference_copy?: boolean
   muted?: boolean
+}
+
+export type CameraPreset =
+  | 'static'
+  | 'push_in'
+  | 'pull_out'
+  | 'pan_left'
+  | 'pan_right'
+  | 'tilt_up'
+  | 'tilt_down'
+  | 'truck_left'
+  | 'truck_right'
+  | 'follow'
+  | 'orbit'
+  | 'crane_up'
+  | 'crane_down'
+  | 'handheld'
+  | 'zoom_in'
+  | 'zoom_out'
+
+export type CameraEasing = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out'
+
+export interface CameraKeyframe {
+  /** 相对段起点的帧偏移 */
+  frame: number
+  preset: CameraPreset
+  easing: CameraEasing
+  strength?: number
+}
+
+export interface CameraData {
+  preset?: CameraPreset
+  easing?: CameraEasing
+  strength?: number
+  target?: 'subject' | 'scene' | 'custom'
+  keyframes?: CameraKeyframe[]
+  /** 编译后的英文运镜描述；为空时由 keyframes 生成 */
+  compiled_prompt?: string
+  motion_scene?: string
+  playblast?: string
+  camera_embedding?: string
+  native_tracks?: string
 }
 
 export interface MultiTrackSegmentContent {
@@ -75,6 +117,8 @@ export interface MultiTrackSegmentContent {
   speaker_reference?: boolean
   subtitle_style?: MultiTrackSubtitleStyle
   subtitle_speech?: MultiTrackSubtitleSpeechSettings
+  /** 相机轨段的运镜数据 */
+  camera?: CameraData
 }
 
 export interface MultiTrackSubtitleSpeechSettings {

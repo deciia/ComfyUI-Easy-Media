@@ -18,6 +18,7 @@ import { activeTaskImages } from '@/lib/task-image-utils'
 import { useT } from '@/lib/i18n'
 import { formatMultiTrackTime, getMultiTrackTaskModeLabel } from '@/lib/multitrack-utils'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
+import { cameraPresetLabel } from '@/lib/camera-presets'
 import { captureVideoPosterFrame } from '@/lib/video-utils'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
@@ -190,7 +191,12 @@ export function MultiTrackSegmentBlock({
     : projectKind === 'audio'
       ? (taskMode === 'ref' ? '音频克隆' : taskMode === 'edit' ? '声音设计' : '文生音频')
       : getMultiTrackTaskModeLabel(taskMode, t)
-  const label = trackType === 'task'
+  const cameraLabel = trackType === 'camera'
+    ? cameraPresetLabel(segment.content.camera?.preset)
+    : ''
+  const label = trackType === 'camera'
+    ? cameraLabel
+    : trackType === 'task'
     ? showTaskIndex
       ? t('multitrackSegment.taskLabel', {
           n: segmentIndex + 1,

@@ -133,6 +133,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyH3ProjectArtifact,
             EasyH3ProjectStaticPrepare,
             EasyMultiTrackProject,
+            EasyH3CameraPromptInject,
             EasyMultiTrackProjectVideoCombine,
             EasyMiniMaxH3ToVideo,
             EasyMinimaxPromptOverride,

@@ -719,13 +719,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleAddTrack(type: MultiTrackType) {
-    if (type !== 'video' && type !== 'audio' && type !== 'subtitle') return
+    if (type !== 'video' && type !== 'audio' && type !== 'subtitle' && type !== 'camera') return
     const trackNumber = data.tracks.filter((track) => track.type === type).length
+    if (type === 'camera' && trackNumber >= 1) return
     if (trackNumber >= MULTITRACK_MEDIA_TRACK_LIMIT) return
     const hasAudioControls = type === 'video' || type === 'audio'
     const track: MultiTrack = {
       id: uuid(),
-      name: `${type === 'video' ? 'Video' : type === 'audio' ? 'Audio' : 'Subtitle'} ${trackNumber}`,
+      name: `${type === 'video' ? 'Video' : type === 'audio' ? 'Audio' : type === 'camera' ? 'Camera' : 'Subtitle'} ${trackNumber}`,
       type,
       color: type === 'subtitle' ? MULTITRACK_SUBTITLE_COLOR : MULTITRACK_TRACK_COLORS[type],
       muted: false,
@@ -1084,7 +1085,10 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   function handleCloneSegment(trackId: string, segmentId: string) {
     let clonedSegmentId: string | null = null
     let trackEnd = 0
-    const updatedTracks = data.tracks.map((track) => {
+    const sourceSegment = data.tracks
+      .find((track) => track.id === trackId)?.segments
+      .find((segment) => segment.id === segmentId)
+    let updatedTracks = data.tracks.map((track) => {
       if (track.id !== trackId) return track
       const result = cloneMultiTrackSegment(track.segments, segmentId)
       if (!result) return track
@@ -1093,6 +1097,29 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       return { ...track, segments: result.segments }
     })
     if (!clonedSegmentId) return
+    // 相机段跟随任务段一起复制（仅当相机段与源段重叠且相机数据非空）
+    if (sourceSegment && trackId) {
+      const taskTrack = data.tracks.find((track) => track.id === trackId)
+      const clonedTask = taskTrack
+        ? updatedTracks.find((track) => track.id === trackId)?.segments.find((segment) => segment.id === clonedSegmentId)
+        : undefined
+      const offset = clonedTask ? clonedTask.start_frame - sourceSegment.start_frame : 0
+      if (clonedTask && offset !== 0) {
+        updatedTracks = updatedTracks.map((track) => {
+          if (track.type !== 'camera') return track
+          const copies = track.segments
+            .filter((segment) => segment.start_frame < sourceSegment.end_frame && segment.end_frame > sourceSegment.start_frame)
+            .filter((segment) => segment.content?.camera && Object.keys(segment.content.camera).length > 0)
+            .map((segment) => ({
+              ...structuredClone(segment),
+              id: uuid(),
+              start_frame: segment.start_frame + offset,
+              end_frame: segment.end_frame + offset,
+            }))
+          return copies.length > 0 ? { ...track, segments: [...track.segments, ...copies] } : track
+        })
+      }
+    }
     commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,

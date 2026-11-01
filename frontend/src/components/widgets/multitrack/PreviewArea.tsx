@@ -55,6 +55,7 @@ import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 import { TaskSegmentEditor } from './TaskSegmentEditor'
+import { CameraSegmentEditor } from './CameraSegmentEditor'
 import { VideoPreview } from './VideoPreview'
 import { SubtitleSettingsPanel } from './SubtitleSettingsPanel'
 
@@ -1336,6 +1337,22 @@ export function PreviewArea({
             transformOrigin: `${expandedImagePreview.origin.x}% ${expandedImagePreview.origin.y}%`,
           }}
           draggable={false}
+        />
+      </div>
+    )
+  }
+
+  if (selectedSegment?.trackType === 'camera') {
+    return (
+      <div
+        data-multitrack-preview-area
+        className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 overflow-hidden rounded-sm bg-background"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <CameraSegmentEditor
+          segment={selectedSegment.segment}
+          currentTime={currentTime}
+          onContentChange={onSelectedSegmentContentChange}
         />
       </div>
     )
