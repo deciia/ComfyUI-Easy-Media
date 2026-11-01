@@ -216,6 +216,20 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
     if end <= start:
         return ""
     track_data = timeline.get("track_data") or {}
+    reference_task = False
+    for track in track_data.get("tracks") or []:
+        if not isinstance(track, dict) or track.get("type") != "task":
+            continue
+        for segment in track.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            seg_start = int(segment.get("start_frame") or 0)
+            seg_end = int(segment.get("end_frame") or seg_start)
+            if seg_end <= start or seg_start >= end:
+                continue
+            mode = str((segment.get("content") or {}).get("task_mode") or "").lower()
+            if mode in {"ref", "reference"}:
+                reference_task = True
     pieces: list[str] = []
     for track in track_data.get("tracks") or []:
         if not isinstance(track, dict) or track.get("type") != "camera":
@@ -258,7 +272,7 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
             if not text:
                 text = _compile_camera_from_keyframes(camera)
             if text:
-                if camera.get("playblast"):
+                if camera.get("playblast") and reference_task:
                     text = (
                         f"{text} Follow the camera motion of the reference video; "
                         "do not copy its appearance."
