@@ -590,11 +590,11 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByTestId('task-image-index-b').textContent).toBe('2')
   })
 
-  it('confirms before applying the selected prompt to both variants of every task segment', () => {
+  it.each(['a', 'b'] as const)('confirms before applying each prompt to its matching variant with %s selected', (variant) => {
     const first = taskSegment()
     first.content.user_prompt = 'Prompt A'
     first.content.user_prompt_b = 'Selected prompt B'
-    first.content.user_prompt_variant = 'b'
+    first.content.user_prompt_variant = variant
     const second = secondTaskSegment()
     second.content.user_prompt = 'Existing A'
     second.content.user_prompt_b = 'Existing B'
@@ -615,20 +615,92 @@ describe('TaskSegmentEditor', () => {
     fireEvent.click(applyButton)
 
     expect(screen.getByRole('heading', { name: 'Apply this prompt to every segment?' })).not.toBeNull()
-    expect(screen.getByText(/replace both prompt A and prompt B/)).not.toBeNull()
+    expect(screen.getByText(/Prompt A replaces A and prompt B replaces B/)).not.toBeNull()
     expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
     expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
       {
         segmentId: first.id,
-        patch: { user_prompt: 'Selected prompt B', user_prompt_b: 'Selected prompt B' },
+        patch: { user_prompt: 'Prompt A', user_prompt_b: 'Selected prompt B' },
       },
       {
         segmentId: second.id,
-        patch: { user_prompt: 'Selected prompt B', user_prompt_b: 'Selected prompt B' },
+        patch: { user_prompt: 'Prompt A', user_prompt_b: 'Selected prompt B' },
       },
     ])
+  })
+
+  it.each([
+    { user_prompt: 'Prompt A', user_prompt_b: undefined, patch: { user_prompt: 'Prompt A' } },
+    { user_prompt: 'Prompt A', user_prompt_b: '', patch: { user_prompt: 'Prompt A' } },
+    { user_prompt: undefined, user_prompt_b: 'Prompt B', patch: { user_prompt_b: 'Prompt B' } },
+    { user_prompt: ' \n ', user_prompt_b: 'Prompt B', patch: { user_prompt_b: 'Prompt B' } },
+  ])('preserves the other variant when applying $patch', ({ user_prompt, user_prompt_b, patch }) => {
+    const first = taskSegment()
+    first.content.user_prompt = user_prompt
+    first.content.user_prompt_b = user_prompt_b
+    const second = secondTaskSegment()
+    second.content.user_prompt_b = 'Existing B'
+    second.content.user_prompt_variant = 'b'
+    const onTrackSegmentsContentChange = vi.fn()
+    const onContentChange = vi.fn()
+
+    render(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        onContentChange={onContentChange}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+      { segmentId: first.id, patch },
+      { segmentId: second.id, patch },
+    ])
+    expect(onContentChange).not.toHaveBeenCalled()
+  })
+
+  it('applies distinct prompts without a track update callback', () => {
+    const segment = taskSegment()
+    segment.content.user_prompt_b = 'Prompt B'
+    segment.content.user_prompt_variant = 'b'
+    const onContentChange = vi.fn()
+    render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+
+    expect(onContentChange).toHaveBeenCalledWith({
+      user_prompt: 'Initial prompt',
+      user_prompt_b: 'Prompt B',
+    })
+  })
+
+  it('does not overwrite any prompts when both source prompts are empty', () => {
+    const segment = taskSegment()
+    segment.content.user_prompt = ''
+    const onContentChange = vi.fn()
+    const onTrackSegmentsContentChange = vi.fn()
+    render(
+      <TaskSegmentEditor
+        segment={segment}
+        trackSegments={[segment, secondTaskSegment()]}
+        onContentChange={onContentChange}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+
+    expect(onContentChange).not.toHaveBeenCalled()
+    expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('bypasses an image, removes its sequence number, and renumbers active images', () => {

@@ -5,7 +5,7 @@
 @import "shadcn/tailwind.css";
 /*---break---
  */
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where([data-easy-media-color-scheme="dark"], [data-easy-media-color-scheme="dark"] *));
 
 /**
  * Define CSS variables for light and dark themes, scoped under a custom class to avoid global conflicts.
@@ -143,8 +143,8 @@
     }
   }
 
-  /* Dark theme - active when body has dark-theme class */
-  .dark-theme .__CUSTOM_NODE_CLASS__{
+  /* Synced from the host color-scheme, with legacy theme-class fallback. */
+  [data-easy-media-color-scheme="dark"] .__CUSTOM_NODE_CLASS__{
     --checker-a: oklch(0.145 0 0);
     --checker-b: oklch(0.205 0 0);
     --background: oklch(0.145 0 0);

@@ -428,6 +428,26 @@ def validate_track_data(
             "Each audio/video track may contain only one shared reference; found multiple in "
             f"{duplicate_shared_media_tracks}"
         )
+    selected_task_ranges = task_ranges[segment_start_index:]
+    if segment_count >= 0:
+        selected_task_ranges = selected_task_ranges[:segment_count]
+    # A complete audio master drives the project even when a motion reference
+    # starts later. Runtime only applies a locked video where it overlaps.
+    master_audio_ranges: list[tuple[int, int]] = []
+    for _, index, kind in locked_media_tracks:
+        if kind != "audio":
+            continue
+        for segment in tracks[index]["segments"]:
+            start, end = segment["start_frame"], segment["end_frame"]
+            if master_audio_ranges and master_audio_ranges[-1][1] == start:
+                master_audio_ranges[-1] = (master_audio_ranges[-1][0], end)
+            else:
+                master_audio_ranges.append((start, end))
+    complete_audio_master = bool(selected_task_ranges) and all(
+        any(audio_start <= start and audio_end >= end
+            for audio_start, audio_end in master_audio_ranges)
+        for start, end in selected_task_ranges
+    )
     for locked_id, locked_index, locked_type in locked_media_tracks:
         locked_segments = tracks[locked_index].get("segments", [])
         if not any(
@@ -439,9 +459,8 @@ def validate_track_data(
             raise WorkflowError(
                 f"Locked {locked_type} track {locked_id} contains no {locked_type} segments"
             )
-        selected_task_ranges = task_ranges[segment_start_index:]
-        if segment_count >= 0:
-            selected_task_ranges = selected_task_ranges[:segment_count]
+        if locked_type == "video" and complete_audio_master:
+            continue
         uncovered_task_ranges = [
             (task_start, task_end)
             for task_start, task_end in selected_task_ranges

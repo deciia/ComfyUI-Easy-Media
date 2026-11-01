@@ -30,13 +30,16 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
    python3 scripts/patch_workflow.py inspect RESULT.json
    ```
 
-6. 复核节点数、link 数和非目标节点不变量。脚本报告目标歧义、schema 不兼容或媒体无效时停止，不绕过校验。
+6. 复核节点数、link 数和非目标节点不变量；用户要求同步时，还要确认真实页面的自定义 widget 可见，不能以 loaded 回执代替 UI 验证。脚本报告目标歧义、schema 不兼容或媒体无效时停止，不绕过校验。
 
 ## 关键决策
 
 - **分辨率**：用户未表达意图时保留现值。`16:9 0.9mp` 等表达选择 megapixels 模式，并映射完整 `aspect_ratio`；精确尺寸、auto、短/长边和 custom 规则见 schema 参考。
 - **上下文漂移控制**：用户提供视频作为主体或局部替换参考时，将全部目标 task segment 的 `content.continuity_mode` 设为 `context_drift`，并在该视频轨设置 `audio_locked: true` 以保留画面时间线。未另设音频锁时沿用视频原声；另有锁定 audio track 时优先用其音频替换。用户未指定片段长度时，默认把任务范围按连续 10 秒拆分，末段使用剩余时长；完整规则见 schema 参考。
+- **上下文分段提示词**：为 `task_mode: "ref"` 且 `continuity_mode: "context"` 的任务写或改 `user_prompt` 时，按 schema 参考的“上下文分段提示词”处理：先保持进入状态再变化，不把上一段提示词设想的结尾当作事实；需要明确的新构图时改用 `shot` 并配关键帧。
 - **主音频/视频原声**：需要原样沿用并驱动任务时长/节奏时，在目标 audio 或 video 轨设置 `audio_locked: true`。同类型最多锁一条；video 与 audio 可各锁一条，并存时 audio 优先执行音频锁定，video 继续约束画面时间线。
+- **单一完整时间线**：完整主音频搭配局部舞蹈参考时，保留同一工作流与完整任务时间线；音频锁覆盖全部任务，视频锁只在交集内生效。不得为了满足校验而拆成多个工程、补长视频或重复短音频。
+- **公用图片兼容**：当前前端对稀疏公用图片（仅首任务有图、后续为空）在归一化时会为缺失引用生成 UUID，多次归一化相同原始数据时 ID 不稳定。未验证目标前端能稳定加载此类数据时，为每个任务写入私有图片引用（shared_reference: false），沿用同一资源路径、保存固定图片 ID；不要重复上传。细节见 schema 参考。
 - **公用媒体**：上下文分段需要使用同一张图片、同一段音频或同一段视频作为参考时，将对应媒体设置为 `shared_reference: true`。任务图片把字段写在 `content.images[]` 项上；音频/视频把字段写在媒体片段的 `content` 上。公用图片会排在各任务私有图片之前且每个任务合计仍最多 9 张；同一音频或视频轨最多一个公用片段，公用音频最多使用源文件开头 15 秒。它是跨任务参考，不等于轨道级 `audio_locked`。`speaker_reference` 仅作为旧工作流兼容字段，新工作流不再写入。
 - **项目范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
 
@@ -48,4 +51,4 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 ## 交付
 
-说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、主体替换衔接模式、锁定媒体轨/公用媒体、项目参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。
+说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、上下文漂移控制衔接模式、锁定媒体轨/公用媒体、项目参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。

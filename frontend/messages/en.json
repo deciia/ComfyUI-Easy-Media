@@ -173,7 +173,7 @@
     "combinedEdit": "Combined",
     "applyPromptToAll": "Apply to all",
     "applyPromptToAllTitle": "Apply this prompt to every segment?",
-    "applyPromptToAllDescription": "The selected user prompt from this segment will replace both prompt A and prompt B in every task segment, including prompts already set on other segments.",
+    "applyPromptToAllDescription": "The non-empty user prompts from this segment will replace the matching prompts in every task segment. Prompt A replaces A and prompt B replaces B; empty prompts leave existing content unchanged.",
     "applyPromptToAllConfirm": "Replace all",
     "taskNumber": "Segment {n}",
     "taskMode": "Task mode",

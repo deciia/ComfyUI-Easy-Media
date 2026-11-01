@@ -1,4 +1,5 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
+import { installWidgetTheme } from '@/lib/widget-theme'
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveMultiImagesLoaderNodeSize } from '@/lib/multi-images-loader-node-size'
@@ -52,6 +53,7 @@ comfyApp.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
 
   async setup() {
+    installWidgetTheme()
     installWorkflowSubmission(comfyApp)
     addInlineStyles(
       __COMFY_EASY_MEDIA_GLOBAL_CSS__,

@@ -168,6 +168,18 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 
 > **Note:** Some models support automatic download via the built-in Easy-Media model download interface. Model files will be placed in the `ComfyUI/models/` directory.
 
+### Local OpenAI-compatible Prompt Enhancement
+
+`easy multiTrackPromptEnhancer` and `easy multitrackPromptEnhanceToProject` support **openai_compatible (local)** through `/v1/chat/completions`, including [Strata](https://github.com/Niko1221/Strata). The seven options are `base_url`, `model_name`, `apikey`, `max_tokens`, `temperature`, `reasoning_effort`, and `force_unload`.
+
+`base_url` is empty by default: a nonempty node value takes priority, followed by `OPENAI_LOCAL_BASE_URL` in `config.yaml` and finally `http://127.0.0.1:8080/v1`. Server roots, `/v1` bases, full Chat Completions URLs, and proxy prefixes are accepted. `model_name` is also empty by default: the node value overrides `OPENAI_LOCAL_MODEL_NAME`; otherwise `/v1/models` must identify one model (aliases for that same model are accepted). If discovery is unavailable or multiple distinct models are listed, fill `model_name` explicitly. API keys are optional and read from `OPENAI_LOCAL_API_KEY` in config.yaml or the environment.
+
+`max_tokens` defaults to empty and is omitted from the request, leaving the output limit to the service. Positive integers and STRING/INT connections are supported. Output includes thinking and must fit beside the input in the server's context. An explicit output limit rejected with Strata's positive remaining-output allowance is reduced to that allowance and retried once without truncating input. Other errors and inputs with no output space still fail. Existing workflows keep saved field values; select the new provider and clear saved limits or addresses to use the defaults.
+
+`reasoning_effort` defaults to `high`; `none`, `low`, `medium`, and `high` are sent directly, without `enable_thinking` or `chat_template_kwargs`. The service must support the selected effort; Strata's `none` disables thinking. Only final answer text is returned: separate reasoning fields, thinking content blocks, and inline `<think>` blocks are excluded. Reasoning-only responses fail. Temperature defaults to 0.7, timeout is 600 seconds, and other settings follow the service defaults. Vision-capable models receive images; each video is sampled into up to 24 image frames. Audio is omitted.
+
+Both nodes offload ComfyUI's loaded models and clear allocator caches before local inference; cleanup failures stop the request. `force_unload` defaults to **false**. When enabled, it separately calls `/v1/unload?wait=1` after inference, including failures. Enable it for Strata or services that implement that endpoint; keep it disabled otherwise. Unload errors are reported. The generated Chat Completions payload does not contain `force_unload`. Strata runs on the machine selected by `base_url`; `127.0.0.1` means the ComfyUI server's machine. See [Strata's API documentation](https://github.com/Niko1221/Strata/blob/main/docs/DETAILS.md#using-it).
+
 <a id="multitrack-project"></a>
 
 ### 🎞️ MultiTrack Project
@@ -226,6 +238,28 @@ In addition to attaching the previous segment's context conditioning, the projec
 - **Automatic handoff and resuming across runs:** Context passes automatically between segments in one run. When starting from a later segment, the project loads context from the previous segment's active saved version, without manually wiring Save / Load Latent nodes.
 
 > **Note:** Context continuation requires the previous segment's saved latents; an MP4 alone is insufficient. After changing editor dimensions, scaling factor, or the previous segment's version, check the downstream context chain. Regenerate first-pass checkpoints and context latents created with the old reduced-first-pass sizing before resuming with the new sizing behavior. Existing later segments are not automatically regenerated when an earlier segment changes.
+
+#### Prompting Context Segments (Reference Mode)
+
+A `context` segment starts from the previous segment's **delivered** tail (22 frames, 0.92 s at 24 fps), not from the ending its prompt asked for. Model priors on framing and camera motion mean the two can differ. Those frames are pinned, and text that disagrees with them tends to be rendered *in addition to* them rather than replacing them: a pinned close-up plus a newly described two-shot can come out as both. Write the handoff around what is certain, never around what you intended the previous segment to do.
+
+| Rule | In practice |
+|------|-------------|
+| Open with a hold | `[Shot 1]` holds the incoming state: the camera keeps its incoming direction and framing, and the subject keeps the incoming pose, action, and lighting. No new composition, arrangement of people, or location. |
+| Keep the hold alive | A held frame with nothing happening renders as a freeze. Give the performer a breath, a weight shift, or an eyeline change; only the camera holds still. |
+| Change after the hold | No cut, dialogue, or new key action before `00:02.000`. A requested change of framing or location becomes an explicit cut after that point; a change of distance alone is a camera movement. |
+| Start in motion | Anything already moving at the join (gait, gesture, camera move, sound) starts mid-motion. Nothing is already finished at the first frame. |
+| Stay self-contained | The model sees no earlier prompt text. Define every `<Subject N>` fully and name the location and lighting; avoid "the same" for identity. Only pose, action, and camera may refer to what is incoming. |
+| Pictures define identity, not frames | Use `<Picture N>` to define a subject, setting, or style, never as the first frame or composition anchor of `[Shot 1]`. Do not use `<Video N>` or `[video continuation]` for the handoff, because continuation comes from the saved latents. The summary tag stays `[reference generation]`. |
+| End in motion before another `context` segment | No "finishes", "arrives", "settles", "centered", or "slows"; no cut or new line of dialogue in the final second; describe the last camera state as a movement or a hold. |
+
+If the next segment needs a specific new framing rather than whatever the previous one happened to end on, use a `shot` segment with a keyframe instead of `context`.
+
+**Automatic application:** when `MultiTrack Task Output` builds a prompt with the default MiniMax reference-mode system prompt, it appends these rules, the incoming ones when the segment is not first and uses `context`, and the outgoing ones when the next segment uses `context`. They reach a rewriting LLM only through the `api` and `llm` prompt formats, because `default` and `promptRelay` do not output a system prompt. Custom system prompts, the base T2VA / I2VA / FL2VA / L2VA prompt, edit mode, and `context_drift` (including the legacy `context_swap`) are left unchanged.
+
+**Timestamps:** Easy Media does not shift prompt timestamps. They are read against the generated clip, which starts 0.92 s before the saved segment, so `[Shot 2] At 00:03.000` is expected to appear about 2.1 s into the saved file. Frames generated beyond the required length are discarded.
+
+> **Note:** These are conservative defaults based on how the pinned tail works and on third-party field reports, notably the chaining notes in [ComfyUI-H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context) (the hold-then-change pattern). They have not been benchmarked in this project; adjust the `00:02.000` threshold and the wording against your own renders.
 
 #### Generation Ranges, Regeneration, and Version Retention
 

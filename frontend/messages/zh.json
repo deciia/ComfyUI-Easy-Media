@@ -173,7 +173,7 @@
     "combinedEdit": "整体编辑",
     "applyPromptToAll": "应用到所有",
     "applyPromptToAllTitle": "将提示词应用到所有片段？",
-    "applyPromptToAllDescription": "当前片段选中的用户提示词将覆盖所有任务片段的 A、B 提示词；其他片段已设置的提示词也会被替换。",
+    "applyPromptToAllDescription": "当前片段中非空的用户提示词将覆盖所有任务片段的对应提示词：A 覆盖 A，B 覆盖 B；未填写的提示词不会修改其他片段已有的内容。",
     "applyPromptToAllConfirm": "确认覆盖",
     "taskNumber": "片段 {n}",
     "taskMode": "任务模式",

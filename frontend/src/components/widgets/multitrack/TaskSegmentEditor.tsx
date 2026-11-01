@@ -606,9 +606,16 @@ export function TaskSegmentEditor({
   }
 
   function handleApplyPromptToAll() {
-    const patch = {
-      user_prompt: promptValue,
-      user_prompt_b: promptValue,
+    const patch: Partial<MultiTrackSegmentContent> = {}
+    if (segment.content.user_prompt?.trim()) {
+      patch.user_prompt = segment.content.user_prompt
+    }
+    if (segment.content.user_prompt_b?.trim()) {
+      patch.user_prompt_b = segment.content.user_prompt_b
+    }
+    if (Object.keys(patch).length === 0) {
+      setApplyPromptToAllOpen(false)
+      return
     }
     if (onTrackSegmentsContentChange) {
       onTrackSegmentsContentChange(editableSegments.map((item) => ({

@@ -4,6 +4,18 @@ import gc
 from typing import Any
 
 
+def unload_comfyui_models() -> None:
+    """Offload ComfyUI models and release allocator caches before external inference."""
+    try:
+        from comfy import model_management
+
+        model_management.unload_all_models()
+        gc.collect()
+        model_management.soft_empty_cache(force=True)
+    except Exception as error:
+        raise RuntimeError(f"Failed to release ComfyUI model memory: {error}") from error
+
+
 def _move_model_to_cpu(model: Any) -> None:
     if model is None:
         return
