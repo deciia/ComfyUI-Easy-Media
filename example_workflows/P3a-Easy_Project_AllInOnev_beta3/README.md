@@ -19,15 +19,20 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 
 | 插件 | 用到的节点 | 地址 |
 |---|---|---|
-| **ComfyUI_Deciia_EasyUse** | `DeciiaVideoModelLoader` 四合一模型加载、`DeciiaSamplerPreset` ×2 采样预设、`DeciiaSparseSolAttn` 稀疏注意力、`DeciiaVramSafeLoraStack` ×3 显存安全 LoRA 串 | https://github.com/deciia/ComfyUI_Deciia_EasyUse |
+| **ComfyUI_Deciia_EasyUse** | `DeciiaVideoModelLoader` 四合一模型加载、`DeciiaSamplerPreset` ×2 采样预设、`DeciiaSparseSolAttn` 稀疏注意力、`DeciiaVramSafeLoraStack` ×3 显存安全 LoRA 串；**并收录了下述班长captain 的 6 个节点**（`banzhang_nodes/` 子包） | https://github.com/deciia/ComfyUI_Deciia_EasyUse |
 
-### 班长插件（原作者已授权开源）
+### 班长captain 节点（已收录于 ComfyUI_Deciia_EasyUse）
 
-| 插件 | 用到的节点 | 地址 |
-|---|---|---|
-| **ComfyUI_Deciia_Banzhang**（班长插件 fork） | 🛡️⚡ **显存守卫** `BanZhang_VRAM_Guard`、📈 **活动监视器·内存显存** `BanZhang_Mem_Graph`、**班长 MiniMax H3 预览覆盖** `MiniMaxH3PreviewOverride`（taeh3 实时预览）、🔍 RTX 超分降噪 `BanZhang_RTX_SuperResolution`、🎞️ RIFE 插帧 `BanZhang_RIFE_Interpolation`、🧹 全能系统净化 `BanZhang_VRAM_Cleaner` | https://github.com/deciia/ComfyUI_Deciia_Banzhang |
+以下 6 个节点来自 **班长captain**（B站昵称）的「BanZhang 全家桶」插件。该插件未整体开源；经作者同意，工作流用到的这 6 个节点已收录进 **ComfyUI_Deciia_EasyUse**（`banzhang_nodes/` 子包，代码与原插件一致并注明来源）。**安装 EasyUse 即可用，无需另装班长插件。**
 
-> 🛡️⚡ 显存守卫、班长 MiniMax H3 预览覆盖、📈 活动监视器·内存显存 三个节点已获得原作者 **班长captain** 授权开源（B站：https://space.bilibili.com/15838129 ），后续会合并进 EasyUse / EasyMedia 发布，届时可去掉此依赖。
+| 节点 | 说明 |
+|---|---|
+| 🛡️⚡ **显存守卫** `BanZhang_VRAM_Guard` | 运行前预留显存，防瞬时峰值 OOM |
+| 📈 **活动监视器·内存显存** `BanZhang_Mem_Graph` | 画布实时内存/显存曲线（含净化标记） |
+| **班长 MiniMax H3 预览覆盖** `MiniMaxH3PreviewOverride` | taeh3 迷你 VAE 实时预览 |
+| 🔍 **RTX 超分降噪** `BanZhang_RTX_SuperResolution` | 需 pip 安装 NVIDIA Maxine VFX（nvvfx） |
+| 🎞️ **RIFE 插帧** `BanZhang_RIFE_Interpolation` | 权重首次运行自动下载 |
+| 🧹 **全能系统净化** `BanZhang_VRAM_Cleaner` | 内存/显存/缓存一键清理 |
 
 ### 第三方插件
 
@@ -57,7 +62,7 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 | loras（上采样器） | `h3_upscaler_lms_v0.1.safetensors` | multitrackProject 上采样 |
 | vae（预览） | `taeh3.safetensors` | 班长 H3 预览覆盖用的迷你 VAE |
 | loras（LoRA 串预设中的可选行） | `MMH3-MPOV`、`H3_Combat_V2`、`Motion_Repair_V2`、`Bunny_weapon_combatV1`、`minimax_h3_dmad_full_dareties…` 等 | 预设里默认大多关闭，按需自备 |
-| RTX 超分 | NVIDIA Maxine VFX（nvvfx） | 班长插件内 `Install_RTX_VFX_Deps.bat` 一键装依赖 |
+| RTX 超分 | NVIDIA Maxine VFX（nvvfx） | 需 pip 安装 nvvfx 依赖包（RTX 超分节点启用时） |
 | RIFE 插帧 | v4.26 权重 | 首次运行自动下载 |
 | VOSR2 / SeedVR2 | 各自模型权重 | 启用对应超分出口时需要 |
 
@@ -91,7 +96,7 @@ MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一�
 
 ## 5. 致谢
 
-- **班长captain**（B站 https://space.bilibili.com/15838129 ）——显存守卫 / H3 预览覆盖 / 活动监视器 / RTX 超分 / RIFE 插帧 / 系统净化等节点原作者，已授权开源；
+- **班长captain**（B站昵称）——显存守卫 / H3 预览覆盖 / 活动监视器 / RTX 超分 / RIFE 插帧 / 系统净化等节点原作者，上述节点经其同意收录进 ComfyUI_Deciia_EasyUse；
 - **孤海 goohai**（Goohaitools 图像/视频对比、忽略多组）；
 - **MajoorWaldi**（OmniCam 相机编排）、**T8mars**（H3 语义桥 T8）、**kijai**（KJNodes）、**tl2012tl**（TE-Speed-VOSR2）、**LAOGOU-666**（Memory Cleanup）、**Suzie1**（Comfyroll）；
 - **yolain/ComfyUI-Easy-Media** 上游项目。
