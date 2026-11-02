@@ -26,6 +26,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import traceback
 import uuid
 from pathlib import Path
@@ -176,14 +177,20 @@ async def handle_camera_store_playblast(request: web.Request) -> web.Response:
     project_name = str(payload.get("project_name") or "").strip()
     segment_id = str(payload.get("segment_id") or "").strip()
     recording_path = str(payload.get("recording_path") or "").strip()
+    # ComfyUI 文件控件会把来源写进值里，例如 "clip.webm [input]"
+    suffix_match = re.search(r"\s*\[(input|output|temp)\]\s*$", recording_path, re.IGNORECASE)
+    declared_source = ""
+    if suffix_match:
+        declared_source = suffix_match.group(1).lower()
+        recording_path = recording_path[: suffix_match.start()].strip()
     if not project_name or not segment_id or not recording_path:
         return web.json_response({"error": "project_name / segment_id / recording_path are required"}, status=400)
     recording = Path(recording_path)
     if not recording.is_absolute() or not recording.is_file():
-        candidates = [
-            Path(folder_paths.get_output_directory()) / recording_path,
-            Path(folder_paths.get_input_directory()) / recording_path,
-        ]
+        output_dir = Path(folder_paths.get_output_directory())
+        input_dir = Path(folder_paths.get_input_directory())
+        ordered = [input_dir, output_dir] if declared_source == "input" else [output_dir, input_dir]
+        candidates = [base / recording_path for base in ordered]
         recording = next((item for item in candidates if item.is_file()), recording)
     if not recording.is_file():
         return web.json_response({"error": f"recording not found: {recording_path}"}, status=404)
@@ -443,6 +450,31 @@ async def handle_camera_extract(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"提取失败：{error}"}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/camera/profiles")
+async def handle_camera_profiles(request: web.Request) -> web.Response:
+    """返回 OmniCam 可用的编译目标 profile 列表。"""
+    try:
+        from .vendor.omnicam.profiles.catalog import PROFILE_REGISTRY
+
+        ids = list(PROFILE_REGISTRY.ids)
+        profiles = []
+        for profile_id in ids:
+            try:
+                profile = PROFILE_REGISTRY.require(profile_id)
+                profiles.append({
+                    "id": profile_id,
+                    "label": getattr(profile, "label", profile_id) or profile_id,
+                    "semantic": getattr(profile, "semantic", ""),
+                    "frame_policy": getattr(profile, "frame_policy", ""),
+                })
+            except Exception:
+                profiles.append({"id": profile_id, "label": profile_id})
+        return web.json_response({"profiles": profiles})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": str(error)}, status=500)
 
 
 @PromptServer.instance.routes.post("/easy-media/camera/monitor-compile")

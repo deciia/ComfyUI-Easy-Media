@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { CameraData } from '@/types/multitrack'
 
@@ -47,6 +47,25 @@ export function MonitorCompileDialog({
   const [draft, setDraft] = useState('')
 
   const durationSeconds = useMemo(() => Math.max(0.1, durationFrames / 24), [durationFrames])
+  const [profiles, setProfiles] = useState<Array<{ id: string; label?: string; semantic?: string }>>([])
+
+  useEffect(() => {
+    if (!open) return
+    void (async () => {
+      try {
+        const response = await fetch('/easy-media/camera/profiles')
+        if (!response.ok) return
+        const data = await response.json() as { profiles?: Array<{ id: string; label?: string; semantic?: string }> }
+        if (data.profiles?.length) {
+          setProfiles(data.profiles)
+          if (!data.profiles.some((item) => item.id === profile)) setProfile(data.profiles[0].id)
+        }
+      } catch (error) {
+        console.debug('[EasyMedia] load profiles failed', error)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   if (!open) return null
 
@@ -104,7 +123,11 @@ export function MonitorCompileDialog({
               value={profile}
               onChange={(event) => setProfile(event.target.value)}
             >
-              <option value="h3_native">h3_native（MiniMax H3 参考模式）</option>
+              {profiles.length ? profiles.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.id}{item.semantic ? `（${item.semantic}）` : ''}
+                </option>
+              )) : <option value="h3_native">h3_native（MiniMax H3 参考模式）</option>}
             </select>
           </label>
           <label className="flex flex-col gap-0.5">
@@ -189,6 +212,22 @@ export function MonitorCompileDialog({
                 {failedChecks.map((item) => `${item.state ?? ''} ${item.label ?? item.id ?? ''}${item.message ? `：${item.message}` : ''}`).join('；')}
               </div>
             ) : null}
+            <details className="rounded border border-border p-1">
+              <summary className="cursor-pointer text-[10px] text-muted-foreground">
+                编译诊断（{result.checks?.length ?? 0} 项）
+              </summary>
+              <div className="mt-1 flex flex-col gap-0.5">
+                {(result.checks ?? []).map((item) => (
+                  <div key={item.id ?? item.label} className="text-[10px]">
+                    <span className={(item.state ?? '').toUpperCase() === 'PASS' ? 'text-muted-foreground' : 'text-destructive'}>
+                      {item.state ?? ''}
+                    </span>
+                    {' '}{item.label ?? item.id ?? ''}
+                    {item.message ? <span className="text-muted-foreground">：{item.message}</span> : null}
+                  </div>
+                ))}
+              </div>
+            </details>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-muted-foreground">编译后的提示词（可编辑，应用后注入任务段）</span>
               <textarea

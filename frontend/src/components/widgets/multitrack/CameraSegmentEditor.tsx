@@ -12,6 +12,7 @@ import {
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import { installOmniCamChinese, uninstallOmniCamChinese } from '@/lib/omnicam-zh'
 import { MonitorCompileDialog } from './MonitorCompileDialog'
+import { ExtractMotionDialog } from './ExtractMotionDialog'
 import type { CameraData, CameraEasing, CameraKeyframe, CameraPreset, MultiTrackSegment } from '@/types/multitrack'
 
 type ComfyGraphLike = {
@@ -103,6 +104,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const [directorFrame, setDirectorFrame] = useState(0)
   const [zhEnabled, setZhEnabled] = useState(() => localStorage.getItem('easyMedia.omnicamZh') !== 'off')
   const [monitorOpen, setMonitorOpen] = useState(false)
+  const [extractOpen, setExtractOpen] = useState(false)
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -161,7 +163,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
         try {
           lastPushedRef.current = cameraSignature
           suppressSyncUntilRef.current = Date.now() + 1500
-          await prepareDirectorNode()
+          await prepareDirectorNode({ fromPresets: true })
           setNotice({ kind: 'ok', text: '面板改动已同步到 3D 编辑器' })
         } catch (error) {
           console.debug('[EasyMedia] push camera to director failed', error)
@@ -175,16 +177,28 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   }, [cameraSignature, embedded])
 
   /** 确保 Director 节点存在、写入相机状态，并让活动编辑器严格对齐当前段的帧数。 */
-  async function prepareDirectorNode(): Promise<{ node: Record<string, unknown>; runtime?: DirectorRuntimeLike }> {
+  async function prepareDirectorNode(options: { fromPresets?: boolean } = {}): Promise<{ node: Record<string, unknown>; runtime?: DirectorRuntimeLike }> {
     const { app, graph, liteGraph } = resolveComfyGraph()
     if (!graph) throw new Error('找不到 ComfyUI 画布（comfyAPI.app.app 不可用）')
-    const response = await fetch('/easy-media/camera/editor-state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
-    })
-    if (!response.ok) throw new Error(`生成编辑器状态失败（HTTP ${response.status}）`)
-    const result = await response.json() as { state?: Record<string, unknown> }
+    const storedState = camera.omnicam_state
+    const omniState = storedState && typeof storedState === 'object' && !Array.isArray(storedState)
+      ? storedState as Record<string, unknown>
+      : null
+    const hasOmniCameras = Array.isArray((omniState as { cameras?: unknown[] } | null)?.cameras)
+      && ((omniState as { cameras?: unknown[] }).cameras as unknown[]).length > 0
+    let result: { state?: Record<string, unknown> }
+    if (!options.fromPresets && hasOmniCameras) {
+      // 已存在 3D 编排结果时优先用它，避免被预设关键帧覆盖
+      result = { state: omniState as Record<string, unknown> }
+    } else {
+      const response = await fetch('/easy-media/camera/editor-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
+      })
+      if (!response.ok) throw new Error(`生成编辑器状态失败（HTTP ${response.status}）`)
+      result = await response.json() as { state?: Record<string, unknown> }
+    }
     if (!result.state) throw new Error('编辑器状态为空，请先设置预设或关键帧')
     let node: Record<string, unknown> | null | undefined = findDirectorNode(graph)
     if (!node) {
@@ -377,6 +391,43 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     }
     button.click()
     setNotice({ kind: 'ok', text: '已开始录制预演，录完会自动挂载' })
+  }
+
+  /** 把一份外部 state（如 Extractor 结果）直接写进 Director 并刷新内嵌视口。 */
+  async function applyExplicitState(state: Record<string, unknown>) {
+    const { app, graph, liteGraph } = resolveComfyGraph()
+    if (!graph) throw new Error('找不到 ComfyUI 画布')
+    let node: Record<string, unknown> | null | undefined = findDirectorNode(graph)
+    if (!node) {
+      if (!liteGraph?.createNode) throw new Error('无法自动创建节点')
+      node = liteGraph.createNode(OMNICAM_DIRECTOR_TYPE)
+      if (!node) throw new Error('创建 Director 节点失败')
+      node.pos = [80, 80]
+      graph.add?.(node)
+    }
+    let runtime = getDirectorRuntime(node)
+    for (let i = 0; i < 40 && !runtime?.inlineView?.container; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      runtime = getDirectorRuntime(node)
+    }
+    suppressSyncUntilRef.current = Date.now() + 2500
+    const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+    const setWidget = (name: string, value: unknown) => {
+      const widget = widgets.find((item) => item.name === name)
+      if (widget) widget.value = value
+    }
+    const aligned = { ...state, fps: 24, duration_frames: durationFrames }
+    setWidget('state_json', JSON.stringify(aligned))
+    setWidget('width', 1280)
+    setWidget('height', 720)
+    setWidget('fps', 24)
+    setWidget('duration_seconds', durationFrames / 24)
+    setWidget('render_mode', 'omni_ref')
+    app?.canvas?.setDirty?.(true, true)
+    graph.setDirtyCanvas?.(true, true)
+    runtime?.restoreFromWidgetsHeadless?.()
+    await embedDirector(node)
+    setTab('viewport')
   }
 
   /** 把 Director 的 inline 编辑器 DOM 搬进本面板并显示。 */
@@ -695,6 +746,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             >
               H3 编译…
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 w-fit px-2 text-[10px]"
+              onClick={() => setExtractOpen(true)}
+            >
+              提取运镜…
+            </Button>
             <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
               录制预演
             </Button>
@@ -827,6 +887,31 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           {notice.text}
         </div>
       ) : null}
+      <ExtractMotionDialog
+        open={extractOpen}
+        defaultVideo={camera.playblast ?? ''}
+        onClose={() => setExtractOpen(false)}
+        onApply={(editorState) => {
+          void (async () => {
+            try {
+              const response = await fetch('/easy-media/camera/compile-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: editorState }),
+              })
+              const compiled = await response.json() as { prompt?: string }
+              patchCamera({
+                omnicam_state: editorState,
+                ...(compiled.prompt ? { compiled_prompt: compiled.prompt } : {}),
+              })
+              await applyExplicitState(editorState)
+              setNotice({ kind: 'ok', text: '运镜已从视频提取并载入 3D 视口' })
+            } catch (error) {
+              setNotice({ kind: 'error', text: `应用提取结果失败：${String(error)}` })
+            }
+          })()
+        }}
+      />
       <MonitorCompileDialog
         open={monitorOpen}
         camera={camera}
