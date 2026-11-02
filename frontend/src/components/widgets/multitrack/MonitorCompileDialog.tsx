@@ -1,0 +1,221 @@
+import { useMemo, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import type { CameraData } from '@/types/multitrack'
+
+interface MonitorCompileDialogProps {
+  open: boolean
+  camera: CameraData
+  durationFrames: number
+  playblast?: string
+  onClose: () => void
+  onApply: (prompt: string) => void
+}
+
+interface CompileResult {
+  profile?: string
+  final_prompt?: string
+  target_length?: number
+  target_fps?: number
+  width?: number
+  height?: number
+  duration_seconds?: number
+  frame_policy?: string
+  has_reference_video?: boolean
+  has_reference_frames?: boolean
+  checks?: Array<{ id?: string; label?: string; state?: string; message?: string }>
+  error?: string
+  need_playblast?: boolean
+}
+
+export function MonitorCompileDialog({
+  open,
+  camera,
+  durationFrames,
+  playblast,
+  onClose,
+  onApply,
+}: MonitorCompileDialogProps) {
+  const [profile, setProfile] = useState('h3_native')
+  const [width, setWidth] = useState(832)
+  const [height, setHeight] = useState(480)
+  const [fps, setFps] = useState(24)
+  const [guideSlot, setGuideSlot] = useState(1)
+  const [basePrompt, setBasePrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<CompileResult | null>(null)
+  const [draft, setDraft] = useState('')
+
+  const durationSeconds = useMemo(() => Math.max(0.1, durationFrames / 24), [durationFrames])
+
+  if (!open) return null
+
+  async function compile() {
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch('/easy-media/camera/monitor-compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: camera.omnicam_state ?? undefined,
+          target_profile: profile,
+          playblast: playblast ?? '',
+          width,
+          height,
+          target_fps: fps,
+          duration_seconds: durationSeconds,
+          guide_reference_index: guideSlot,
+          base_prompt: basePrompt,
+        }),
+      })
+      const payload = await response.json() as CompileResult
+      if (!response.ok) {
+        setResult(null)
+        setError(payload.error ?? `编译失败（HTTP ${response.status}）`)
+        return
+      }
+      setResult(payload)
+      setDraft(payload.final_prompt ?? '')
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const failedChecks = (result?.checks ?? []).filter((item) => (item.state ?? '').toUpperCase() !== 'PASS')
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4" role="dialog">
+      <div className="flex max-h-[85vh] w-[min(760px,92vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]">
+        <div className="flex items-center justify-between">
+          <div className="text-[12px] font-medium">H3 编译（OmniCam Monitor）</div>
+          <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">目标模型</span>
+            <select
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={profile}
+              onChange={(event) => setProfile(event.target.value)}
+            >
+              <option value="h3_native">h3_native（MiniMax H3 参考模式）</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">引导槽位（&lt;Video N&gt;）</span>
+            <input
+              type="number"
+              min={1}
+              max={3}
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={guideSlot}
+              onChange={(event) => setGuideSlot(Math.max(1, Math.min(3, Number(event.target.value) || 1)))}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">输出宽度</span>
+            <input
+              type="number"
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={width}
+              onChange={(event) => setWidth(Number(event.target.value) || 832)}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">输出高度</span>
+            <input
+              type="number"
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={height}
+              onChange={(event) => setHeight(Number(event.target.value) || 480)}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">帧率</span>
+            <input
+              type="number"
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={fps}
+              onChange={(event) => setFps(Number(event.target.value) || 24)}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">时长（秒）</span>
+            <input
+              type="number"
+              step="0.1"
+              className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+              value={durationSeconds.toFixed(2)}
+              onChange={() => undefined}
+            />
+          </label>
+        </div>
+
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] text-muted-foreground">基础提示词（可选，会与相机描述合并）</span>
+          <textarea
+            className="min-h-12 w-full rounded border border-border bg-card p-1 text-[10px]"
+            value={basePrompt}
+            onChange={(event) => setBasePrompt(event.target.value)}
+          />
+        </label>
+
+        <div className="flex items-center gap-2">
+          <Button type="button" size="sm" className="h-6 px-2 text-[10px]" disabled={busy} onClick={() => { void compile() }}>
+            {busy ? '编译中…' : '编译'}
+          </Button>
+          <span className="text-[10px] text-muted-foreground">
+            预演：{playblast ? playblast.split('/').pop() : '未录制（H3 需要参考视频）'}
+          </span>
+        </div>
+
+        {error ? <div className="text-[10px] text-destructive">{error}</div> : null}
+
+        {result ? (
+          <>
+            <div className="text-[10px] text-muted-foreground">
+              输出：{result.width}×{result.height} · {result.target_length} 帧 @ {result.target_fps}fps
+              {result.frame_policy ? ` · ${result.frame_policy}` : ''}
+              {result.has_reference_video ? ' · 含参考视频' : result.has_reference_frames ? ' · 含参考帧' : ''}
+            </div>
+            {failedChecks.length ? (
+              <div className="text-[10px] text-destructive">
+                {failedChecks.map((item) => `${item.state ?? ''} ${item.label ?? item.id ?? ''}${item.message ? `：${item.message}` : ''}`).join('；')}
+              </div>
+            ) : null}
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-muted-foreground">编译后的提示词（可编辑，应用后注入任务段）</span>
+              <textarea
+                className="min-h-40 w-full rounded border border-border bg-card p-1 font-mono text-[10px] leading-relaxed"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-6 px-2 text-[10px]"
+                disabled={!draft.trim()}
+                onClick={() => {
+                  onApply(draft.trim())
+                  onClose()
+                }}
+              >
+                应用到相机段
+              </Button>
+              <span className="text-[10px] text-muted-foreground">应用后：生成时注入任务段提示词</span>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}

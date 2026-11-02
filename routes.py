@@ -334,6 +334,100 @@ async def handle_camera_editor_state(request: web.Request) -> web.Response:
     return web.json_response({"state": state})
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/monitor-compile")
+async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
+    """用 OmniCam Monitor 的编译能力：MotionScene → 目标模型产物（提示词 / 参考视频 / 合法帧数）。"""
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    try:
+        from .utils.camera_omnicam import compile_from_editor_state
+        from .vendor.omnicam.core.motion_scene import MotionScene
+        from .vendor.omnicam.profiles.base import CompileRequest
+        from .vendor.omnicam.profiles.catalog import PROFILE_REGISTRY
+
+        profile_id = str(payload.get("target_profile") or "h3_native")
+        state = payload.get("state") or {}
+        motion_scene = payload.get("motion_scene") or {}
+        if motion_scene:
+            scene_dict = motion_scene
+            prompt = ""
+        else:
+            compiled = compile_from_editor_state(state, fps=float(payload.get("fps") or 24))
+            scene_dict = compiled.get("motion_scene") or {}
+            prompt = compiled.get("prompt") or ""
+        if not scene_dict:
+            return web.json_response({"error": "无法从当前相机状态构建 MotionScene"}, status=400)
+        scene = MotionScene.from_dict(scene_dict)
+        target_fps = float(payload.get("target_fps") or 24)
+        duration = float(payload.get("duration_seconds") or 0) or scene.timeline.duration_seconds
+        playblast_video = None
+        playblast_path = str(payload.get("playblast") or "").strip()
+        if playblast_path:
+            candidate = Path(playblast_path)
+            if not candidate.is_absolute() or not candidate.is_file():
+                options = [
+                    Path(folder_paths.get_output_directory()) / playblast_path,
+                    Path(folder_paths.get_input_directory()) / playblast_path,
+                ]
+                candidate = next((item for item in options if item.is_file()), candidate)
+            if candidate.is_file():
+                try:
+                    from comfy_api.latest import InputImpl
+                    playblast_video = InputImpl.VideoFromFile(str(candidate))
+                except Exception as error:
+                    logger.warning("EasyMedia: playblast load failed: %s", error)
+        compile_request = CompileRequest(
+            motion_scene=scene,
+            playblast_video=playblast_video,
+            base_prompt=str(payload.get("base_prompt") or ""),
+            target_width=int(payload.get("width") or 832),
+            target_height=int(payload.get("height") or 480),
+            duration_seconds=duration,
+            target_fps=target_fps,
+            guide_reference_index=int(payload.get("guide_reference_index") or 1),
+            guide_style=None,
+            reference_plan_json="",
+        )
+        profile = PROFILE_REGISTRY.require(profile_id)
+        try:
+            result = profile.compile(compile_request)
+        except ValueError as error:
+            if "playblast" in str(error).lower():
+                return web.json_response({
+                    "error": "该目标模型需要参考视频：请先在 3D 视口里录制预演",
+                    "need_playblast": True,
+                }, status=409)
+            raise
+        checks = [
+            {
+                "id": item.id,
+                "label": item.label,
+                "state": item.state,
+                "message": item.message,
+            }
+            for item in result.checks
+        ]
+        return web.json_response({
+            "profile": profile_id,
+            "final_prompt": result.final_prompt,
+            "motion_prompt": prompt,
+            "target_length": result.timeline.frame_count,
+            "target_fps": result.timeline.fps,
+            "width": result.timeline.width,
+            "height": result.timeline.height,
+            "duration_seconds": result.timeline.duration_seconds,
+            "frame_policy": result.timeline.frame_policy,
+            "has_reference_video": result.reference_video is not None,
+            "has_reference_frames": result.reference_frames is not None,
+            "checks": checks,
+        })
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Monitor compile failed: {error}"}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/compile-state")
 async def handle_camera_compile_state(request: web.Request) -> web.Response:
     """OmniCam 编辑器 state_json → 运镜描述与 motion_scene。"""

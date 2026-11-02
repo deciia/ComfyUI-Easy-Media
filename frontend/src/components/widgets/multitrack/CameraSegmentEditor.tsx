@@ -11,6 +11,7 @@ import {
 } from '@/lib/camera-presets'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import { installOmniCamChinese, uninstallOmniCamChinese } from '@/lib/omnicam-zh'
+import { MonitorCompileDialog } from './MonitorCompileDialog'
 import type { CameraData, CameraEasing, CameraKeyframe, CameraPreset, MultiTrackSegment } from '@/types/multitrack'
 
 type ComfyGraphLike = {
@@ -101,6 +102,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const [tab, setTab] = useState<'params' | 'viewport'>('params')
   const [directorFrame, setDirectorFrame] = useState(0)
   const [zhEnabled, setZhEnabled] = useState(() => localStorage.getItem('easyMedia.omnicamZh') !== 'off')
+  const [monitorOpen, setMonitorOpen] = useState(false)
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -684,6 +686,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             >
               生成运镜描述（OmniCam）
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 w-fit px-2 text-[10px]"
+              onClick={() => setMonitorOpen(true)}
+            >
+              H3 编译…
+            </Button>
             <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
               录制预演
             </Button>
@@ -755,6 +766,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
             录制预演
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 w-fit px-2 text-[10px]"
+            onClick={() => setMonitorOpen(true)}
+          >
+            H3 编译…
+          </Button>
           {embedded ? (
             <Button
               type="button"
@@ -807,6 +827,17 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           {notice.text}
         </div>
       ) : null}
+      <MonitorCompileDialog
+        open={monitorOpen}
+        camera={camera}
+        durationFrames={durationFrames}
+        playblast={camera.playblast}
+        onClose={() => setMonitorOpen(false)}
+        onApply={(prompt) => {
+          patchCamera({ compiled_prompt: prompt })
+          setNotice({ kind: 'ok', text: 'H3 编译结果已写入相机段，生成时注入任务段提示词' })
+        }}
+      />
     </div>
   )
 }
