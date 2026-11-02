@@ -374,6 +374,9 @@ async def handle_camera_extract(request: web.Request) -> web.Response:
     frame_step = int(payload.get("frame_step") or 1)
     motion_scale = float(payload.get("motion_scale") or 1.0)
     simplify_keys = bool(payload.get("simplify_keys", True))
+    position_smoothing = float(payload.get("position_smoothing") if payload.get("position_smoothing") is not None else 0.15)
+    rotation_smoothing = float(payload.get("rotation_smoothing") if payload.get("rotation_smoothing") is not None else 0.10)
+    horizon_stabilization = float(payload.get("horizon_stabilization") if payload.get("horizon_stabilization") is not None else 0.0)
 
     def _solve() -> dict:
         from comfy_api.latest import InputImpl
@@ -392,9 +395,9 @@ async def handle_camera_extract(request: web.Request) -> web.Response:
             frame_step=frame_step,
             normalize_origin=True,
             motion_scale=motion_scale,
-            position_smoothing=0.15,
-            rotation_smoothing=0.10,
-            horizon_stabilization=0.0,
+            position_smoothing=position_smoothing,
+            rotation_smoothing=rotation_smoothing,
+            horizon_stabilization=horizon_stabilization,
             simplify_keys=simplify_keys,
             position_tolerance=0.01,
             rotation_tolerance_deg=0.25,

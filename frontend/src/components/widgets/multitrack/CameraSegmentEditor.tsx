@@ -466,7 +466,6 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       try {
         await embedDirector(node)
         setNotice({ kind: 'ok', text: `3D 编辑器已嵌入面板（已对齐 ${durationFrames} 帧）` })
-        void syncRecordingPath()
       } catch (embedError) {
         console.debug('[EasyMedia] embed director failed', embedError)
         const message = embedError instanceof Error ? embedError.message : String(embedError)
@@ -508,14 +507,6 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     void openOmniCamEditor()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segment.id])
-
-  // 录制完成后轮询 recording_path，自动挂载预演
-  useEffect(() => {
-    if (!embedded) return
-    const timer = window.setInterval(() => { void syncRecordingPath() }, 1500)
-    return () => window.clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [embedded, segment.id])
 
   // 卸载时清理监听与定时器
   useEffect(() => () => {
@@ -761,6 +752,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             <Button
               type="button"
               size="sm"
+              variant="outline"
+              className="h-6 w-fit px-2 text-[10px]"
+              onClick={() => { void syncRecordingPath() }}
+            >
+              挂载预演
+            </Button>
+            <Button
+              type="button"
+              size="sm"
               variant="secondary"
               className="h-6 px-2 text-[10px]"
               onClick={() => {
@@ -825,6 +825,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
         <div className="flex flex-wrap items-center gap-1.5">
           <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
             录制预演
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 w-fit px-2 text-[10px]"
+            onClick={() => { void syncRecordingPath() }}
+          >
+            挂载预演
           </Button>
           <Button
             type="button"
