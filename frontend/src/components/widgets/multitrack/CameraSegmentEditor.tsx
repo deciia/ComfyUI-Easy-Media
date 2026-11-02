@@ -89,11 +89,14 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const embedHostRef = useRef<HTMLDivElement | null>(null)
   const mountedEmbedRef = useRef<{ container: HTMLElement; parent: HTMLElement | null; next: Node | null } | null>(null)
   const [embedded, setEmbedded] = useState(false)
-  const syncListenerRef = useRef<{ runtime: DirectorRuntimeLike; handler: EventListener } | null>(null)
+  const syncListenerRef = useRef<{ runtime: DirectorRuntimeLike; handler: EventListener; progressHandler?: EventListener } | null>(null)
   const suppressSyncUntilRef = useRef(0)
   const syncTimerRef = useRef<number | null>(null)
   const lastSyncedStateRef = useRef('')
   const lastAttachedRecordingRef = useRef('')
+  const lastPushedRef = useRef('')
+  const pushTimerRef = useRef<number | null>(null)
+  const suppressPushUntilRef = useRef(0)
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -131,6 +134,39 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     }]
     patchCamera({ keyframes })
   }
+
+  const cameraSignature = useMemo(() => JSON.stringify({
+    preset: camera.preset,
+    easing: camera.easing,
+    keyframes: camera.keyframes ?? [],
+  }), [camera.preset, camera.easing, camera.keyframes])
+
+  // 面板 → 3D：面板里改预设/关键帧后自动推给内嵌编辑器
+  useEffect(() => {
+    if (!embedded) return
+    if (cameraSignature === lastPushedRef.current) return
+    if (Date.now() < suppressPushUntilRef.current) {
+      lastPushedRef.current = cameraSignature
+      return
+    }
+    if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current)
+    pushTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          lastPushedRef.current = cameraSignature
+          suppressSyncUntilRef.current = Date.now() + 1500
+          await prepareDirectorNode()
+          setNotice({ kind: 'ok', text: '面板改动已同步到 3D 编辑器' })
+        } catch (error) {
+          console.debug('[EasyMedia] push camera to director failed', error)
+        }
+      })()
+    }, 350)
+    return () => {
+      if (pushTimerRef.current) window.clearTimeout(pushTimerRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraSignature, embedded])
 
   /** 确保 Director 节点存在、写入相机状态，并让活动编辑器严格对齐当前段的帧数。 */
   async function prepareDirectorNode(): Promise<{ node: Record<string, unknown>; runtime?: DirectorRuntimeLike }> {
@@ -192,6 +228,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     if (!saved) return
     const target = saved.runtime as unknown as EventTarget
     target.removeEventListener?.('statechange', saved.handler)
+    if (saved.progressHandler) target.removeEventListener?.('playblastprogress', saved.progressHandler)
     syncListenerRef.current = null
     if (syncTimerRef.current) {
       window.clearTimeout(syncTimerRef.current)
@@ -211,7 +248,18 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       syncTimerRef.current = window.setTimeout(() => { void autoImportState(true) }, 800)
     }) as EventListener
     target.addEventListener('statechange', handler)
-    syncListenerRef.current = { runtime: runtime as DirectorRuntimeLike, handler }
+    const progressHandler = ((event: Event) => {
+      const detail = (event as CustomEvent<{ frame?: number; total?: number }>).detail ?? {}
+      const frame = Number(detail.frame ?? 0)
+      const total = Number(detail.total ?? 0)
+      if (total > 0) setNotice({ kind: 'ok', text: `录制中 ${frame}/${total}…` })
+    }) as EventListener
+    target.addEventListener('playblastprogress', progressHandler)
+    syncListenerRef.current = {
+      runtime: runtime as DirectorRuntimeLike,
+      handler,
+      progressHandler,
+    } as { runtime: DirectorRuntimeLike; handler: EventListener; progressHandler: EventListener }
   }
 
   /** 读取节点 state_json → 编译 → 写回相机段。silent=true 时用于自动同步。 */
@@ -237,6 +285,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       parsed = undefined
     }
     lastSyncedStateRef.current = stateJson
+    suppressPushUntilRef.current = Date.now() + 1500
     patchCamera({
       ...(parsed ? { omnicam_state: parsed } : {}),
       ...(result.prompt ? { compiled_prompt: result.prompt } : {}),
@@ -466,7 +515,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           </Select>
         </div>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-1">
           {(camera.keyframes ?? []).map((key, index) => (
             <div key={`${key.frame}-${index}`} className="flex items-center gap-1.5">
               <span className="w-12 text-[10px] text-muted-foreground">帧 {key.frame}</span>
@@ -521,9 +570,18 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
               size="sm"
               variant="secondary"
               className="h-6 px-2 text-[10px]"
-              onClick={() => { void openOmniCamEditor() }}
+              onClick={() => {
+                if (!embedded) {
+                  void openOmniCamEditor()
+                  return
+                }
+                const { graph } = resolveComfyGraph()
+                getDirectorRuntime(findDirectorNode(graph))?.inlineView?.hide?.()
+                setEmbedded(false)
+                setNotice(null)
+              }}
             >
-              打开 3D 编辑器
+              {embedded ? '收起视口' : '打开 3D 编辑器'}
             </Button>
             {embedded ? (
               <Button
