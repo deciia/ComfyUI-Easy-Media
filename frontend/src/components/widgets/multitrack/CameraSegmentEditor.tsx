@@ -59,7 +59,7 @@ type DirectorRuntimeLike = {
   inlineView?: DirectorViewLike
   restoreFromWidgetsHeadless?: () => void
   state?: { duration_frames?: number }
-  shell?: { root?: HTMLElement }
+  shell?: { root?: HTMLElement; recordButton?: HTMLButtonElement; openButton?: HTMLButtonElement; secondaryButton?: HTMLButtonElement }
 }
 
 function getDirectorRuntime(node: Record<string, unknown> | null | undefined): DirectorRuntimeLike | undefined {
@@ -332,12 +332,26 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   function triggerRecord() {
     const { graph } = resolveComfyGraph()
     const runtime = getDirectorRuntime(findDirectorNode(graph))
-    const root = runtime?.shell?.root
-    const button = root
-      ? Array.from(root.querySelectorAll('button')).find((item) => /REC/i.test(item.textContent ?? ''))
-      : null
+    const shell = runtime?.shell
+    // 优先使用外壳暴露的按钮对象（汉化改文案也不影响）
+    let button: HTMLButtonElement | null = shell?.recordButton ?? null
     if (!button) {
-      setNotice({ kind: 'error', text: '未找到录制按钮，请先加载 3D 视口' })
+      const root = shell?.root
+      button = (root?.querySelector('.oc-node-shell-record') as HTMLButtonElement | null)
+        ?? (root?.querySelector('button[class*="record"]') as HTMLButtonElement | null)
+        ?? null
+    }
+    if (!button) {
+      const root = shell?.root
+      const candidates = root ? Array.from(root.querySelectorAll('button')) : []
+      button = (candidates.find((item) => /REC|录制/i.test(item.textContent ?? '')) as HTMLButtonElement | undefined) ?? null
+    }
+    if (!button) {
+      setNotice({ kind: 'error', text: '未找到录制按钮：请先点「加载 3D 视口」再试' })
+      return
+    }
+    if (button.disabled) {
+      setNotice({ kind: 'ok', text: '正在录制中，请等待完成…' })
       return
     }
     button.click()
