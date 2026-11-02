@@ -123,6 +123,41 @@ function moveTaskImage(
   return nextImages
 }
 
+type CameraMediaSource = { kind: 'video' | 'image'; label: string; path: string }
+
+function collectMediaSources(data: TrackData): CameraMediaSource[] {
+  const items: CameraMediaSource[] = []
+  const seen = new Set<string>()
+  const push = (kind: 'video' | 'image', label: string, path: string) => {
+    const key = `${kind}:${path}`
+    if (!path || seen.has(key)) return
+    seen.add(key)
+    items.push({ kind, label, path })
+  }
+  for (const track of data.tracks) {
+    for (const segment of track.segments) {
+      const content = segment.content
+      if (track.type === 'video') {
+        const path = content.local_path || content.file_path || content.url || ''
+        if (path) {
+          const name = content.file_name || path.split('/').pop() || path
+          push('video', name, path)
+        }
+      }
+      if (track.type === 'task') {
+        for (const image of content.images ?? []) {
+          const path = image.local_path || image.file_path || image.url || ''
+          if (path) {
+            const name = image.file_name || path.split('/').pop() || path
+            push('image', name, path)
+          }
+        }
+      }
+    }
+  }
+  return items
+}
+
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
   const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
 
@@ -1352,6 +1387,7 @@ export function PreviewArea({
         <CameraSegmentEditor
           segment={selectedSegment.segment}
           currentTime={currentTime}
+          mediaSources={collectMediaSources(data)}
           onContentChange={onSelectedSegmentContentChange}
         />
       </div>

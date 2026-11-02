@@ -1,9 +1,16 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 
+interface CameraMediaSource {
+  kind: 'video' | 'image'
+  label: string
+  path: string
+}
+
 interface ExtractMotionDialogProps {
   open: boolean
   defaultVideo?: string
+  sources?: CameraMediaSource[]
   onClose: () => void
   onApply: (editorState: Record<string, unknown>) => void
 }
@@ -36,7 +43,7 @@ function Step({ index, label, state }: { index: number; label: string; state: St
   )
 }
 
-export function ExtractMotionDialog({ open, defaultVideo, onClose, onApply }: ExtractMotionDialogProps) {
+export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onApply }: ExtractMotionDialogProps) {
   const [mode, setMode] = useState<'track' | 'reconstruct'>('track')
   const [video, setVideo] = useState(defaultVideo ?? '')
   const [method, setMethod] = useState('auto')
@@ -146,7 +153,39 @@ export function ExtractMotionDialog({ open, defaultVideo, onClose, onApply }: Ex
 
         {/* 来源 */}
         <div className="flex flex-col gap-1 rounded border border-border p-2">
-          <span className="text-[10px] text-muted-foreground">来源视频（项目视频轨文件，或 input/ 下的相对路径）</span>
+          <span className="text-[10px] text-muted-foreground">
+            来源（视频轨上的视频 / 节点绑定的参考图，或手动填写 input/ 下的路径）
+          </span>
+          {sources && sources.length ? (
+            <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
+              {sources.map((item) => {
+                const selectable = item.kind === 'video'
+                const active = video === item.path
+                return (
+                  <label
+                    key={`${item.kind}:${item.path}`}
+                    className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] ${selectable ? 'cursor-pointer hover:bg-secondary/50' : 'opacity-50'} ${active ? 'bg-secondary/60' : ''}`}
+                    title={selectable ? item.path : '参考图仅用于场景重建（暂未接入）'}
+                  >
+                    <input
+                      type="radio"
+                      name="extract-source"
+                      className="h-3 w-3"
+                      checked={active}
+                      disabled={!selectable}
+                      onChange={() => setVideo(item.path)}
+                    />
+                    <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">
+                      {item.kind === 'video' ? '视频' : '图片'}
+                    </span>
+                    <span className="truncate">{item.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+          ) : (
+            <span className="text-[9px] text-muted-foreground">当前项目没有可用的视频轨素材，可直接填写路径</span>
+          )}
           <input
             className="h-6 w-full rounded border border-border bg-card px-1 text-[10px]"
             value={video}

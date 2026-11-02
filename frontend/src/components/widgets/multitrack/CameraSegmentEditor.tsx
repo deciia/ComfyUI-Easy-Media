@@ -80,10 +80,11 @@ function findDirectorNode(graph: ComfyGraphLike | undefined) {
 interface CameraSegmentEditorProps {
   segment: MultiTrackSegment
   currentTime: number
+  mediaSources?: Array<{ kind: 'video' | 'image'; label: string; path: string }>
   onContentChange?: (patch: Partial<MultiTrackSegment['content']>) => void
 }
 
-export function CameraSegmentEditor({ segment, currentTime, onContentChange }: CameraSegmentEditorProps) {
+export function CameraSegmentEditor({ segment, currentTime, mediaSources, onContentChange }: CameraSegmentEditorProps) {
   const presentation = getSegmentTrackPresentation('camera')
   const camera = useMemo(() => normalizeCamera(segment.content.camera), [segment.content.camera])
   const durationFrames = Math.max(1, segment.end_frame - segment.start_frame)
@@ -899,6 +900,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       <ExtractMotionDialog
         open={extractOpen}
         defaultVideo={camera.playblast ?? ''}
+        sources={mediaSources}
         onClose={() => setExtractOpen(false)}
         onApply={(editorState) => {
           void (async () => {
