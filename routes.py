@@ -334,6 +334,117 @@ async def handle_camera_editor_state(request: web.Request) -> web.Response:
     return web.json_response({"state": state})
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/extract")
+async def handle_camera_extract(request: web.Request) -> web.Response:
+    """从一段视频反推相机轨迹，返回标准 MotionScene（供 3D 编辑器直接载入）。"""
+    import asyncio
+    import json
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+
+    video_path = str(payload.get("video") or "").strip()
+    if not video_path:
+        return web.json_response({"error": "video 不能为空"}, status=400)
+    candidate = Path(video_path)
+    if not candidate.is_absolute() or not candidate.is_file():
+        options = [
+            Path(folder_paths.get_output_directory()) / video_path,
+            Path(folder_paths.get_input_directory()) / video_path,
+        ]
+        candidate = next((item for item in options if item.is_file()), candidate)
+    if not candidate.is_file():
+        return web.json_response({"error": f"视频不存在：{video_path}"}, status=404)
+
+    method = str(payload.get("method") or "auto")
+    lens_mode = str(payload.get("lens_mode") or "auto")
+    fov_degrees = float(payload.get("fov_degrees") or 53.0)
+    focal_length_mm = float(payload.get("focal_length_mm") or 24.0)
+    sensor_width_mm = float(payload.get("sensor_width_mm") or 36.0)
+    max_dimension = int(payload.get("max_dimension") or 840)
+    frame_step = int(payload.get("frame_step") or 1)
+    motion_scale = float(payload.get("motion_scale") or 1.0)
+    simplify_keys = bool(payload.get("simplify_keys", True))
+
+    def _solve() -> dict:
+        from comfy_api.latest import InputImpl
+        from .vendor.omnicam.extractor.pipeline import extract_camera_track
+        from .vendor.omnicam.core.motion_scene import motion_scene_from_camera_track
+
+        video = InputImpl.VideoFromFile(str(candidate))
+        result = extract_camera_track(
+            video=video,
+            method=method,
+            lens_mode=lens_mode,
+            fov_degrees=fov_degrees,
+            focal_length_mm=focal_length_mm,
+            sensor_width_mm=sensor_width_mm,
+            max_dimension=max_dimension,
+            frame_step=frame_step,
+            normalize_origin=True,
+            motion_scale=motion_scale,
+            position_smoothing=0.15,
+            rotation_smoothing=0.10,
+            horizon_stabilization=0.0,
+            simplify_keys=simplify_keys,
+            position_tolerance=0.01,
+            rotation_tolerance_deg=0.25,
+            progress=None,
+            control=None,
+        )
+        scene = motion_scene_from_camera_track(result.track)
+        scene_dict = scene.to_dict()
+        # MotionScene -> 编辑器 state（3D 视口直接可载入）
+        from dataclasses import asdict
+
+        cameras_state = []
+        for item in scene.cameras:
+            track = item.track
+            keyframes = []
+            for key in track.keyframes:
+                camera_value = asdict(key.camera) if hasattr(key.camera, "__dataclass_fields__") else key.camera
+                keyframes.append({
+                    "frame": int(key.frame),
+                    "camera": camera_value,
+                    "interpolation": key.interpolation,
+                })
+            cameras_state.append({
+                "id": item.id,
+                "name": getattr(item, "label", "") or "Camera 1",
+                "enabled": True,
+                "camera": keyframes[0]["camera"] if keyframes else {},
+                "keyframes": keyframes,
+            })
+        timeline = scene_dict.get("timeline") or {}
+        editor_state = {
+            "schema_version": 1,
+            "fps": float(timeline.get("authoring_fps") or 24),
+            "duration_frames": int(timeline.get("duration_frames") or
+                                   round(float(timeline.get("duration_seconds") or 0) * float(timeline.get("authoring_fps") or 24)) or 1),
+            "cameras": cameras_state,
+            "objects": scene_dict.get("objects") or [],
+            "active_camera_id": cameras_state[0]["id"] if cameras_state else "",
+            "playblast_camera_id": cameras_state[0]["id"] if cameras_state else "",
+        }
+        return {
+            "motion_scene": scene_dict,
+            "editor_state": editor_state,
+            "keyframe_count": sum(len(item["keyframes"]) for item in cameras_state),
+            "coverage": getattr(result, "coverage", None),
+            "method": getattr(result, "method", method),
+        }
+
+    try:
+        loop = asyncio.get_event_loop()
+        solved = await loop.run_in_executor(None, _solve)
+        return web.json_response(solved)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"提取失败：{error}"}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/monitor-compile")
 async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
     """用 OmniCam Monitor 的编译能力：MotionScene → 目标模型产物（提示词 / 参考视频 / 合法帧数）。"""
