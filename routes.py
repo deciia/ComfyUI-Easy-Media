@@ -164,6 +164,47 @@ async def handle_asset_save_as(request: web.Request) -> web.Response:
         return web.json_response({"error": f"save-as failed: {error}"}, status=500)
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/store-playblast")
+async def handle_camera_store_playblast(request: web.Request) -> web.Response:
+    """只把录制的预演复制进项目 camera 目录并返回相对路径；时间线由前端负责。"""
+    import shutil
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+    project_name = str(payload.get("project_name") or "").strip()
+    segment_id = str(payload.get("segment_id") or "").strip()
+    recording_path = str(payload.get("recording_path") or "").strip()
+    if not project_name or not segment_id or not recording_path:
+        return web.json_response({"error": "project_name / segment_id / recording_path are required"}, status=400)
+    recording = Path(recording_path)
+    if not recording.is_absolute() or not recording.is_file():
+        candidates = [
+            Path(folder_paths.get_output_directory()) / recording_path,
+            Path(folder_paths.get_input_directory()) / recording_path,
+        ]
+        recording = next((item for item in candidates if item.is_file()), recording)
+    if not recording.is_file():
+        return web.json_response({"error": f"recording not found: {recording_path}"}, status=404)
+    output_root = Path(folder_paths.get_output_directory()).resolve()
+    project_dir = output_root / "easy_media" / "projects" / "".join(
+        ch for ch in project_name if ch not in '\\/:*?"<>|'
+    ).strip()
+    camera_dir = project_dir / "camera"
+    camera_dir.mkdir(parents=True, exist_ok=True)
+    suffix = recording.suffix or ".webm"
+    target = camera_dir / f"playblast_{segment_id[:12]}{suffix}"
+    try:
+        shutil.copy2(recording, target)
+    except Exception as error:
+        return web.json_response({"error": f"copy playblast failed: {error}"}, status=500)
+    return web.json_response({
+        "playblast": target.relative_to(output_root).as_posix(),
+        "source": str(recording),
+    })
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/attach-playblast")
 async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
     """把 OmniCam 录制的预演复制进项目 camera 目录，并写回相机段。"""

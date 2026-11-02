@@ -310,21 +310,40 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     if (typeof recording !== 'string' || !recording.trim()) return
     if (recording === lastAttachedRecordingRef.current) return
     const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
-    if (!projectName) return
+    if (!projectName) {
+      setNotice({ kind: 'error', text: '未打开项目，无法挂载预演' })
+      return
+    }
     try {
-      const attach = await fetch('/easy-media/camera/attach-playblast', {
+      const response = await fetch('/easy-media/camera/store-playblast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_name: projectName, segment_id: segment.id, recording_path: recording }),
       })
-      if (!attach.ok) return
-      const attached = await attach.json() as { playblast?: string }
-      if (!attached.playblast) return
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({})) as { error?: string }
+        setNotice({ kind: 'error', text: `挂载失败：${detail.error ?? response.status}` })
+        return
+      }
+      const stored = await response.json() as { playblast?: string }
+      if (!stored.playblast) {
+        setNotice({ kind: 'error', text: '挂载失败：服务端未返回路径' })
+        return
+      }
       lastAttachedRecordingRef.current = recording
-      patchCamera({ playblast: attached.playblast })
-      setNotice({ kind: 'ok', text: `预演已自动挂载：${attached.playblast}` })
+      patchCamera({ playblast: stored.playblast })
+      window.dispatchEvent(new CustomEvent('easy-media:mount-camera-reference', {
+        detail: {
+          segmentId: segment.id,
+          playblast: stored.playblast,
+          startFrame: segment.start_frame,
+          endFrame: segment.end_frame,
+        },
+      }))
+      setNotice({ kind: 'ok', text: `预演已挂载到「相机参考」轨：${stored.playblast}` })
     } catch (error) {
-      console.debug('[EasyMedia] auto attach playblast failed', error)
+      console.error('[EasyMedia] store playblast failed', error)
+      setNotice({ kind: 'error', text: `挂载失败：${String(error)}` })
     }
   }
 

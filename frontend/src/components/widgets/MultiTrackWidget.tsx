@@ -802,6 +802,52 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  // 相机预演落轨：前端直接把预演写成视频段（不依赖 timeline.json）
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        segmentId: string
+        playblast: string
+        startFrame: number
+        endFrame: number
+      }>).detail
+      if (!detail?.playblast) return
+      void mountCameraReference(detail)
+    }
+    window.addEventListener('easy-media:mount-camera-reference', handler)
+    return () => window.removeEventListener('easy-media:mount-camera-reference', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function mountCameraReference(detail: {
+    segmentId: string
+    playblast: string
+    startFrame: number
+    endFrame: number
+  }) {
+    const latest = dataRef.current
+    let trackId = latest.tracks.find(
+      (item) => item.type === 'video' && item.name === '相机参考',
+    )?.id
+    if (!trackId) {
+      const created: MultiTrack = {
+        id: uuid(),
+        name: '相机参考',
+        type: 'video',
+        color: MULTITRACK_TRACK_COLORS.video,
+        muted: false,
+        solo: false,
+        volume_db: MULTITRACK_DEFAULT_VOLUME_DB,
+        locked: false,
+        segments: [],
+      }
+      commitNormalizedTrackChange({ ...latest, tracks: [...latest.tracks, created] })
+      trackId = created.id
+    }
+    await handleAddVideo(trackId, detail.playblast, 'output', detail.startFrame, detail.endFrame)
+    console.info('[EasyMedia] 预演已写入「相机参考」轨', detail.endFrame - detail.startFrame, '帧')
+  }
+
   function handleDeleteTrack(trackId: string) {
     const target = data.tracks.find((track) => track.id === trackId)
     const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
