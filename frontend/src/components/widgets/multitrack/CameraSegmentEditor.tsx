@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -22,7 +22,7 @@ type ComfyCanvasLike = {
   centerOnNode?: (node: unknown) => void
   setDirty?: (a: boolean, b: boolean) => void
 }
-type ComfyAppLike = { graph?: ComfyGraphLike; canvas?: ComfyCanvasLike }
+type ComfyAppLike = { graph?: ComfyGraphLike; canvas?: ComfyCanvasLike; rootGraphInternal?: ComfyGraphLike }
 type LiteGraphLike = { createNode?: (type: string) => Record<string, unknown> | null }
 
 /**
@@ -43,9 +43,25 @@ function resolveComfyGraph(): {
     LiteGraph?: LiteGraphLike
   }
   const app = registry.comfyAPI?.app?.app ?? registry.app
-  const graph = app?.canvas?.graph ?? app?.graph
+  const graph = app?.rootGraphInternal ?? app?.canvas?.graph ?? app?.graph
   const liteGraph = registry.LiteGraph ?? registry.comfyAPI?.litegraph?.LiteGraph
   return { app, graph, liteGraph }
+}
+
+type DirectorViewLike = {
+  container?: HTMLElement
+  show?: () => Promise<unknown>
+  hide?: () => boolean
+  expand?: (anchor?: Element | null) => Promise<unknown>
+}
+type DirectorRuntimeLike = {
+  inlineView?: DirectorViewLike
+  restoreFromWidgetsHeadless?: () => void
+}
+
+function getDirectorRuntime(node: Record<string, unknown> | null | undefined): DirectorRuntimeLike | undefined {
+  if (!node) return undefined
+  return (node as { __majoorOmniCamDirectorRuntime?: DirectorRuntimeLike }).__majoorOmniCamDirectorRuntime
 }
 
 const OMNICAM_DIRECTOR_TYPE = 'MajoorOmniCamDirector'
@@ -68,6 +84,25 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const durationFrames = Math.max(1, segment.end_frame - segment.start_frame)
   const localFrame = Math.max(0, Math.min(durationFrames - 1, Math.round(currentTime - segment.start_frame)))
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const embedHostRef = useRef<HTMLDivElement | null>(null)
+  const mountedEmbedRef = useRef<{ container: HTMLElement; parent: HTMLElement | null; next: Node | null } | null>(null)
+  const [embedded, setEmbedded] = useState(false)
+
+  // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
+  useEffect(() => () => {
+    const saved = mountedEmbedRef.current
+    if (!saved) return
+    mountedEmbedRef.current = null
+    try {
+      if (saved.parent) saved.parent.insertBefore(saved.container, saved.next)
+      saved.container.style.display = ''
+      saved.container.style.width = ''
+      saved.container.style.height = ''
+    } catch (error) {
+      console.debug('[EasyMedia] restore director container failed', error)
+    }
+  }, [])
+
 
   function patchCamera(patch: Partial<CameraData>) {
     const next = { ...camera, ...patch }
@@ -90,66 +125,112 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     patchCamera({ keyframes })
   }
 
+  /** 确保 Director 节点存在并把当前相机段状态写进去。 */
+  async function prepareDirectorNode(): Promise<Record<string, unknown>> {
+    const { app, graph, liteGraph } = resolveComfyGraph()
+    if (!graph) throw new Error('找不到 ComfyUI 画布（comfyAPI.app.app 不可用）')
+    const response = await fetch('/easy-media/camera/editor-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
+    })
+    if (!response.ok) throw new Error(`生成编辑器状态失败（HTTP ${response.status}）`)
+    const result = await response.json() as { state?: Record<string, unknown> }
+    if (!result.state) throw new Error('编辑器状态为空，请先设置预设或关键帧')
+    let node: Record<string, unknown> | null | undefined = findDirectorNode(graph)
+    if (!node) {
+      if (!liteGraph?.createNode) throw new Error('无法自动创建节点：请在画布双击搜索 MajoorOmniCamDirector 手动添加')
+      node = liteGraph.createNode(OMNICAM_DIRECTOR_TYPE)
+      if (!node) throw new Error(`创建 ${OMNICAM_DIRECTOR_TYPE} 节点失败（类型未注册？）`)
+      node.pos = [80, 80]
+      graph.add?.(node)
+    }
+    const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+    const setWidget = (name: string, value: unknown) => {
+      const widget = widgets.find((item) => item.name === name)
+      if (widget) widget.value = value
+    }
+    setWidget('state_json', JSON.stringify(result.state))
+    setWidget('width', 1280)
+    setWidget('height', 720)
+    setWidget('fps', 24)
+    setWidget('duration_seconds', durationFrames / 24)
+    setWidget('render_mode', 'omni_ref')
+    node.properties = { ...(node.properties as Record<string, unknown> | undefined), easyCameraSegmentId: segment.id }
+    app?.canvas?.setDirty?.(true, true)
+    graph.setDirtyCanvas?.(true, true)
+    return node
+  }
+
+  /** 把 Director 的 inline 编辑器 DOM 搬进本面板并显示。 */
+  async function embedDirector(node: Record<string, unknown>) {
+    const host = embedHostRef.current
+    if (!host) throw new Error('面板容器未就绪')
+    // runtime 由扩展在节点入图后异步挂载，最多等 4 秒
+    let runtime = getDirectorRuntime(node)
+    for (let i = 0; i < 40 && !runtime?.inlineView?.container; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      runtime = getDirectorRuntime(node)
+    }
+    const view = runtime?.inlineView
+    const container = view?.container
+    if (!view?.show || !container) {
+      throw new Error('OmniCam 扩展未就绪（找不到 inlineView），请刷新页面后重试')
+    }
+    if (!mountedEmbedRef.current) {
+      mountedEmbedRef.current = { container, parent: container.parentElement, next: container.nextSibling }
+      container.style.display = 'flex'
+      container.style.width = '100%'
+      container.style.height = '100%'
+      host.appendChild(container)
+    } else if (container.parentElement !== host) {
+      host.appendChild(container)
+    }
+    await view.show()
+    setEmbedded(true)
+  }
+
   async function openOmniCamEditor() {
     try {
       setNotice(null)
-      const { app, graph, liteGraph } = resolveComfyGraph()
-      if (!graph) {
-        setNotice({ kind: 'error', text: '找不到 ComfyUI 画布（comfyAPI.app.app 不可用），无法打开 3D 编辑器' })
-        return
+      const node = await prepareDirectorNode()
+      try {
+        await embedDirector(node)
+        setNotice({ kind: 'ok', text: '3D 编辑器已嵌入本面板，可直接编排运镜' })
+      } catch (embedError) {
+        console.debug('[EasyMedia] embed director failed', embedError)
+        const message = embedError instanceof Error ? embedError.message : String(embedError)
+        const { app } = resolveComfyGraph()
+        app?.canvas?.centerOnNode?.(node)
+        setNotice({ kind: 'error', text: `无法嵌入面板：${message}。已把节点放到画布上，可在节点里点 OPEN DIRECTOR` })
       }
-      const response = await fetch('/easy-media/camera/editor-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
-      })
-      if (!response.ok) {
-        setNotice({ kind: 'error', text: `生成编辑器状态失败（HTTP ${response.status}）` })
-        return
-      }
-      const result = await response.json() as { state?: Record<string, unknown> }
-      if (!result.state) {
-        setNotice({ kind: 'error', text: '编辑器状态为空，请先设置预设或关键帧' })
-        return
-      }
-      let node: Record<string, unknown> | null | undefined = findDirectorNode(graph)
-      let created = false
-      if (!node) {
-        if (!liteGraph?.createNode) {
-          setNotice({ kind: 'error', text: '无法自动创建节点：请在画布上双击搜索 MajoorOmniCamDirector 手动添加后再点本按钮' })
-          return
-        }
-        node = liteGraph.createNode(OMNICAM_DIRECTOR_TYPE)
-        if (!node) {
-          setNotice({ kind: 'error', text: `创建 ${OMNICAM_DIRECTOR_TYPE} 节点失败（类型未注册？）` })
-          return
-        }
-        node.pos = [80, 80]
-        graph.add?.(node)
-        created = true
-      }
-      const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
-      const setWidget = (name: string, value: unknown) => {
-        const widget = widgets.find((item) => item.name === name)
-        if (widget) widget.value = value
-      }
-      setWidget('state_json', JSON.stringify(result.state))
-      setWidget('width', 1280)
-      setWidget('height', 720)
-      setWidget('fps', 24)
-      setWidget('duration_seconds', durationFrames / 24)
-      setWidget('render_mode', 'omni_ref')
-      node.properties = { ...(node.properties as Record<string, unknown> | undefined), easyCameraSegmentId: segment.id }
-      const canvas = app?.canvas
-      canvas?.centerOnNode?.(node)
-      canvas?.setDirty?.(true, true)
-      graph.setDirtyCanvas?.(true, true)
-      setNotice({ kind: 'ok', text: created ? '已创建 3D 编辑器节点并载入相机状态' : '已把相机状态写入现有 3D 编辑器节点' })
     } catch (error) {
       console.error('[EasyMedia] open OmniCam editor failed', error)
       setNotice({ kind: 'error', text: `打开失败：${String(error)}` })
     }
   }
+
+  // 切换相机段时：把新段状态写回节点并刷新内嵌视口
+  useEffect(() => {
+    if (!embedded) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { graph } = resolveComfyGraph()
+        if (!findDirectorNode(graph)) return
+        getDirectorRuntime(findDirectorNode(graph))?.inlineView?.hide?.()
+        const refreshed = await prepareDirectorNode()
+        if (cancelled) return
+        getDirectorRuntime(refreshed)?.restoreFromWidgetsHeadless?.()
+        await embedDirector(refreshed)
+        if (!cancelled) setNotice({ kind: 'ok', text: '已切换到当前相机段' })
+      } catch (error) {
+        console.debug('[EasyMedia] sync embedded director failed', error)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment.id])
 
   async function importFromOmniCamEditor() {
     try {
@@ -327,6 +408,21 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             >
               打开 3D 编辑器
             </Button>
+            {embedded ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => {
+                  const { graph } = resolveComfyGraph()
+                  const view = getDirectorRuntime(findDirectorNode(graph))?.inlineView
+                  void view?.expand?.(embedHostRef.current)
+                }}
+              >
+                全屏编辑
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
@@ -347,6 +443,14 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
                 清除预演
               </Button>
             ) : null}
+          </div>
+          <div className="relative w-full overflow-hidden rounded border border-border bg-black/30" style={{ minHeight: 420 }}>
+            <div ref={embedHostRef} className="h-[420px] w-full" />
+            {embedded ? null : (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[10px] text-muted-foreground">
+                点「打开 3D 编辑器」在此处加载 OmniCam 视口（不再切换画布节点）
+              </div>
+            )}
           </div>
           {notice ? (
             <div className={notice.kind === 'error' ? 'text-[9px] text-destructive' : 'text-[9px] text-muted-foreground'}>
