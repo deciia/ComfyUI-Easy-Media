@@ -21,6 +21,8 @@ const ROOT_SELECTOR = [
 ].join(',')
 
 /** 英 → 中 词表（可持续追加；未收录的保持英文） */
+import { OMNICAM_ZH_TABLE, OMNICAM_ZH_TABLE_EXTRA, OMNICAM_ZH_TABLE_EXTRA2 } from './omnicam-zh-table'
+
 export const OMNICAM_ZH: Record<string, string> = {
   // ---------- 顶栏 / 菜单 ----------
   'OmniCam Director': 'OmniCam 导演',
@@ -249,6 +251,9 @@ export const OMNICAM_ZH: Record<string, string> = {
   'Info': '信息',
 }
 
+/** 合并词表：精选条目优先，全量表兜底 */
+const TABLE: Record<string, string> = { ...OMNICAM_ZH_TABLE, ...OMNICAM_ZH_TABLE_EXTRA, ...OMNICAM_ZH_TABLE_EXTRA2, ...OMNICAM_ZH }
+
 /** 动态文案规则（英文 → 中文），用于带数字的标签 */
 const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Camera (\d+)$/, (m) => `相机 ${m[1]}`],
@@ -261,6 +266,21 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
   [/^Manual Target \(No Track\)$/, () => '手动目标（不跟踪）'],
   [/^Track: (.+)$/, (m) => `跟踪：${m[1]}`],
   [/^Aim: (.+)$/, (m) => `对准：${m[1]}`],
+  [/^Camera (\d+) · Frame (\d+)$/, (m) => `相机 ${m[1]} · 第 ${m[2]} 帧`],
+  [/^Camera (\d+) · (\d+) key · PLAYBLAST$/, (m) => `相机 ${m[1]} · ${m[2]} 个关键帧 · 预演`],
+  [/^Camera (\d+) · (\d+) key$/, (m) => `相机 ${m[1]} · ${m[2]} 个关键帧`],
+  [/^Camera (\d+) · F(\d+)$/, (m) => `相机 ${m[1]} · F${m[2]}`],
+  [/^REC KEY @ F(\d+)$/, (m) => `录制关键帧 @ F${m[1]}`],
+  [/^Camera Key @ (\d+)$/, (m) => `相机关键帧 @ ${m[1]}`],
+  [/^(\d+) of (\d+) assets$/, (m) => `${m[1]} / ${m[2]} 个资产`],
+  [/^(\d+) selected$/, (m) => `已选中 ${m[1]}`],
+  [/^· (\d+) key$/, (m) => `· ${m[1]} 个关键帧`],
+  [/^🎥 Camera (\d+)$/, (m) => `🎥 相机 ${m[1]}`],
+  [/^Frame (\d+)$/, (m) => `第 ${m[1]} 帧`],
+  [/^Currently animating camera: (.+)$/, (m) => `当前正在动画的相机：${TABLE[m[1].trim()] ?? m[1].trim()}`],
+  [/^Currently animating object: (.+)$/, (m) => `当前正在动画的物体：${TABLE[m[1].trim()] ?? m[1].trim()}`],
+  [/^(.+) changes at frame (\d+)$/, (m) => `${TABLE[m[1].trim()] ?? m[1].trim()} 在第 ${m[2]} 帧变化`],
+  [/^Target: (.+)$/, (m) => `目标：${m[1]}`],
   [/^VIEW: (.+)$/, (m) => {
     const raw = m[1].trim()
     const titleCase = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
@@ -271,7 +291,7 @@ const PATTERNS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
 export function translateOmniCamText(raw: string): string | null {
   const text = raw.trim()
   if (!text) return null
-  const exact = OMNICAM_ZH[text]
+  const exact = TABLE[text]
   if (exact) return raw.replace(text, exact)
   for (const [pattern, build] of PATTERNS) {
     const match = text.match(pattern)
