@@ -100,6 +100,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const suppressPushUntilRef = useRef(0)
   const [tab, setTab] = useState<'params' | 'viewport'>('params')
   const [directorFrame, setDirectorFrame] = useState(0)
+  const [zhEnabled, setZhEnabled] = useState(() => localStorage.getItem('easyMedia.omnicamZh') !== 'off')
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -531,21 +532,20 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           <button
             type="button"
             className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-            title="OmniCam 界面中/英切换"
+            title={zhEnabled ? '切换到英文界面' : '切换到中文界面'}
             onClick={() => {
-              const zhOff = document.documentElement.dataset.easyOmnicamZh === 'off'
-              if (zhOff) {
+              const next = !zhEnabled
+              if (next) {
                 installOmniCamChinese()
-                document.documentElement.dataset.easyOmnicamZh = 'on'
-                localStorage.setItem('easyMedia.omnicamZh', 'on')
               } else {
                 uninstallOmniCamChinese()
-                document.documentElement.dataset.easyOmnicamZh = 'off'
-                localStorage.setItem('easyMedia.omnicamZh', 'off')
               }
+              document.documentElement.dataset.easyOmnicamZh = next ? 'on' : 'off'
+              localStorage.setItem('easyMedia.omnicamZh', next ? 'on' : 'off')
+              setZhEnabled(next)
             }}
           >
-            中
+            {zhEnabled ? 'EN' : '中'}
           </button>
           <div className="flex overflow-hidden rounded border border-border">
             <button

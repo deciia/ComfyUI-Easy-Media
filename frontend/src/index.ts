@@ -55,7 +55,9 @@ comfyApp.registerExtension({
 
   async setup() {
     installWidgetTheme()
-    if (localStorage.getItem('easyMedia.omnicamZh') !== 'off') installOmniCamChinese()
+    const omnicamZh = localStorage.getItem('easyMedia.omnicamZh') !== 'off'
+    document.documentElement.dataset.easyOmnicamZh = omnicamZh ? 'on' : 'off'
+    if (omnicamZh) installOmniCamChinese()
     installWorkflowSubmission(comfyApp)
     addInlineStyles(
       __COMFY_EASY_MEDIA_GLOBAL_CSS__,
