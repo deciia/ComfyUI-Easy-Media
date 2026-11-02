@@ -97,6 +97,8 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const lastPushedRef = useRef('')
   const pushTimerRef = useRef<number | null>(null)
   const suppressPushUntilRef = useRef(0)
+  const [tab, setTab] = useState<'params' | 'viewport'>('params')
+  const [directorFrame, setDirectorFrame] = useState(0)
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -128,7 +130,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
 
   function addKeyframe(preset: CameraPreset = 'static') {
     const keyframes = [...(camera.keyframes ?? []), {
-      frame: localFrame,
+      frame: embedded ? (readDirectorFrame() ?? localFrame) : localFrame,
       preset,
       easing: 'ease_in_out' as CameraEasing,
     }]
@@ -370,6 +372,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
 
   async function openOmniCamEditor() {
     try {
+      setTab('viewport')
       setNotice(null)
       const { node } = await prepareDirectorNode()
       try {
@@ -475,113 +478,173 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     patchCamera({ keyframes })
   }
 
+  function readDirectorFrame(): number | null {
+    const host = embedHostRef.current
+    const scrub = host?.querySelector('input[data-role="scrub"]') as HTMLInputElement | null
+    if (!scrub) return null
+    const value = Number(scrub.value)
+    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : null
+  }
+
+  function seekDirector(frame: number) {
+    const host = embedHostRef.current
+    const scrub = host?.querySelector('input[data-role="scrub"]') as HTMLInputElement | null
+    if (!scrub) return
+    const clamped = Math.max(0, Math.min(durationFrames - 1, Math.round(frame)))
+    scrub.value = String(clamped)
+    scrub.dispatchEvent(new Event('input', { bubbles: true }))
+    setDirectorFrame(clamped)
+  }
+
+  const editFrame = embedded ? directorFrame : localFrame
+
+  // 视口打开时跟踪 3D 播放头，面板显示同一帧号
+  useEffect(() => {
+    if (!embedded) return
+    const timer = window.setInterval(() => {
+      const frame = readDirectorFrame()
+      if (frame !== null) setDirectorFrame(frame)
+    }, 400)
+    return () => window.clearInterval(timer)
+  }, [embedded])
+
+  // 多轨播放头 → 3D 播放头（用户正在操作 3D 时不抢）
+  useEffect(() => {
+    if (!embedded || tab !== 'viewport') return
+    const host = embedHostRef.current
+    if (host && host.contains(document.activeElement)) return
+    const timer = window.setTimeout(() => seekDirector(localFrame), 200)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localFrame, embedded, tab])
+
   return (
     <div className="flex min-h-24 w-full min-w-0 flex-col gap-2 overflow-y-auto rounded-sm bg-background p-2" data-camera-editor>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5" style={{ color: presentation.textColor }}>
           <Camera className="h-3.5 w-3.5" />
           <span className="text-[11px] font-medium">相机 · {cameraPresetLabel(camera.preset)}</span>
           <span className="text-[9px] opacity-70">{durationFrames} 帧</span>
         </div>
-        <Button type="button" size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => addKeyframe(camera.preset ?? 'static')}>
-          <Plus className="mr-1 h-3 w-3" /> 在第 {localFrame} 帧加关键帧
-        </Button>
+        <div className="flex items-center gap-1">
+          <div className="flex overflow-hidden rounded border border-border">
+            <button
+              type="button"
+              className={`px-2 py-0.5 text-[10px] ${tab === 'params' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setTab('params')}
+            >
+              参数
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-0.5 text-[10px] ${tab === 'viewport' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setTab('viewport')}
+            >
+              3D 视口
+            </button>
+          </div>
+          <Button type="button" size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => addKeyframe(camera.preset ?? 'static')}>
+            <Plus className="mr-1 h-3 w-3" /> 在第 {editFrame} 帧加关键帧
+          </Button>
+        </div>
       </div>
 
-      {(camera.keyframes ?? []).length === 0 ? (
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span>还没有关键帧：</span>
-          <Select
-            value={camera.preset ?? 'static'}
-            onValueChange={(value) => patchCamera({ preset: value as CameraPreset })}
-          >
-            <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CAMERA_PRESETS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={camera.easing ?? 'ease_in_out'}
-            onValueChange={(value) => patchCamera({ easing: value as CameraEasing })}
-          >
-            <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CAMERA_EASINGS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : (
-        <div className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-1">
-          {(camera.keyframes ?? []).map((key, index) => (
-            <div key={`${key.frame}-${index}`} className="flex items-center gap-1.5">
-              <span className="w-12 text-[10px] text-muted-foreground">帧 {key.frame}</span>
-              <Select
-                value={key.preset}
-                onValueChange={(value) => updateKeyframe(index, { preset: value as CameraPreset })}
-              >
-                <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CAMERA_PRESETS.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={key.easing}
-                onValueChange={(value) => updateKeyframe(index, { easing: value as CameraEasing })}
-              >
-                <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CAMERA_EASINGS.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button type="button" size="icon" variant="ghost" className="h-6 w-6" onClick={() => removeKeyframe(index)}>
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-6 w-fit px-2 text-[10px]"
-            onClick={() => { void compileWithOmniCam() }}
-          >
-            生成运镜描述（OmniCam）
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-6 w-fit px-2 text-[10px]"
-            onClick={triggerRecord}
-          >
-            录制预演
-          </Button>
-          <div className="flex items-center gap-1.5">
+      {tab === 'params' ? (
+        (camera.keyframes ?? []).length === 0 ? (
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span>还没有关键帧：</span>
+            <Select
+              value={camera.preset ?? 'static'}
+              onValueChange={(value) => patchCamera({ preset: value as CameraPreset })}
+            >
+              <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CAMERA_PRESETS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={camera.easing ?? 'ease_in_out'}
+              onValueChange={(value) => patchCamera({ easing: value as CameraEasing })}
+            >
+              <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CAMERA_EASINGS.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {(camera.keyframes ?? []).map((key, index) => (
+              <div key={`${key.frame}-${index}`} className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="w-12 cursor-pointer text-left text-[10px] text-muted-foreground hover:text-foreground"
+                  title="跳到该帧"
+                  onClick={() => seekDirector(key.frame)}
+                >
+                  帧 {key.frame}
+                </button>
+                <Select
+                  value={key.preset}
+                  onValueChange={(value) => updateKeyframe(index, { preset: value as CameraPreset })}
+                >
+                  <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CAMERA_PRESETS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={key.easing}
+                  onValueChange={(value) => updateKeyframe(index, { easing: value as CameraEasing })}
+                >
+                  <SelectTrigger className="h-6 w-24 bg-card text-[10px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CAMERA_EASINGS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button type="button" size="icon" variant="ghost" className="h-6 w-6" onClick={() => removeKeyframe(index)}>
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )
+      ) : null}
+
+      {tab === 'params' ? (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 w-fit px-2 text-[10px]"
+              onClick={() => { void compileWithOmniCam() }}
+            >
+              生成运镜描述（OmniCam）
+            </Button>
+            <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
+              录制预演
+            </Button>
             <Button
               type="button"
               size="sm"
               variant="secondary"
               className="h-6 px-2 text-[10px]"
               onClick={() => {
-                if (!embedded) {
-                  void openOmniCamEditor()
-                  return
-                }
-                const { graph } = resolveComfyGraph()
-                getDirectorRuntime(findDirectorNode(graph))?.inlineView?.hide?.()
-                setEmbedded(false)
-                setNotice(null)
+                setTab('viewport')
+                if (!embedded) window.setTimeout(() => { void openOmniCamEditor() }, 0)
               }}
             >
-              {embedded ? '收起视口' : '打开 3D 编辑器'}
+              {embedded ? '打开视口页' : '加载 3D 视口'}
             </Button>
             {embedded ? (
               <Button
@@ -619,34 +682,76 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
               </Button>
             ) : null}
           </div>
-          <div className="relative w-full overflow-hidden rounded border border-border bg-black/30" style={{ minHeight: 420 }}>
-            <div ref={embedHostRef} className="h-[420px] w-full" />
-            {embedded ? null : (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[10px] text-muted-foreground">
-                点「打开 3D 编辑器」在此处加载 OmniCam 视口（不再切换画布节点）
-              </div>
-            )}
+          <textarea
+            className="min-h-16 w-full resize-y rounded border border-border bg-card p-2 text-[10px] leading-relaxed"
+            placeholder="编译后的英文运镜描述（留空则由关键帧自动生成）"
+            value={camera.compiled_prompt ?? ''}
+            onChange={(event) => patchCamera({ compiled_prompt: event.target.value })}
+          />
+          <div className="text-[9px] text-muted-foreground">
+            本地摘要（不注入 H3）：{compileCameraPrompt(camera)}
           </div>
-          {notice ? (
-            <div className={notice.kind === 'error' ? 'text-[9px] text-destructive' : 'text-[9px] text-muted-foreground'}>
-              {notice.text}
+          {camera.playblast ? (
+            <div className="truncate text-[9px] text-muted-foreground" title={camera.playblast}>
+              预演：{camera.playblast}
             </div>
           ) : null}
+        </>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
+            录制预演
+          </Button>
+          {embedded ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => {
+                const { graph } = resolveComfyGraph()
+                const view = getDirectorRuntime(findDirectorNode(graph))?.inlineView
+                void view?.expand?.(embedHostRef.current)
+              }}
+            >
+              全屏编辑
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => { void openOmniCamEditor() }}
+            >
+              加载 3D 视口
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[10px]"
+            onClick={() => { void importFromOmniCamEditor() }}
+          >
+            从 3D 编辑器取回
+          </Button>
         </div>
       )}
 
-      <textarea
-        className="min-h-16 w-full resize-y rounded border border-border bg-card p-2 text-[10px] leading-relaxed"
-        placeholder="编译后的英文运镜描述（留空则由关键帧自动生成）"
-        value={camera.compiled_prompt ?? ''}
-        onChange={(event) => patchCamera({ compiled_prompt: event.target.value })}
+      <div
+        ref={embedHostRef}
+        className={tab === 'viewport'
+          ? 'relative w-full overflow-hidden rounded border border-border bg-black/30'
+          : 'hidden'}
+        style={{ minHeight: 520 }}
       />
-      <div className="text-[9px] text-muted-foreground">
-        本地摘要（不注入 H3）：{compileCameraPrompt(camera)}
-      </div>
-      {camera.playblast ? (
-        <div className="truncate text-[9px] text-muted-foreground" title={camera.playblast}>
-          预演：{camera.playblast}
+      {tab === 'viewport' && !embedded ? (
+        <div className="text-[9px] text-muted-foreground">点「加载 3D 视口」在此处加载 OmniCam 编辑器（不再切换画布节点）</div>
+      ) : null}
+      {notice ? (
+        <div className={notice.kind === 'error' ? 'text-[9px] text-destructive' : 'text-[9px] text-muted-foreground'}>
+          {notice.text}
         </div>
       ) : null}
     </div>
