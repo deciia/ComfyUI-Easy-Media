@@ -19,6 +19,7 @@ import { DEFAULT_PROJECT_DATA } from '@/types/project'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 import { installWorkflowSubmission } from '@/lib/workflow-submission'
 import { installProjectSamplingPreview } from '@/lib/project-sampling-preview-node'
+import { installOmniCamChinese } from '@/lib/omnicam-zh'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
@@ -54,6 +55,7 @@ comfyApp.registerExtension({
 
   async setup() {
     installWidgetTheme()
+    if (localStorage.getItem('easyMedia.omnicamZh') !== 'off') installOmniCamChinese()
     installWorkflowSubmission(comfyApp)
     addInlineStyles(
       __COMFY_EASY_MEDIA_GLOBAL_CSS__,

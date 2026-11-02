@@ -10,6 +10,7 @@ import {
   cameraPresetLabel,
 } from '@/lib/camera-presets'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
+import { installOmniCamChinese, uninstallOmniCamChinese } from '@/lib/omnicam-zh'
 import type { CameraData, CameraEasing, CameraKeyframe, CameraPreset, MultiTrackSegment } from '@/types/multitrack'
 
 type ComfyGraphLike = {
@@ -527,6 +528,25 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           <span className="text-[9px] opacity-70">{durationFrames} 帧</span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            title="OmniCam 界面中/英切换"
+            onClick={() => {
+              const zhOff = document.documentElement.dataset.easyOmnicamZh === 'off'
+              if (zhOff) {
+                installOmniCamChinese()
+                document.documentElement.dataset.easyOmnicamZh = 'on'
+                localStorage.setItem('easyMedia.omnicamZh', 'on')
+              } else {
+                uninstallOmniCamChinese()
+                document.documentElement.dataset.easyOmnicamZh = 'off'
+                localStorage.setItem('easyMedia.omnicamZh', 'off')
+              }
+            }}
+          >
+            中
+          </button>
           <div className="flex overflow-hidden rounded border border-border">
             <button
               type="button"
