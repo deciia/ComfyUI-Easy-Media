@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Camera, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -12,6 +12,50 @@ import {
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import type { CameraData, CameraEasing, CameraKeyframe, CameraPreset, MultiTrackSegment } from '@/types/multitrack'
 
+type ComfyGraphLike = {
+  _nodes?: Array<Record<string, unknown>>
+  add?: (node: unknown) => void
+  setDirtyCanvas?: (a: boolean, b: boolean) => void
+}
+type ComfyCanvasLike = {
+  graph?: ComfyGraphLike
+  centerOnNode?: (node: unknown) => void
+  setDirty?: (a: boolean, b: boolean) => void
+}
+type ComfyAppLike = { graph?: ComfyGraphLike; canvas?: ComfyCanvasLike }
+type LiteGraphLike = { createNode?: (type: string) => Record<string, unknown> | null }
+
+/**
+ * 新版 ComfyUI 前端（Vue）只暴露 globalThis.comfyAPI.app.app；
+ * 旧版是 window.app / window.LiteGraph。两条链都试，避免静默失败。
+ */
+function resolveComfyGraph(): {
+  app: ComfyAppLike | undefined
+  graph: ComfyGraphLike | undefined
+  liteGraph: LiteGraphLike | undefined
+} {
+  const registry = globalThis as unknown as {
+    comfyAPI?: {
+      app?: { app?: ComfyAppLike }
+      litegraph?: { LiteGraph?: LiteGraphLike }
+    }
+    app?: ComfyAppLike
+    LiteGraph?: LiteGraphLike
+  }
+  const app = registry.comfyAPI?.app?.app ?? registry.app
+  const graph = app?.canvas?.graph ?? app?.graph
+  const liteGraph = registry.LiteGraph ?? registry.comfyAPI?.litegraph?.LiteGraph
+  return { app, graph, liteGraph }
+}
+
+const OMNICAM_DIRECTOR_TYPE = 'MajoorOmniCamDirector'
+
+function findDirectorNode(graph: ComfyGraphLike | undefined) {
+  return (graph?._nodes ?? []).find(
+    (item) => item.comfyClass === OMNICAM_DIRECTOR_TYPE || item.type === OMNICAM_DIRECTOR_TYPE,
+  )
+}
+
 interface CameraSegmentEditorProps {
   segment: MultiTrackSegment
   currentTime: number
@@ -23,6 +67,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const camera = useMemo(() => normalizeCamera(segment.content.camera), [segment.content.camera])
   const durationFrames = Math.max(1, segment.end_frame - segment.start_frame)
   const localFrame = Math.max(0, Math.min(durationFrames - 1, Math.round(currentTime - segment.start_frame)))
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
   function patchCamera(patch: Partial<CameraData>) {
     const next = { ...camera, ...patch }
@@ -47,25 +92,41 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
 
   async function openOmniCamEditor() {
     try {
+      setNotice(null)
+      const { app, graph, liteGraph } = resolveComfyGraph()
+      if (!graph) {
+        setNotice({ kind: 'error', text: '找不到 ComfyUI 画布（comfyAPI.app.app 不可用），无法打开 3D 编辑器' })
+        return
+      }
       const response = await fetch('/easy-media/camera/editor-state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
       })
-      if (!response.ok) return
-      const result = await response.json() as { state?: Record<string, unknown> }
-      if (!result.state) return
-      const win = window as unknown as {
-        app?: { graph?: { _nodes?: Array<Record<string, unknown>>; add?: (node: unknown) => void; setDirtyCanvas?: (a: boolean, b: boolean) => void } }
-        LiteGraph?: { createNode?: (type: string) => Record<string, unknown> }
+      if (!response.ok) {
+        setNotice({ kind: 'error', text: `生成编辑器状态失败（HTTP ${response.status}）` })
+        return
       }
-      const app = win.app
-      const graph = app?.graph
-      if (!graph || !win.LiteGraph?.createNode) return
-      let node = graph._nodes?.find((item) => item.comfyClass === 'MajoorOmniCamDirector')
+      const result = await response.json() as { state?: Record<string, unknown> }
+      if (!result.state) {
+        setNotice({ kind: 'error', text: '编辑器状态为空，请先设置预设或关键帧' })
+        return
+      }
+      let node: Record<string, unknown> | null | undefined = findDirectorNode(graph)
+      let created = false
       if (!node) {
-        node = win.LiteGraph.createNode('MajoorOmniCamDirector')
+        if (!liteGraph?.createNode) {
+          setNotice({ kind: 'error', text: '无法自动创建节点：请在画布上双击搜索 MajoorOmniCamDirector 手动添加后再点本按钮' })
+          return
+        }
+        node = liteGraph.createNode(OMNICAM_DIRECTOR_TYPE)
+        if (!node) {
+          setNotice({ kind: 'error', text: `创建 ${OMNICAM_DIRECTOR_TYPE} 节点失败（类型未注册？）` })
+          return
+        }
+        node.pos = [80, 80]
         graph.add?.(node)
+        created = true
       }
       const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
       const setWidget = (name: string, value: unknown) => {
@@ -79,17 +140,30 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       setWidget('duration_seconds', durationFrames / 24)
       setWidget('render_mode', 'omni_ref')
       node.properties = { ...(node.properties as Record<string, unknown> | undefined), easyCameraSegmentId: segment.id }
+      const canvas = app?.canvas
+      canvas?.centerOnNode?.(node)
+      canvas?.setDirty?.(true, true)
       graph.setDirtyCanvas?.(true, true)
+      setNotice({ kind: 'ok', text: created ? '已创建 3D 编辑器节点并载入相机状态' : '已把相机状态写入现有 3D 编辑器节点' })
     } catch (error) {
-      console.debug('[EasyMedia] open OmniCam editor failed', error)
+      console.error('[EasyMedia] open OmniCam editor failed', error)
+      setNotice({ kind: 'error', text: `打开失败：${String(error)}` })
     }
   }
 
   async function importFromOmniCamEditor() {
     try {
-      const win = window as unknown as { app?: { graph?: { _nodes?: Array<Record<string, unknown>> } } }
-      const node = win.app?.graph?._nodes?.find((item) => item.comfyClass === 'MajoorOmniCamDirector')
-      if (!node) return
+      setNotice(null)
+      const { graph } = resolveComfyGraph()
+      if (!graph) {
+        setNotice({ kind: 'error', text: '找不到 ComfyUI 画布，无法读取 3D 编辑器节点' })
+        return
+      }
+      const node = findDirectorNode(graph)
+      if (!node) {
+        setNotice({ kind: 'error', text: '画布上没有 MajoorOmniCamDirector 节点，请先「打开 3D 编辑器」' })
+        return
+      }
       const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
       const stateJson = widgets.find((item) => item.name === 'state_json')?.value
       if (typeof stateJson !== 'string' || !stateJson.trim()) return
@@ -122,8 +196,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
         }
       }
       patchCamera(patch as Partial<CameraData>)
+      setNotice({
+        kind: 'ok',
+        text: patch.playblast
+          ? `已取回运镜描述，并挂载预演：${String(patch.playblast)}`
+          : '已取回运镜描述（未检测到录制文件 recording_path）',
+      })
     } catch (error) {
-      console.debug('[EasyMedia] import OmniCam state failed', error)
+      console.error('[EasyMedia] import OmniCam state failed', error)
+      setNotice({ kind: 'error', text: `取回失败：${String(error)}` })
     }
   }
 
@@ -267,6 +348,11 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
               </Button>
             ) : null}
           </div>
+          {notice ? (
+            <div className={notice.kind === 'error' ? 'text-[9px] text-destructive' : 'text-[9px] text-muted-foreground'}>
+              {notice.text}
+            </div>
+          ) : null}
         </div>
       )}
 
