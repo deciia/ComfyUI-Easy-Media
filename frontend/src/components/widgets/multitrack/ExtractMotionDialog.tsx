@@ -16,6 +16,11 @@ interface ExtractMotionDialogProps {
 }
 
 interface ExtractResult {
+  object_count?: number
+  triangle_count?: number
+  confidence?: number | null
+  provider?: string
+  recon_mode?: string
   editor_state?: Record<string, unknown>
   keyframe_count?: number
   method?: string
@@ -47,6 +52,8 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
   const [mode, setMode] = useState<'track' | 'reconstruct'>('track')
   const [video, setVideo] = useState(defaultVideo ?? '')
   const [method, setMethod] = useState('auto')
+  const [reconMode, setReconMode] = useState('depth_mesh')
+  const [quality, setQuality] = useState('fast')
   const [maxDimension, setMaxDimension] = useState(840)
   const [simplify, setSimplify] = useState(true)
   const [positionSmoothing, setPositionSmoothing] = useState(0.15)
@@ -72,10 +79,10 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
     setResult(null)
     setApplied(false)
     try {
-      const response = await fetch('/easy-media/camera/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const endpoint = mode === 'reconstruct' ? '/easy-media/camera/reconstruct' : '/easy-media/camera/extract'
+      const body = mode === 'reconstruct'
+        ? { image: video, recon_mode: reconMode, quality, provider: 'comfy_moge', segmentation: 'none' }
+        : {
           video,
           method,
           max_dimension: maxDimension,
@@ -83,7 +90,11 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
           position_smoothing: positionSmoothing,
           motion_scale: motionScale,
           horizon_stabilization: levelHorizon,
-        }),
+        }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       const payload = await response.json() as ExtractResult
       if (!response.ok) {
@@ -130,11 +141,10 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
           </button>
           <button
             type="button"
-            disabled
-            title="场景重建需要单张图像 + 深度模型，暂未接入"
-            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground opacity-50"
+            className={`rounded border px-2 py-0.5 text-[10px] ${mode === 'reconstruct' ? 'border-primary text-primary' : 'border-border text-muted-foreground'}`}
+            onClick={() => setMode('reconstruct')}
           >
-            场景重建（暂未接入）
+            场景重建
           </button>
         </div>
 
@@ -154,12 +164,14 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
         {/* 来源 */}
         <div className="flex flex-col gap-1 rounded border border-border p-2">
           <span className="text-[10px] text-muted-foreground">
-            来源（视频轨上的视频 / 节点绑定的参考图，或手动填写 input/ 下的路径）
+            {mode === 'reconstruct'
+              ? '来源图片（节点绑定的参考图，或手动填写 input/ 下的路径）'
+              : '来源（视频轨上的视频 / 节点绑定的参考图，或手动填写 input/ 下的路径）'}
           </span>
           {sources && sources.length ? (
             <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
               {sources.map((item) => {
-                const selectable = item.kind === 'video'
+                const selectable = mode === 'reconstruct' ? item.kind === 'image' : item.kind === 'video'
                 const active = video === item.path
                 return (
                   <label
@@ -212,6 +224,33 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
               <option value="pycolmap">pycolmap（需安装）</option>
             </select>
           </label>
+          {mode === 'reconstruct' ? (
+            <>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-muted-foreground">重建模式</span>
+                <select
+                  className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+                  value={reconMode}
+                  onChange={(event) => setReconMode(event.target.value)}
+                >
+                  <option value="depth_mesh">深度网格（depth_mesh）</option>
+                  <option value="blockout">体块（blockout）</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[10px] text-muted-foreground">质量</span>
+                <select
+                  className="h-6 rounded border border-border bg-card px-1 text-[10px]"
+                  value={quality}
+                  onChange={(event) => setQuality(event.target.value)}
+                >
+                  <option value="fast">快速</option>
+                  <option value="balanced">均衡</option>
+                  <option value="high">高质量</option>
+                </select>
+              </label>
+            </>
+          ) : null}
           <label className="flex flex-col gap-0.5">
             <span className="text-[10px] text-muted-foreground">分析分辨率上限</span>
             <input
@@ -307,6 +346,15 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
               <span>{typeof result?.coverage === 'number' ? `${(result.coverage * 100).toFixed(0)}%` : '—'}</span>
             </div>
             <div className="flex justify-between"><span className="text-muted-foreground">已应用</span><span>{applied ? 'YES' : 'NO'}</span></div>
+            {typeof result?.object_count === 'number' ? (
+              <div className="flex justify-between"><span className="text-muted-foreground">重建物体</span><span>{result.object_count}</span></div>
+            ) : null}
+            {typeof result?.triangle_count === 'number' ? (
+              <div className="flex justify-between"><span className="text-muted-foreground">三角面</span><span>{result.triangle_count}</span></div>
+            ) : null}
+            {typeof result?.confidence === 'number' ? (
+              <div className="flex justify-between"><span className="text-muted-foreground">重建置信度</span><span>{(result.confidence * 100).toFixed(0)}%</span></div>
+            ) : null}
           </div>
         </div>
       </div>

@@ -341,6 +341,133 @@ async def handle_camera_editor_state(request: web.Request) -> web.Response:
     return web.json_response({"state": state})
 
 
+@PromptServer.instance.routes.post("/easy-media/camera/reconstruct")
+async def handle_camera_reconstruct(request: web.Request) -> web.Response:
+    """单张图片重建 3D 场景代理（MoGe / VGGT），返回可载入 3D 编辑器的 state。"""
+    import asyncio
+    import hashlib
+
+    try:
+        payload = await request.json()
+    except Exception as error:
+        return web.json_response({"error": f"Invalid JSON: {error}"}, status=400)
+
+    image_path = str(payload.get("image") or "").strip()
+    if not image_path:
+        return web.json_response({"error": "image 不能为空"}, status=400)
+
+    # ComfyUI 文件控件可能带来源后缀
+    suffix_match = re.search(r"\s*\[(input|output|temp)\]\s*$", image_path, re.IGNORECASE)
+    if suffix_match:
+        image_path = image_path[: suffix_match.start()].strip()
+
+    candidate = Path(image_path)
+    if not candidate.is_absolute() or not candidate.is_file():
+        options = [
+            Path(folder_paths.get_input_directory()) / image_path,
+            Path(folder_paths.get_output_directory()) / image_path,
+        ]
+        candidate = next((item for item in options if item.is_file()), candidate)
+    if not candidate.is_file():
+        return web.json_response({"error": f"图片不存在：{image_path}"}, status=404)
+
+    recon_mode = str(payload.get("recon_mode") or "depth_mesh")
+    quality = str(payload.get("quality") or "balanced")
+    provider_id = str(payload.get("provider") or "comfy_moge")
+    fps = float(payload.get("fps") or 24)
+    duration_seconds = float(payload.get("duration_seconds") or 5.0)
+
+    def _run() -> dict:
+        from dataclasses import asdict
+
+        from PIL import Image
+
+        from .utils.camera_omnicam import compile_from_editor_state  # noqa: F401
+        from .vendor.omnicam.reconstruction.node_bridge import reconstruction_settings_from_widgets
+        from .vendor.omnicam.reconstruction.pipeline import run_reconstruction_pipeline
+        from .vendor.omnicam.reconstruction.providers import get_provider
+        from .vendor.omnicam.reconstruction.types import ReconstructionSource
+
+        input_dir = Path(folder_paths.get_input_directory())
+        recon_in_dir = input_dir / "majoor_omnicam" / "reconstruction" / "inputs"
+        recon_in_dir.mkdir(parents=True, exist_ok=True)
+
+        # 统一转 PNG 并算哈希命名
+        with Image.open(candidate) as source_image:
+            image = source_image.convert("RGB")
+        buffer = image.tobytes()
+        image_hash = hashlib.sha1(buffer).hexdigest()[:16]
+        target = recon_in_dir / f"recon_input_{image_hash}.png"
+        if not target.exists():
+            image.save(target, format="PNG")
+
+        settings = reconstruction_settings_from_widgets(
+            recon_mode=recon_mode,
+            recon_geometry_provider=provider_id,
+            recon_quality=quality,
+            recon_segmentation_provider=str(payload.get("segmentation") or "none"),
+        )
+        provider = get_provider(settings.provider)
+        source = ReconstructionSource(
+            kind="annotated_input",
+            value=f"majoor_omnicam/reconstruction/inputs/{target.name} [input]",
+        )
+        output = run_reconstruction_pipeline(source=source, settings=settings, provider=provider)
+        scene_dict = output.motion_scene
+        scene_dict.setdefault("timeline", {})
+        scene_dict["timeline"].setdefault("authoring_fps", fps)
+        scene_dict["timeline"].setdefault("duration_seconds", duration_seconds)
+
+        cameras_state = []
+        for item in scene_dict.get("cameras") or []:
+            track = item.get("track") or {}
+            keyframes = []
+            for key in track.get("keyframes") or []:
+                keyframes.append({
+                    "frame": int(key.get("frame") or 0),
+                    "camera": key.get("camera") or {},
+                    "interpolation": key.get("interpolation") or "linear",
+                })
+            cameras_state.append({
+                "id": item.get("id") or "camera_1",
+                "name": item.get("label") or "Camera 1",
+                "enabled": item.get("enabled", True),
+                "camera": keyframes[0]["camera"] if keyframes else {},
+                "keyframes": keyframes,
+            })
+
+        timeline = scene_dict.get("timeline") or {}
+        duration_frames = int(round(float(timeline.get("duration_seconds") or duration_seconds) * fps))
+        editor_state = {
+            "schema_version": 1,
+            "fps": fps,
+            "duration_frames": max(1, duration_frames),
+            "cameras": cameras_state,
+            "objects": scene_dict.get("objects") or [],
+            "active_camera_id": cameras_state[0]["id"] if cameras_state else "",
+            "playblast_camera_id": cameras_state[0]["id"] if cameras_state else "",
+        }
+        summary = output.summary or {}
+        return {
+            "motion_scene": scene_dict,
+            "editor_state": editor_state,
+            "keyframe_count": sum(len(item["keyframes"]) for item in cameras_state),
+            "object_count": len(editor_state["objects"]),
+            "provider": summary.get("provider", provider_id),
+            "recon_mode": summary.get("recon_mode", recon_mode),
+            "triangle_count": summary.get("triangle_count", 0),
+            "confidence": summary.get("confidence"),
+        }
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _run)
+        return web.json_response(result)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"场景重建失败：{error}"}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/camera/extract")
 async def handle_camera_extract(request: web.Request) -> web.Response:
     """从一段视频反推相机轨迹，返回标准 MotionScene（供 3D 编辑器直接载入）。"""
