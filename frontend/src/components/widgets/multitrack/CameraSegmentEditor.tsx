@@ -57,6 +57,8 @@ type DirectorViewLike = {
 type DirectorRuntimeLike = {
   inlineView?: DirectorViewLike
   restoreFromWidgetsHeadless?: () => void
+  state?: { duration_frames?: number }
+  shell?: { root?: HTMLElement }
 }
 
 function getDirectorRuntime(node: Record<string, unknown> | null | undefined): DirectorRuntimeLike | undefined {
@@ -87,6 +89,11 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
   const embedHostRef = useRef<HTMLDivElement | null>(null)
   const mountedEmbedRef = useRef<{ container: HTMLElement; parent: HTMLElement | null; next: Node | null } | null>(null)
   const [embedded, setEmbedded] = useState(false)
+  const syncListenerRef = useRef<{ runtime: DirectorRuntimeLike; handler: EventListener } | null>(null)
+  const suppressSyncUntilRef = useRef(0)
+  const syncTimerRef = useRef<number | null>(null)
+  const lastSyncedStateRef = useRef('')
+  const lastAttachedRecordingRef = useRef('')
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -125,8 +132,8 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     patchCamera({ keyframes })
   }
 
-  /** 确保 Director 节点存在并把当前相机段状态写进去。 */
-  async function prepareDirectorNode(): Promise<Record<string, unknown>> {
+  /** 确保 Director 节点存在、写入相机状态，并让活动编辑器严格对齐当前段的帧数。 */
+  async function prepareDirectorNode(): Promise<{ node: Record<string, unknown>; runtime?: DirectorRuntimeLike }> {
     const { app, graph, liteGraph } = resolveComfyGraph()
     if (!graph) throw new Error('找不到 ComfyUI 画布（comfyAPI.app.app 不可用）')
     const response = await fetch('/easy-media/camera/editor-state', {
@@ -145,28 +152,149 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       node.pos = [80, 80]
       graph.add?.(node)
     }
+    let runtime = getDirectorRuntime(node)
+    for (let i = 0; i < 40 && !runtime?.inlineView?.container; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      runtime = getDirectorRuntime(node)
+    }
+    suppressSyncUntilRef.current = Date.now() + 2500
     const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
     const setWidget = (name: string, value: unknown) => {
       const widget = widgets.find((item) => item.name === name)
       if (widget) widget.value = value
     }
-    setWidget('state_json', JSON.stringify(result.state))
-    setWidget('width', 1280)
-    setWidget('height', 720)
-    setWidget('fps', 24)
-    setWidget('duration_seconds', durationFrames / 24)
-    setWidget('render_mode', 'omni_ref')
+    const applyState = (state: Record<string, unknown>) => {
+      const aligned = { ...state, fps: 24, duration_frames: durationFrames }
+      setWidget('state_json', JSON.stringify(aligned))
+      setWidget('width', 1280)
+      setWidget('height', 720)
+      setWidget('fps', 24)
+      setWidget('duration_seconds', durationFrames / 24)
+      setWidget('render_mode', 'omni_ref')
+      return aligned
+    }
+    applyState(result.state)
     node.properties = { ...(node.properties as Record<string, unknown> | undefined), easyCameraSegmentId: segment.id }
     app?.canvas?.setDirty?.(true, true)
     graph.setDirtyCanvas?.(true, true)
-    return node
+    runtime?.restoreFromWidgetsHeadless?.()
+    // 活动编辑器可能停在自己的默认时长上，校验后强制再对齐一次
+    const liveFrames = runtime?.state?.duration_frames
+    if (typeof liveFrames === 'number' && liveFrames !== durationFrames) {
+      applyState({ ...(runtime?.state as Record<string, unknown> | undefined), ...result.state })
+      runtime?.restoreFromWidgetsHeadless?.()
+    }
+    return { node, runtime }
+  }
+
+  function detachSyncListener() {
+    const saved = syncListenerRef.current
+    if (!saved) return
+    const target = saved.runtime as unknown as EventTarget
+    target.removeEventListener?.('statechange', saved.handler)
+    syncListenerRef.current = null
+    if (syncTimerRef.current) {
+      window.clearTimeout(syncTimerRef.current)
+      syncTimerRef.current = null
+    }
+  }
+
+  /** 3D 编辑器内的变更自动回写相机段（800ms 防抖）。 */
+  function attachSyncListener(runtime: DirectorRuntimeLike | undefined) {
+    const target = runtime as unknown as EventTarget | undefined
+    if (!target?.addEventListener) return
+    if (syncListenerRef.current?.runtime === runtime) return
+    detachSyncListener()
+    const handler = (() => {
+      if (Date.now() < suppressSyncUntilRef.current) return
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current)
+      syncTimerRef.current = window.setTimeout(() => { void autoImportState(true) }, 800)
+    }) as EventListener
+    target.addEventListener('statechange', handler)
+    syncListenerRef.current = { runtime: runtime as DirectorRuntimeLike, handler }
+  }
+
+  /** 读取节点 state_json → 编译 → 写回相机段。silent=true 时用于自动同步。 */
+  async function autoImportState(silent: boolean): Promise<boolean> {
+    const { graph } = resolveComfyGraph()
+    const node = findDirectorNode(graph)
+    if (!node) return false
+    const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+    const stateJson = widgets.find((item) => item.name === 'state_json')?.value
+    if (typeof stateJson !== 'string' || !stateJson.trim()) return false
+    if (stateJson === lastSyncedStateRef.current) return false
+    const response = await fetch('/easy-media/camera/compile-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: stateJson }),
+    })
+    if (!response.ok) return false
+    const result = await response.json() as { prompt?: string }
+    let parsed: Record<string, unknown> | undefined
+    try {
+      parsed = JSON.parse(stateJson) as Record<string, unknown>
+    } catch {
+      parsed = undefined
+    }
+    lastSyncedStateRef.current = stateJson
+    patchCamera({
+      ...(parsed ? { omnicam_state: parsed } : {}),
+      ...(result.prompt ? { compiled_prompt: result.prompt } : {}),
+    })
+    setNotice(silent
+      ? { kind: 'ok', text: `已自动同步 · ${new Date().toLocaleTimeString()}` }
+      : { kind: 'ok', text: '已从 3D 编辑器取回运镜描述' })
+    return true
+  }
+
+  /** 录制完成后自动把预演复制进项目并写回相机段。 */
+  async function syncRecordingPath() {
+    const { graph } = resolveComfyGraph()
+    const node = findDirectorNode(graph)
+    if (!node) return
+    const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
+    const recording = widgets.find((item) => item.name === 'recording_path')?.value
+    if (typeof recording !== 'string' || !recording.trim()) return
+    if (recording === lastAttachedRecordingRef.current) return
+    const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
+    if (!projectName) return
+    try {
+      const attach = await fetch('/easy-media/camera/attach-playblast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_name: projectName, segment_id: segment.id, recording_path: recording }),
+      })
+      if (!attach.ok) return
+      const attached = await attach.json() as { playblast?: string }
+      if (!attached.playblast) return
+      lastAttachedRecordingRef.current = recording
+      patchCamera({ playblast: attached.playblast })
+      setNotice({ kind: 'ok', text: `预演已自动挂载：${attached.playblast}` })
+    } catch (error) {
+      console.debug('[EasyMedia] auto attach playblast failed', error)
+    }
+  }
+
+  /** 点击面板上的「录制预演」→ 触发 OmniCam 自身的 REC。 */
+  function triggerRecord() {
+    const { graph } = resolveComfyGraph()
+    const runtime = getDirectorRuntime(findDirectorNode(graph))
+    const root = runtime?.shell?.root
+    const button = root
+      ? Array.from(root.querySelectorAll('button')).find((item) => /REC/i.test(item.textContent ?? ''))
+      : null
+    if (!button) {
+      setNotice({ kind: 'error', text: '未找到录制按钮，请先加载 3D 视口' })
+      return
+    }
+    button.click()
+    setNotice({ kind: 'ok', text: '已开始录制预演，录完会自动挂载' })
   }
 
   /** 把 Director 的 inline 编辑器 DOM 搬进本面板并显示。 */
   async function embedDirector(node: Record<string, unknown>) {
     const host = embedHostRef.current
     if (!host) throw new Error('面板容器未就绪')
-    // runtime 由扩展在节点入图后异步挂载，最多等 4 秒
     let runtime = getDirectorRuntime(node)
     for (let i = 0; i < 40 && !runtime?.inlineView?.container; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -187,16 +315,18 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
       host.appendChild(container)
     }
     await view.show()
+    attachSyncListener(runtime)
     setEmbedded(true)
   }
 
   async function openOmniCamEditor() {
     try {
       setNotice(null)
-      const node = await prepareDirectorNode()
+      const { node } = await prepareDirectorNode()
       try {
         await embedDirector(node)
-        setNotice({ kind: 'ok', text: '3D 编辑器已嵌入本面板，可直接编排运镜' })
+        setNotice({ kind: 'ok', text: `3D 编辑器已嵌入面板（已对齐 ${durationFrames} 帧）` })
+        void syncRecordingPath()
       } catch (embedError) {
         console.debug('[EasyMedia] embed director failed', embedError)
         const message = embedError instanceof Error ? embedError.message : String(embedError)
@@ -210,7 +340,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
     }
   }
 
-  // 切换相机段时：把新段状态写回节点并刷新内嵌视口
+  // 切换相机段 / 段长变化时：把新状态写回节点并刷新内嵌视口
   useEffect(() => {
     if (!embedded) return
     let cancelled = false
@@ -219,70 +349,48 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
         const { graph } = resolveComfyGraph()
         if (!findDirectorNode(graph)) return
         getDirectorRuntime(findDirectorNode(graph))?.inlineView?.hide?.()
-        const refreshed = await prepareDirectorNode()
+        const { node } = await prepareDirectorNode()
         if (cancelled) return
-        getDirectorRuntime(refreshed)?.restoreFromWidgetsHeadless?.()
-        await embedDirector(refreshed)
-        if (!cancelled) setNotice({ kind: 'ok', text: '已切换到当前相机段' })
+        await embedDirector(node)
+        if (!cancelled) setNotice({ kind: 'ok', text: `已切换到当前相机段（${durationFrames} 帧）` })
       } catch (error) {
         console.debug('[EasyMedia] sync embedded director failed', error)
       }
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment.id, durationFrames])
+
+  // 已有 3D 状态的相机段：选中即自动加载视口
+  useEffect(() => {
+    if (embedded) return
+    if (!camera.omnicam_state) return
+    void openOmniCamEditor()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segment.id])
+
+  // 录制完成后轮询 recording_path，自动挂载预演
+  useEffect(() => {
+    if (!embedded) return
+    const timer = window.setInterval(() => { void syncRecordingPath() }, 1500)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, segment.id])
+
+  // 卸载时清理监听与定时器
+  useEffect(() => () => {
+    detachSyncListener()
+  }, [])
 
   async function importFromOmniCamEditor() {
     try {
       setNotice(null)
-      const { graph } = resolveComfyGraph()
-      if (!graph) {
-        setNotice({ kind: 'error', text: '找不到 ComfyUI 画布，无法读取 3D 编辑器节点' })
+      const ok = await autoImportState(false)
+      if (!ok) {
+        setNotice({ kind: 'error', text: '画布上没有可读的 MajoorOmniCamDirector 状态，请先加载 3D 视口' })
         return
       }
-      const node = findDirectorNode(graph)
-      if (!node) {
-        setNotice({ kind: 'error', text: '画布上没有 MajoorOmniCamDirector 节点，请先「打开 3D 编辑器」' })
-        return
-      }
-      const widgets = (node.widgets as Array<{ name: string; value: unknown }> | undefined) ?? []
-      const stateJson = widgets.find((item) => item.name === 'state_json')?.value
-      if (typeof stateJson !== 'string' || !stateJson.trim()) return
-      const response = await fetch('/easy-media/camera/compile-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: stateJson }),
-      })
-      if (!response.ok) return
-      const result = await response.json() as { prompt?: string }
-      const patch: Record<string, unknown> = {
-        omnicam_state: stateJson as unknown as Record<string, unknown>,
-        ...(result.prompt ? { compiled_prompt: result.prompt } : {}),
-      }
-      const recordingPath = widgets.find((item) => item.name === 'recording_path')?.value
-      const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
-      if (typeof recordingPath === 'string' && recordingPath.trim() && projectName) {
-        try {
-          const attach = await fetch('/easy-media/camera/attach-playblast', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_name: projectName, segment_id: segment.id, recording_path: recordingPath }),
-          })
-          if (attach.ok) {
-            const attached = await attach.json() as { playblast?: string }
-            if (attached.playblast) patch.playblast = attached.playblast
-          }
-        } catch (error) {
-          console.debug('[EasyMedia] attach playblast failed', error)
-        }
-      }
-      patchCamera(patch as Partial<CameraData>)
-      setNotice({
-        kind: 'ok',
-        text: patch.playblast
-          ? `已取回运镜描述，并挂载预演：${String(patch.playblast)}`
-          : '已取回运镜描述（未检测到录制文件 recording_path）',
-      })
+      await syncRecordingPath()
     } catch (error) {
       console.error('[EasyMedia] import OmniCam state failed', error)
       setNotice({ kind: 'error', text: `取回失败：${String(error)}` })
@@ -398,6 +506,15 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
           >
             生成运镜描述（OmniCam）
           </Button>
+          <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[10px]"
+              onClick={triggerRecord}
+            >
+              录制预演
+            </Button>
           <div className="flex items-center gap-1.5">
             <Button
               type="button"
@@ -467,7 +584,7 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
         onChange={(event) => patchCamera({ compiled_prompt: event.target.value })}
       />
       <div className="text-[9px] text-muted-foreground">
-        提示词预览：{compileCameraPrompt(camera)}
+        本地摘要（不注入 H3）：{compileCameraPrompt(camera)}
       </div>
       {camera.playblast ? (
         <div className="truncate text-[9px] text-muted-foreground" title={camera.playblast}>

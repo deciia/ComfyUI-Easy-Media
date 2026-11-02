@@ -180,7 +180,14 @@ async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
     recording_path = str(payload.get("recording_path") or "").strip()
     if not project_name or not segment_id or not recording_path:
         return web.json_response({"error": "project_name / segment_id / recording_path are required"}, status=400)
-    if not Path(recording_path).is_file():
+    recording = Path(recording_path)
+    if not recording.is_absolute() or not recording.is_file():
+        candidates = [
+            Path(folder_paths.get_output_directory()) / recording_path,
+            Path(folder_paths.get_input_directory()) / recording_path,
+        ]
+        recording = next((item for item in candidates if item.is_file()), recording)
+    if not recording.is_file():
         return web.json_response({"error": f"recording not found: {recording_path}"}, status=404)
     try:
         timeline = load_timeline(project_name)
@@ -202,10 +209,10 @@ async def handle_camera_attach_playblast(request: web.Request) -> web.Response:
     ).strip()
     camera_dir = project_dir / "camera"
     camera_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(recording_path).suffix or ".mp4"
+    suffix = recording.suffix or ".mp4"
     target = camera_dir / f"playblast_{segment_id[:12]}{suffix}"
     try:
-        shutil.copy2(recording_path, target)
+        shutil.copy2(recording, target)
     except Exception as error:
         return web.json_response({"error": f"copy playblast failed: {error}"}, status=500)
     camera["playblast"] = target.relative_to(output_root).as_posix()
