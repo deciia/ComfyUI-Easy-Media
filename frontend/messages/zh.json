@@ -395,7 +395,9 @@
     "referenceGlobal": "全局使用",
     "referenceAlignedTooltip": "参考 · 对齐片段：只作用于与它时间重叠的任务片段（拖动片段改覆盖范围）",
     "referenceGlobalTooltip": "参考 · 全局使用：所有任务片段都可以选它作为参考",
-    "projectWorkspace": "工作台"
+    "projectWorkspace": "工作台",
+    "addCameraSegment": "添加相机段",
+    "cameraEmptyHint": "点 + 添加相机段（自动对齐任务段）"
   },
   "multitrackContinuityModes": {
     "shot": "分镜",

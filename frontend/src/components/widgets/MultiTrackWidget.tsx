@@ -724,6 +724,26 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     if (type === 'camera' && trackNumber >= 1) return
     if (trackNumber >= MULTITRACK_MEDIA_TRACK_LIMIT) return
     const hasAudioControls = type === 'video' || type === 'audio'
+    const defaultCamera = {
+      preset: 'static' as const,
+      easing: 'ease_in_out' as const,
+      keyframes: [{ frame: 0, preset: 'static' as const, easing: 'linear' as const }],
+    }
+    const taskSegments = data.tracks
+      .filter((item) => item.type === 'task')
+      .flatMap((item) => item.segments)
+      .slice()
+      .sort((left, right) => left.start_frame - right.start_frame)
+    const anchorTask = taskSegments.find((segment) => selectedSegmentIds.has(segment.id)) ?? taskSegments[0]
+    const seededSegments: MultiTrackSegment[] = type === 'camera' && anchorTask
+      ? [{
+          id: uuid(),
+          start_frame: anchorTask.start_frame,
+          end_frame: anchorTask.end_frame,
+          color: MULTITRACK_TRACK_COLORS.camera,
+          content: { media_type: 'none' as const, camera: { ...defaultCamera } },
+        }]
+      : []
     const track: MultiTrack = {
       id: uuid(),
       name: `${type === 'video' ? 'Video' : type === 'audio' ? 'Audio' : type === 'camera' ? 'Camera' : 'Subtitle'} ${trackNumber}`,
@@ -733,9 +753,53 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       solo: hasAudioControls ? false : undefined,
       volume_db: hasAudioControls ? MULTITRACK_DEFAULT_VOLUME_DB : undefined,
       locked: false,
-      segments: [],
+      segments: seededSegments,
     }
     commitNormalizedTrackChange({ ...data, tracks: [...data.tracks, track] })
+  }
+
+  function handleAddCameraSegment(trackId: string, requestedStartFrame?: number, requestedEndFrame?: number) {
+    const taskSegments = data.tracks
+      .filter((item) => item.type === 'task')
+      .flatMap((item) => item.segments)
+      .slice()
+      .sort((left, right) => left.start_frame - right.start_frame)
+    const defaultCamera = {
+      preset: 'static' as const,
+      easing: 'ease_in_out' as const,
+      keyframes: [{ frame: 0, preset: 'static' as const, easing: 'linear' as const }],
+    }
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'camera') return track
+      const anchor = requestedStartFrame === undefined
+        ? taskSegments.find((segment) => selectedSegmentIds.has(segment.id)) ?? taskSegments[0]
+        : taskSegments.find((segment) => requestedStartFrame >= segment.start_frame && requestedStartFrame < segment.end_frame)
+      const startFrame = requestedStartFrame === undefined
+        ? Math.max(0, Math.round(anchor?.start_frame ?? 0))
+        : Math.max(0, Math.round(requestedStartFrame))
+      const fallbackEnd = anchor && requestedStartFrame === undefined
+        ? anchor.end_frame
+        : startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+      const endFrame = requestedEndFrame !== undefined
+        ? Math.max(startFrame + 1, Math.round(requestedEndFrame))
+        : Math.max(startFrame + 1, fallbackEnd)
+      const nextSegment: MultiTrackSegment = {
+        id: uuid(),
+        start_frame: startFrame,
+        end_frame: endFrame,
+        color: track.color,
+        content: { media_type: 'none' as const, camera: { ...defaultCamera } },
+      }
+      return {
+        ...track,
+        segments: [...track.segments, nextSegment].sort((left, right) => left.start_frame - right.start_frame),
+      }
+    })
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+    })
   }
 
   function handleDeleteTrack(trackId: string) {
@@ -2413,6 +2477,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onImportSubtitles={handleImportSubtitles}
                     onReplaceVideo={handleReplaceVideo}
                     onAddTaskSegment={handleAddTaskSegment}
+          onAddCameraSegment={handleAddCameraSegment}
                     onSelectSegment={handleSelectSegment}
                     onSelectSegments={handleSelectSegments}
                     onClearSelection={handleClearSelection}

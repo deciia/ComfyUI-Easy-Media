@@ -60,6 +60,7 @@ interface TrackAreaProps {
   ) => void
   onAddTrack: (type: MultiTrackType) => void
   onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
+  onAddCameraSegment?: (trackId: string, startFrame?: number, endFrame?: number) => void
   onImportSubtitles?: (trackId: string, srtText: string, startFrame: number) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType, previewUrl?: string) => void
   onAddTaskSegment: (
@@ -191,6 +192,7 @@ export function TrackArea({
   onReplaceAudio,
   onAddTrack,
   onAddSubtitleSegment,
+  onAddCameraSegment = () => {},
   onImportSubtitles = () => {},
   onReplaceVideo,
   onAddTaskSegment,
@@ -765,6 +767,66 @@ const cameraTrackLimitReached = data.tracks.some((track) => track.type === 'came
                   >
                     <Plus className="h-2.5 w-2.5" />
                   </Button>
+                </>
+              ) : track.type === 'camera' ? (
+                <>
+                  {getTrackSegmentGaps(track.segments).map((gap) => (
+                    <TrackGapAddButton
+                      key={`${gap.startFrame}-${gap.endFrame}`}
+                      gap={gap}
+                      totalLength={data.total_length}
+                      width={playableWidth}
+                      ariaLabel={t('multitrack.addCameraSegment')}
+                      onClick={() => onAddCameraSegment(track.id, gap.startFrame, gap.endFrame)}
+                    />
+                  ))}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-1/2 h-5 w-5 cursor-pointer"
+                    style={{
+                      left: track.segments.length === 0
+                        ? 6
+                        : (track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0) / safeLength) * playableWidth + 6,
+                      transform: 'translateY(-50%)',
+                    }}
+                    aria-label={t('multitrack.addCameraSegment')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onAddCameraSegment(track.id)
+                    }}
+                  >
+                    <Plus className="h-2.5 w-2.5" />
+                  </Button>
+                  {track.segments.length === 0 ? (
+                    <span
+                      className="pointer-events-none absolute top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground"
+                      style={{ left: 32 }}
+                    >
+                      {t('multitrack.cameraEmptyHint')}
+                    </span>
+                  ) : null}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-1/2 h-5 w-5 -translate-y-1/2 cursor-pointer text-destructive"
+                        style={{
+                          left: track.segments.length === 0
+                            ? 32
+                            : (track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0) / safeLength) * playableWidth + 32,
+                        }}
+                        aria-label={t('multitrack.deleteTrack', { name: track.name })}
+                        onClick={() => onDeleteTrack(track.id)}
+                      >
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+                  </Tooltip>
                 </>
               ) : (
                 <Tooltip>

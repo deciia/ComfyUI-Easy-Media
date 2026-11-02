@@ -395,7 +395,9 @@
     "referenceGlobal": "Global",
     "referenceAlignedTooltip": "Reference · aligned: only task segments overlapping this clip can use it (drag to change coverage)",
     "referenceGlobalTooltip": "Reference · global: every task segment can use it",
-    "projectWorkspace": "Workspace"
+    "projectWorkspace": "Workspace",
+    "addCameraSegment": "Add camera segment",
+    "cameraEmptyHint": "Click + to add a camera segment (aligned to the task)"
   },
   "multitrackContinuityModes": {
     "shot": "Shot",
