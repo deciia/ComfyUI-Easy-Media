@@ -374,6 +374,10 @@ async def handle_camera_reconstruct(request: web.Request) -> web.Response:
     recon_mode = str(payload.get("recon_mode") or "depth_mesh")
     quality = str(payload.get("quality") or "balanced")
     provider_id = str(payload.get("provider") or "comfy_moge")
+    segmentation_provider = str(
+        payload.get("segmentation")
+        or ("comfy_sam3" if _sam3_checkpoint_available() else "none")
+    )
     fps = float(payload.get("fps") or 24)
     duration_seconds = float(payload.get("duration_seconds") or 5.0)
 
@@ -405,7 +409,7 @@ async def handle_camera_reconstruct(request: web.Request) -> web.Response:
             recon_mode=recon_mode,
             recon_geometry_provider=provider_id,
             recon_quality=quality,
-            recon_segmentation_provider=str(payload.get("segmentation") or "none"),
+            recon_segmentation_provider=segmentation_provider,
         )
         provider = get_provider(settings.provider)
         source = ReconstructionSource(
@@ -457,6 +461,7 @@ async def handle_camera_reconstruct(request: web.Request) -> web.Response:
             "recon_mode": summary.get("recon_mode", recon_mode),
             "triangle_count": summary.get("triangle_count", 0),
             "confidence": summary.get("confidence"),
+            "segmentation": segmentation_provider,
         }
 
     try:
@@ -580,6 +585,15 @@ async def handle_camera_extract(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"提取失败：{error}"}, status=500)
+
+
+def _sam3_checkpoint_available() -> bool:
+    """本机是否存在 SAM3 分割检查点（models/checkpoints 下的 sam3*）。"""
+    try:
+        names = folder_paths.get_filename_list("checkpoints")
+        return any(str(name).lower().startswith("sam3") for name in names)
+    except Exception:
+        return False
 
 
 @PromptServer.instance.routes.get("/easy-media/camera/profiles")
