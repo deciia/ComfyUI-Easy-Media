@@ -507,14 +507,14 @@ export function CameraSegmentEditor({ segment, currentTime, onContentChange }: C
             生成运镜描述（OmniCam）
           </Button>
           <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-[10px]"
-              onClick={triggerRecord}
-            >
-              录制预演
-            </Button>
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 w-fit px-2 text-[10px]"
+            onClick={triggerRecord}
+          >
+            录制预演
+          </Button>
           <div className="flex items-center gap-1.5">
             <Button
               type="button"
