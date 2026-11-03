@@ -2417,6 +2417,34 @@ export function AgentRail({
       checkKind('Subject', subjects)
       checkKind('Audio', audios)
       checkKind('Video', videos)
+      // 镜头级检查（H3 实测：面部表情只在镜头含 <d> 台词标签时渲染；单镜表演点过多会静默丢弃表情）
+      const planAudit = readPlan() as { segments?: Array<Record<string, unknown>> } | null
+      const auditSegment = ((planAudit?.segments ?? [])[segmentIndex] ?? null) as Record<string, unknown> | null
+      const auditShots = Array.isArray(auditSegment?.shots)
+        ? (auditSegment?.shots as Array<Record<string, unknown>>)
+        : []
+      auditShots.forEach((shot, shotIndex) => {
+        const label = `镜头${shotIndex + 1}`
+        const expression = String(shot.micro_expression ?? '').trim()
+        const action = String(shot.action ?? '').trim()
+        const framing = String(shot.framing ?? '').trim()
+        const composition = String(shot.composition ?? '').trim()
+        const lines = Array.isArray(shot.dialogue)
+          ? (shot.dialogue as Array<{ line?: string }>).filter((item) => String(item?.line ?? '').trim())
+          : []
+        if (expression && !lines.length) {
+          problems.push({ level: 'warn', kind: 'shot', message: `${label} 有微表情但没有台词：H3 只在镜头含 <d> 台词标签时渲染面部表情，这里的表情不会生效` })
+        }
+        const beats = [...action.split(/[。；;]/), ...expression.split(/[、，,；;]/)]
+          .map((item) => item.trim())
+          .filter(Boolean).length
+        if (beats > 5) {
+          problems.push({ level: 'warn', kind: 'shot', message: `${label} 表演点约 ${beats} 个：单镜表演点过多时 H3 会静默丢弃部分面部指令，建议拆镜` })
+        }
+        if (framing && !composition) {
+          problems.push({ level: 'warn', kind: 'shot', message: `${label} 有景别但没有构图关系：构图决定表情能否被看见，建议补一个` })
+        }
+      })
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
       if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
