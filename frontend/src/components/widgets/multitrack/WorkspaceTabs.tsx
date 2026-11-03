@@ -129,7 +129,8 @@ function PresetCombo({
       />
       <button
         type="button"
-        className="absolute right-0 top-0 flex h-full items-center px-1 text-[8px] leading-none opacity-60 hover:opacity-100"
+        className="absolute right-0.5 top-1/2 -translate-y-1/2 select-none text-[9px] leading-none opacity-50 hover:opacity-90"
+        style={{ background: 'transparent', border: 'none', padding: 0, width: 12, height: 12, cursor: 'pointer', color: 'inherit' }}
         title="选择预设（也可直接输入）"
         aria-label={`选择${placeholder}`}
         onMouseDown={(event) => event.preventDefault()}
@@ -391,7 +392,7 @@ export function StoryboardTab({
                       options={SHOT_SIZES.map((item) => item.label)}
                       placeholder="景别"
                       listId="em-shot-size"
-                      className="w-20 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      className="w-20 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { framing: next })}
                     />
                     <PresetCombo
@@ -399,7 +400,7 @@ export function StoryboardTab({
                       options={CAMERA_MOTIONS.map((item) => item.label)}
                       placeholder="机位/运动"
                       listId="em-camera-motion"
-                      className="w-32 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      className="w-32 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { camera: next })}
                     />
                     <PresetCombo
@@ -407,7 +408,7 @@ export function StoryboardTab({
                       options={FRAMINGS.map((item) => item.label)}
                       placeholder="构图关系"
                       listId="em-composition"
-                      className="w-24 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      className="w-24 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { composition: next })}
                     />
                   </div>
@@ -443,7 +444,7 @@ export function StoryboardTab({
                       options={EXPRESSIONS.map((item) => item.label)}
                       placeholder="微表情"
                       listId="em-expression"
-                      className="w-28 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      className="w-28 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { micro_expression: next })}
                     />
                     <input
