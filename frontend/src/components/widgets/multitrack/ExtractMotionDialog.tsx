@@ -11,6 +11,8 @@ interface CameraMediaSource {
 
 interface ExtractMotionDialogProps {
   open: boolean
+  /** 页签内联模式：不渲染遮罩层 */
+  inline?: boolean
   defaultVideo?: string
   sources?: CameraMediaSource[]
   onClose: () => void
@@ -50,7 +52,7 @@ function Step({ index, label, state }: { index: number; label: string; state: St
   )
 }
 
-export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onApply }: ExtractMotionDialogProps) {
+export function ExtractMotionDialog({ open, inline, defaultVideo, sources, onClose, onApply }: ExtractMotionDialogProps) {
   const [panelTab, setPanelTab] = useState<'official' | 'quick'>('official')
   const [mode, setMode] = useState<'track' | 'reconstruct'>('track')
   const [video, setVideo] = useState(defaultVideo ?? '')
@@ -134,8 +136,17 @@ export function ExtractMotionDialog({ open, defaultVideo, sources, onClose, onAp
   const trackingState = busy ? 'TRACKING' : result ? 'DONE' : error ? 'FAILED' : 'IDLE'
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4" role="dialog">
-      <div className="flex max-h-[90vh] w-[min(980px,96vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]">
+    <div
+      className={inline
+        ? 'flex w-full flex-col gap-2'
+        : 'fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4'}
+      role="dialog"
+    >
+      <div
+        className={inline
+          ? 'flex w-full flex-col gap-2'
+          : 'flex max-h-[90vh] w-[min(980px,96vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]'}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-medium">OmniCam Extractor</span>

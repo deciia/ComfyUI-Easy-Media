@@ -6,6 +6,8 @@ import { ensureNode, setWidgetValue, type ComfyGraphLike } from '@/lib/omnicam-e
 
 interface MonitorCompileDialogProps {
   open: boolean
+  /** 页签内联模式：不渲染遮罩层 */
+  inline?: boolean
   camera: CameraData
   durationFrames: number
   playblast?: string
@@ -31,6 +33,7 @@ interface CompileResult {
 
 export function MonitorCompileDialog({
   open,
+  inline,
   camera,
   durationFrames,
   playblast,
@@ -128,8 +131,17 @@ export function MonitorCompileDialog({
   const failedChecks = (result?.checks ?? []).filter((item) => (item.state ?? '').toUpperCase() !== 'PASS')
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4" role="dialog">
-      <div className="flex max-h-[85vh] w-[min(760px,92vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]">
+    <div
+      className={inline
+        ? 'flex w-full flex-col gap-2'
+        : 'fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4'}
+      role="dialog"
+    >
+      <div
+        className={inline
+          ? 'flex w-full flex-col gap-2'
+          : 'flex max-h-[85vh] w-[min(760px,92vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]'}
+      >
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium">H3 编译（OmniCam Monitor）</div>
           <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>

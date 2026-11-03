@@ -101,11 +101,9 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
   const lastPushedRef = useRef('')
   const pushTimerRef = useRef<number | null>(null)
   const suppressPushUntilRef = useRef(0)
-  const [tab, setTab] = useState<'params' | 'viewport'>('params')
+  const [tab, setTab] = useState<'params' | 'viewport' | 'extract' | 'compile'>('params')
   const [directorFrame, setDirectorFrame] = useState(0)
   const [zhEnabled, setZhEnabled] = useState(() => localStorage.getItem('easyMedia.omnicamZh') !== 'off')
-  const [monitorOpen, setMonitorOpen] = useState(false)
-  const [extractOpen, setExtractOpen] = useState(false)
 
   // 面板卸载时把 3D 编辑器 DOM 还回节点，避免留下游离元素
   useEffect(() => () => {
@@ -315,6 +313,27 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
       ? { kind: 'ok', text: `已自动同步 · ${new Date().toLocaleTimeString()}` }
       : { kind: 'ok', text: '已从 3D 编辑器取回运镜描述' })
     return true
+  }
+
+  /** 把提取/重建结果写入相机段，并载入 3D 视口。 */
+  async function applyExtractedState(editorState: Record<string, unknown>) {
+    try {
+      const response = await fetch('/easy-media/camera/compile-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: editorState }),
+      })
+      const compiled = await response.json() as { prompt?: string }
+      patchCamera({
+        omnicam_state: editorState,
+        ...(compiled.prompt ? { compiled_prompt: compiled.prompt } : {}),
+      })
+      await applyExplicitState(editorState)
+      setNotice({ kind: 'ok', text: '运镜已从视频提取并载入 3D 视口' })
+      setTab('viewport')
+    } catch (error) {
+      setNotice({ kind: 'error', text: `应用提取结果失败：${String(error)}` })
+    }
   }
 
   /** 录制完成后自动把预演复制进项目并写回相机段。 */
@@ -626,20 +645,24 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
             {zhEnabled ? 'EN' : '中'}
           </button>
           <div className="flex overflow-hidden rounded border border-border">
-            <button
-              type="button"
-              className={`px-2 py-0.5 text-[10px] ${tab === 'params' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setTab('params')}
-            >
-              参数
-            </button>
-            <button
-              type="button"
-              className={`px-2 py-0.5 text-[10px] ${tab === 'viewport' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setTab('viewport')}
-            >
-              3D 视口
-            </button>
+            {([
+              ['params', '参数'],
+              ['viewport', '3D编辑'],
+              ['extract', '提取运镜'],
+              ['compile', 'H3编译'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`px-2 py-0.5 text-[10px] ${tab === value ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+                onClick={() => {
+                  setTab(value)
+                  if (value === 'viewport' && !embedded) window.setTimeout(() => { void openOmniCamEditor() }, 0)
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <Button type="button" size="sm" variant="secondary" className="h-6 px-2 text-[10px]" onClick={() => addKeyframe(camera.preset ?? 'static')}>
             <Plus className="mr-1 h-3 w-3" /> 在第 {editFrame} 帧加关键帧
@@ -729,83 +752,6 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
             >
               生成运镜描述（OmniCam）
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 w-fit px-2 text-[10px]"
-              onClick={() => setMonitorOpen(true)}
-            >
-              H3 编译…
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 w-fit px-2 text-[10px]"
-              onClick={() => setExtractOpen(true)}
-            >
-              提取运镜…
-            </Button>
-            <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
-              录制预演
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 w-fit px-2 text-[10px]"
-              onClick={() => { void syncRecordingPath() }}
-            >
-              挂载预演
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-6 px-2 text-[10px]"
-              onClick={() => {
-                setTab('viewport')
-                if (!embedded) window.setTimeout(() => { void openOmniCamEditor() }, 0)
-              }}
-            >
-              {embedded ? '打开视口页' : '加载 3D 视口'}
-            </Button>
-            {embedded ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => {
-                  const { graph } = resolveComfyGraph()
-                  const view = getDirectorRuntime(findDirectorNode(graph))?.inlineView
-                  void view?.expand?.(embedHostRef.current)
-                }}
-              >
-                全屏编辑
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-[10px]"
-              onClick={() => { void importFromOmniCamEditor() }}
-            >
-              从 3D 编辑器取回
-            </Button>
-            {camera.playblast ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-[10px]"
-                onClick={() => patchCamera({ playblast: undefined })}
-              >
-                清除预演
-              </Button>
-            ) : null}
           </div>
           <textarea
             className="min-h-16 w-full resize-y rounded border border-border bg-card p-2 text-[10px] leading-relaxed"
@@ -817,12 +763,23 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
             本地摘要（不注入 H3）：{compileCameraPrompt(camera)}
           </div>
           {camera.playblast ? (
-            <div className="truncate text-[9px] text-muted-foreground" title={camera.playblast}>
-              预演：{camera.playblast}
+            <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+              <span className="truncate" title={camera.playblast}>预演：{camera.playblast}</span>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-5 w-5 shrink-0 text-destructive"
+                aria-label="清除预演"
+                title="清除预演"
+                onClick={() => patchCamera({ playblast: undefined })}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
             </div>
           ) : null}
         </>
-      ) : (
+      ) : tab === 'viewport' ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <Button type="button" size="sm" variant="outline" className="h-6 w-fit px-2 text-[10px]" onClick={triggerRecord}>
             录制预演
@@ -835,15 +792,6 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
             onClick={() => { void syncRecordingPath() }}
           >
             挂载预演
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-6 w-fit px-2 text-[10px]"
-            onClick={() => setMonitorOpen(true)}
-          >
-            H3 编译…
           </Button>
           {embedded ? (
             <Button
@@ -880,7 +828,33 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
             从 3D 编辑器取回
           </Button>
         </div>
-      )}
+      ) : null}
+
+      {tab === 'extract' ? (
+        <ExtractMotionDialog
+          open
+          inline
+          defaultVideo={camera.playblast ?? ''}
+          sources={mediaSources}
+          onClose={() => setTab('params')}
+          onApply={(editorState) => { void applyExtractedState(editorState) }}
+        />
+      ) : null}
+
+      {tab === 'compile' ? (
+        <MonitorCompileDialog
+          open
+          inline
+          camera={camera}
+          durationFrames={durationFrames}
+          playblast={camera.playblast}
+          onClose={() => setTab('params')}
+          onApply={(prompt) => {
+            patchCamera({ compiled_prompt: prompt })
+            setNotice({ kind: 'ok', text: 'H3 编译结果已写入相机段，生成时注入任务段提示词' })
+          }}
+        />
+      ) : null}
 
       <div
         ref={embedHostRef}
@@ -897,43 +871,6 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
           {notice.text}
         </div>
       ) : null}
-      <ExtractMotionDialog
-        open={extractOpen}
-        defaultVideo={camera.playblast ?? ''}
-        sources={mediaSources}
-        onClose={() => setExtractOpen(false)}
-        onApply={(editorState) => {
-          void (async () => {
-            try {
-              const response = await fetch('/easy-media/camera/compile-state', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ state: editorState }),
-              })
-              const compiled = await response.json() as { prompt?: string }
-              patchCamera({
-                omnicam_state: editorState,
-                ...(compiled.prompt ? { compiled_prompt: compiled.prompt } : {}),
-              })
-              await applyExplicitState(editorState)
-              setNotice({ kind: 'ok', text: '运镜已从视频提取并载入 3D 视口' })
-            } catch (error) {
-              setNotice({ kind: 'error', text: `应用提取结果失败：${String(error)}` })
-            }
-          })()
-        }}
-      />
-      <MonitorCompileDialog
-        open={monitorOpen}
-        camera={camera}
-        durationFrames={durationFrames}
-        playblast={camera.playblast}
-        onClose={() => setMonitorOpen(false)}
-        onApply={(prompt) => {
-          patchCamera({ compiled_prompt: prompt })
-          setNotice({ kind: 'ok', text: 'H3 编译结果已写入相机段，生成时注入任务段提示词' })
-        }}
-      />
     </div>
   )
 }
