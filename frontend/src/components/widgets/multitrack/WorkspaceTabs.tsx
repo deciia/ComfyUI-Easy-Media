@@ -518,7 +518,8 @@ export function StoryboardTab({
             {subject.name}({subject.type})
             <button
               type="button"
-              className="rounded-full px-1 text-[9px] leading-none opacity-60 hover:opacity-100"
+              className="select-none text-[10px] leading-none opacity-50 hover:opacity-90"
+              style={{ background: 'transparent', border: 'none', padding: 0, width: 12, height: 12, lineHeight: 1, cursor: 'pointer', color: 'inherit' }}
               title="解除该主体绑定"
               aria-label={`解除主体 ${subject.name}`}
               onClick={() => {
@@ -534,8 +535,8 @@ export function StoryboardTab({
         ))}
         <button
           type="button"
-          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none opacity-70 hover:opacity-100"
-          style={{ border: `1px dashed ${BORDER}` }}
+          className="select-none text-[10px] leading-none opacity-60 hover:opacity-100"
+          style={{ background: 'transparent', border: 'none', padding: 0, width: 14, height: 14, lineHeight: 1, cursor: 'pointer', color: 'inherit' }}
           title="从主体池添加"
           aria-label="从主体池添加"
           onClick={() => setAddPicker(addPicker === 'subject' ? null : 'subject')}
@@ -636,7 +637,8 @@ export function StoryboardTab({
                   {status === 'ready' ? '✓' : status === 'need' ? '缺' : '·'}{resource.kind}:{resource.name}
                   <button
                     type="button"
-                    className="rounded-full px-1 text-[9px] leading-none opacity-60 hover:opacity-100"
+                    className="select-none text-[10px] leading-none opacity-50 hover:opacity-90"
+                    style={{ background: 'transparent', border: 'none', padding: 0, width: 12, height: 12, lineHeight: 1, cursor: 'pointer', color: 'inherit' }}
                     title="解除该资源需求"
                     aria-label={`解除资源 ${resource.name}`}
                     onClick={() => {
@@ -652,8 +654,8 @@ export function StoryboardTab({
             })}
             <button
               type="button"
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none opacity-70 hover:opacity-100"
-              style={{ border: `1px dashed ${BORDER}` }}
+              className="select-none text-[10px] leading-none opacity-60 hover:opacity-100"
+              style={{ background: 'transparent', border: 'none', padding: 0, width: 14, height: 14, lineHeight: 1, cursor: 'pointer', color: 'inherit' }}
               title="从资源池添加"
               aria-label="从资源池添加"
               onClick={() => setAddPicker(addPicker === 'resource' ? null : 'resource')}
