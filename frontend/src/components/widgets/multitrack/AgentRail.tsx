@@ -74,6 +74,130 @@ export interface AgentRailProps {
 }
 
 /** 常驻右侧 AI 助手：弹窗持有，切页签不卸载；内含 对话/轨迹/上下文 三个标签页。 */
+/* ============================================================
+ * 按需加载工具子集
+ * 63 个工具全量发给模型，首包慢且容易选错工具。这里按意图分组，
+ * 每轮只发送 core + 命中组；模型可用 load_tools 主动加载其它组。
+ * ============================================================ */
+const TOOL_GROUP_LABELS: Record<string, string> = {
+  storyboard: '分镜脚本',
+  prompt: '提示词',
+  resource: '主体资源',
+  binding: '绑定',
+  generate: '生成任务轨',
+  camera: '相机',
+  memory: '项目记忆',
+  misc: '其它',
+}
+
+const TOOL_GROUPS: Record<string, string[]> = {
+  storyboard: [
+    'plan_storyboard', 'revise_storyboard', 'get_segment', 'update_segment', 'patch_segment',
+    'add_segment', 'delete_segment', 'delete_segments', 'split_segment', 'merge_segments',
+    'set_plan_settings', 'write_prompt', 'retoken_prompts', 'undo_last_delete', 'list_task_track',
+  ],
+  prompt: ['generate_prompt', 'generate_all_prompts', 'validate_prompts', 'fix_prompts'],
+  resource: [
+    'upsert_resource', 'upsert_subject', 'link_subject_assets', 'set_resource_brief', 'attach_media',
+    'generate_resource', 'generate_resources_batch', 'delete_resources', 'promote_pictures_to_subject',
+    'list_input_files', 'audit_assets', 'plan_assets',
+  ],
+  binding: ['bind_resources', 'list_bindings', 'sync_task_images', 'repair_task_images'],
+  generate: [
+    'apply_storyboard', 'set_task_modes', 'explain_task_modes', 'run_generation',
+    'get_generation_status', 'list_outputs', 'save_project', 'delete_task_segments',
+  ],
+  camera: ['get_camera_track', 'set_camera_track', 'camera_plan', 'attach_camera_playblast'],
+  memory: ['remember', 'recall', 'memorize', 'recall_memories'],
+  misc: ['list_projects', 'verify_project', 'dump_state', 'inspect_images'],
+}
+
+/** 每轮必发：提问、清单、技能、读基础数据 */
+const CORE_TOOL_NAMES = [
+  'ask_user', 'update_todos', 'read_skill', 'list_skills',
+  'get_plan', 'list_segments', 'list_resources', 'get_prompt_context',
+]
+
+/** 模型可主动要求加载的工具组 */
+const LOAD_TOOLS_DEF = {
+  type: 'function',
+  function: {
+    name: 'load_tools',
+    description:
+      '按需加载更多工具组（当前轮次只带了与本轮意图相关的工具）。当你发现需要的工具不在可用列表里时调用它，下一回合即可使用。分组：storyboard 分镜脚本 / prompt 提示词 / resource 主体资源 / binding 绑定 / generate 生成任务轨 / camera 相机 / memory 项目记忆 / misc 其它。可一次传多个组。',
+    parameters: {
+      type: 'object',
+      properties: {
+        groups: {
+          type: 'array',
+          description: '要加载的工具组名',
+          items: { type: 'string', enum: Object.keys(TOOL_GROUPS) },
+        },
+      },
+      required: ['groups'],
+    },
+  },
+}
+
+/** 意图关键词 → 组；按在文本中出现的先后决定优先级 */
+const GROUP_INTENT_RULES: Array<{ group: string; pattern: RegExp }> = [
+  { group: 'camera', pattern: /相机|运镜|机位|3D\s*编辑|关键帧|相机轨|camera/i },
+  { group: 'prompt', pattern: /提示词|终稿|片段稿|A\s*稿|B\s*稿|重写|令牌|校验|修正|fix_prompts|validate/i },
+  { group: 'binding', pattern: /绑定|解绑|引用|@[\u4e00-\u9fa5A-Za-z]/i },
+  { group: 'resource', pattern: /主体|资源|素材|图片|音频|配音|音乐|参考图|reference|subject|asset/i },
+  { group: 'generate', pattern: /生成视频|跑一遍|运行|队列|任务轨|落轨|应用分镜|保存项目|导出|output/i },
+  { group: 'memory', pattern: /记住|记忆|回忆|偏好|remember|memory/i },
+  { group: 'misc', pattern: /项目列表|体检|排查|自检|看图|inspect/i },
+  { group: 'storyboard', pattern: /分镜|脚本|第\s*\d+\s*段|镜头|beat|拆段|合并段|新增段|删除段/i },
+]
+
+function detectGroupRanking(text: string): Array<{ group: string; index: number }> {
+  const value = String(text || '')
+  if (!value.trim()) return []
+  const hits: Array<{ group: string; index: number }> = []
+  for (const rule of GROUP_INTENT_RULES) {
+    const match = rule.pattern.exec(value)
+    if (match) hits.push({ group: rule.group, index: match.index })
+  }
+  return hits.sort((a, b) => a.index - b.index)
+}
+
+/** 本轮要加载的组：粘性 ∪ 意图命中（最多 4 组）；都没命中则用默认 分镜+提示词 */
+function resolveToolGroups(userText: string, sticky: Set<string>): Set<string> {
+  const groups = new Set<string>(sticky)
+  const ranking = detectGroupRanking(userText)
+  if (!ranking.length && groups.size === 0) {
+    groups.add('storyboard')
+    groups.add('prompt')
+    return groups
+  }
+  for (const hit of ranking) {
+    if (groups.size >= 4) break
+    groups.add(hit.group)
+  }
+  if (groups.size === 0) {
+    groups.add('storyboard')
+    groups.add('prompt')
+  }
+  return groups
+}
+
+function toolGroupsForName(name: string): string[] {
+  const out: string[] = []
+  for (const [group, names] of Object.entries(TOOL_GROUPS)) {
+    if (names.includes(name)) out.push(group)
+  }
+  return out
+}
+
+function buildToolNameSet(groups: Iterable<string>): Set<string> {
+  const names = new Set<string>(CORE_TOOL_NAMES)
+  for (const group of groups) {
+    for (const name of TOOL_GROUPS[group] ?? []) names.add(name)
+  }
+  return names
+}
+
 export function AgentRail({
   projectKey,
   tab,
@@ -135,6 +259,8 @@ export function AgentRail({
   const [activeProfileId, setActiveProfileId] = useState('')
   const [railTab, setRailTab] = useState<'chat' | 'trace' | 'context'>('chat')
   const abortRef = useRef<AbortController | null>(null)
+  /** 按需加载：本轮已激活的工具组（含自动粘性） */
+  const activeToolGroupsRef = useRef<Set<string>>(new Set())
   const progressRef = useRef<((text: string) => void) | null>(null)
 
   useEffect(() => {
@@ -1216,6 +1342,19 @@ export function AgentRail({
   }
 
   async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (name === 'load_tools') {
+      const rawGroups = Array.isArray(args.groups) ? args.groups.map((item) => String(item)) : []
+      const valid = rawGroups.filter((group) => group in TOOL_GROUPS)
+      const unknown = rawGroups.filter((group) => !(group in TOOL_GROUPS))
+      for (const group of valid) activeToolGroupsRef.current.add(group)
+      return {
+        ok: true,
+        loaded: valid.map((group) => ({ group, label: TOOL_GROUP_LABELS[group], tools: TOOL_GROUPS[group].length })),
+        ...(unknown.length ? { unknown } : {}),
+        available_groups: Object.keys(TOOL_GROUPS),
+        hint: '这些组的工具下一回合即可使用',
+      }
+    }
     const planNow = readPlan()
     const segments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
     if (name === 'add_segment') {
@@ -4316,6 +4455,7 @@ export function AgentRail({
   async function sendStepLoop(textOverride?: string, asTask = false) {
     const text = String(textOverride ?? input).trim()
     if (!text) return
+    activeToolGroupsRef.current = resolveToolGroups(text, activeToolGroupsRef.current)
     // 纯工具名（如 dump_state / list_bindings）→ 直接执行，不经过模型
     const toolNames = new Set((AGENT_TOOLS as unknown as Array<{ function?: { name?: string } }>)
       .map((item) => String(item?.function?.name ?? ''))
@@ -4619,10 +4759,27 @@ export function AgentRail({
             /* 压缩失败不影响主流程 */
           }
         }
+        // 按需加载：只发送当前激活组 + core 的工具，避免 60+ 工具全量拖慢首包
+        const activeGroups = Array.from(activeToolGroupsRef.current)
+        const activeNames = buildToolNameSet(activeGroups)
+        const activeTools = [
+          ...(AGENT_TOOLS as unknown as Array<{ function?: { name?: string } }>).filter((tool) => {
+            const toolName = String(tool?.function?.name ?? '')
+            return toolName === 'load_tools' || activeNames.has(toolName)
+          }),
+          ...(activeNames.has('load_tools') ? [] : [LOAD_TOOLS_DEF]),
+        ]
+        if (step === 0) {
+          console.info(
+            '[EasyMedia][工具集] 本轮加载：',
+            activeGroups.map((group) => TOOL_GROUP_LABELS[group] ?? group).join('、'),
+            `（${activeTools.length} 个工具）`,
+          )
+        }
         const stepBody = JSON.stringify({
           messages: chatMessages,
           context: buildContext(),
-          tools: AGENT_TOOLS,
+          tools: activeTools,
           system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
         })
         // 优先流式（逐字出现）：失败自动回退非流式；回退时只补未显示的后缀，避免重复
@@ -4760,6 +4917,8 @@ export function AgentRail({
           try {
             const result = await executeAgentTool(call.name, parsedArgs)
             window.clearInterval(heartbeat)
+            // 粘性：用到了某组的工具，后续步骤继续保留该组
+            for (const group of toolGroupsForName(call.name)) activeToolGroupsRef.current.add(group)
             upsertToolCall({
               id: call.id,
               name: call.name,
