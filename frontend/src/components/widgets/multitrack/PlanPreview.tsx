@@ -5,6 +5,8 @@ export interface PlanShot {
   shot: number
   framing: string
   camera: string
+  /** 构图关系（过肩/双人同框/插入镜头…），可为自定义文本 */
+  composition?: string
   action: string
   dialogue: Array<{ speaker: string; line: string }>
   micro_expression: string
@@ -47,7 +49,7 @@ export function formatPlanSegmentBrief(segment: PlanSegment): string {
   if (segment.duration_seconds) lines.push(`时长：${segment.duration_seconds}s（${segment.duration_frames}帧）`)
   if (segment.summary) lines.push(`本段：${segment.summary}`)
   for (const shot of segment.shots) {
-    lines.push(`[${shot.framing}]${shot.camera ? ` ${shot.camera}` : ''}${shot.action ? `：${shot.action}` : ''}`)
+    lines.push(`[${shot.framing}]${shot.camera ? ` ${shot.camera}` : ''}${shot.composition ? `·${shot.composition}` : ''}${shot.action ? `：${shot.action}` : ''}`)
     for (const line of shot.dialogue) {
       lines.push(`${line.speaker ? `${line.speaker}：` : ''}「${line.line}」`)
     }

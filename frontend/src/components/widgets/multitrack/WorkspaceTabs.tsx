@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
+import { CAMERA_MOTIONS, EXPRESSIONS, FRAMINGS, SHOT_SIZES } from '@/lib/prompt-presets'
 import { createEmptyPlan, ensureHydrated, mutatePlanSegments, readWorkspace, subscribeWorkspace, writeWorkspace } from './agentStore'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
@@ -194,6 +195,19 @@ export function StoryboardTab({
   }
   const planDetail = planSegment ? (
     <div className="flex flex-col gap-2">
+      {/* 镜头语言候选：可选可自定义（AI 写入的自由文本也照常显示） */}
+      <datalist id="em-shot-size">
+        {SHOT_SIZES.map((item) => <option key={item.key} value={item.label} />)}
+      </datalist>
+      <datalist id="em-camera-motion">
+        {CAMERA_MOTIONS.map((item) => <option key={item.key} value={item.label} />)}
+      </datalist>
+      <datalist id="em-expression">
+        {EXPRESSIONS.map((item) => <option key={item.key} value={item.label} />)}
+      </datalist>
+      <datalist id="em-composition">
+        {FRAMINGS.map((item) => <option key={item.key} value={item.label} />)}
+      </datalist>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[13px] font-medium">{planSegment.index}. {planSegment.name}</span>
         {planSegment.beat ? (
@@ -294,6 +308,7 @@ export function StoryboardTab({
                     <input
                       defaultValue={String(shotAny.framing ?? '')}
                       placeholder="景别"
+                      list="em-shot-size"
                       className="w-20 rounded px-1 py-0.5 text-[10px] outline-none"
                       style={fieldStyle}
                       onBlur={commitShot('framing')}
@@ -301,9 +316,18 @@ export function StoryboardTab({
                     <input
                       defaultValue={String(shotAny.camera ?? '')}
                       placeholder="机位/运动"
+                      list="em-camera-motion"
                       className="w-32 rounded px-1 py-0.5 text-[10px] outline-none"
                       style={fieldStyle}
                       onBlur={commitShot('camera')}
+                    />
+                    <input
+                      defaultValue={String(shotAny.composition ?? '')}
+                      placeholder="构图关系"
+                      list="em-composition"
+                      className="w-24 rounded px-1 py-0.5 text-[10px] outline-none"
+                      style={fieldStyle}
+                      onBlur={commitShot('composition')}
                     />
                   </div>
                   <textarea
@@ -336,6 +360,7 @@ export function StoryboardTab({
                     <input
                       defaultValue={String(shotAny.micro_expression ?? '')}
                       placeholder="微表情"
+                      list="em-expression"
                       className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
                       style={fieldStyle}
                       onBlur={commitShot('micro_expression')}
@@ -374,6 +399,11 @@ export function StoryboardTab({
                   <div className="flex flex-wrap items-center gap-1.5">
                     {shotAny.framing ? <span className="rounded px-1 text-[10px]" style={{ border: `1px solid ${BORDER}` }}>{String(shotAny.framing)}</span> : null}
                     {shotAny.camera ? <span className="text-[10px] text-muted-foreground">{String(shotAny.camera)}</span> : null}
+                    {shotAny.composition ? (
+                      <span className="rounded px-1 text-[10px] text-muted-foreground" style={{ border: `1px dashed ${BORDER}` }}>
+                        构图 {String(shotAny.composition)}
+                      </span>
+                    ) : null}
                   </div>
                   {shotAny.action ? <div>{String(shotAny.action)}</div> : null}
                   {dialogue.length > 0 ? (
