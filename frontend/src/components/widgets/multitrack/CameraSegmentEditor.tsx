@@ -536,12 +536,19 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
   async function importFromOmniCamEditor() {
     try {
       setNotice(null)
-      const ok = await autoImportState(false)
-      if (!ok) {
+      const { graph } = resolveComfyGraph()
+      if (!findDirectorNode(graph)) {
         setNotice({ kind: 'error', text: '画布上没有可读的 MajoorOmniCamDirector 状态，请先加载 3D 视口' })
         return
       }
-      await syncRecordingPath()
+      const changed = await autoImportState(false)
+      setTab('params')
+      setNotice({
+        kind: 'ok',
+        text: changed
+          ? '已从 3D 编辑器取回运镜描述与相机状态（预演仍需手动挂载）'
+          : '3D 编辑器状态无变化，相机段已是最新',
+      })
     } catch (error) {
       console.error('[EasyMedia] import OmniCam state failed', error)
       setNotice({ kind: 'error', text: `取回失败：${String(error)}` })
@@ -619,7 +626,7 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
 
   return (
     <div className="flex min-h-24 w-full min-w-0 flex-col gap-2 overflow-y-auto rounded-sm bg-background p-2" data-camera-editor>
-      <div className="flex items-center justify-between gap-2">
+      <div className="sticky top-0 z-20 -mx-2 -mt-2 mb-1 flex items-center justify-between gap-2 rounded-t-sm bg-background px-2 py-1">
         <div className="flex items-center gap-1.5" style={{ color: presentation.textColor }}>
           <Camera className="h-3.5 w-3.5" />
           <span className="text-[11px] font-medium">相机 · {cameraPresetLabel(camera.preset)}</span>
