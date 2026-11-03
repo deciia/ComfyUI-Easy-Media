@@ -13,6 +13,7 @@ import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import { installOmniCamChinese, uninstallOmniCamChinese } from '@/lib/omnicam-zh'
 import { MonitorCompileDialog } from './MonitorCompileDialog'
 import { ExtractMotionDialog } from './ExtractMotionDialog'
+import { applyCameraOps, type CameraOp, type EditorStateLike } from '@/lib/camera-plan'
 import type { CameraData, CameraEasing, CameraKeyframe, CameraPreset, MultiTrackSegment } from '@/types/multitrack'
 
 type ComfyGraphLike = {
@@ -90,6 +91,20 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
   const durationFrames = Math.max(1, segment.end_frame - segment.start_frame)
   const localFrame = Math.max(0, Math.min(durationFrames - 1, Math.round(currentTime - segment.start_frame)))
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+
+  // 供导演台 AI / 外部脚本调用的操作协议入口（方案 B）
+  useEffect(() => {
+    const api = {
+      segmentId: segment.id,
+      ops: (list: CameraOp[]) => applyCameraOpsPlan(list),
+    }
+    const host = window as unknown as { easyMediaCameraOps?: typeof api }
+    host.easyMediaCameraOps = api
+    return () => {
+      if (host.easyMediaCameraOps === api) delete host.easyMediaCameraOps
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment.id, camera])
   const embedHostRef = useRef<HTMLDivElement | null>(null)
   const mountedEmbedRef = useRef<{ container: HTMLElement; parent: HTMLElement | null; next: Node | null } | null>(null)
   const [embedded, setEmbedded] = useState(false)
@@ -313,6 +328,54 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
       ? { kind: 'ok', text: `已自动同步 · ${new Date().toLocaleTimeString()}` }
       : { kind: 'ok', text: '已从 3D 编辑器取回运镜描述' })
     return true
+  }
+
+  /** 应用一组 OmniCam Director 操作（操作协议）。 */
+  async function applyCameraOpsPlan(ops: CameraOp[]): Promise<{ applied: number; skipped: number }> {
+    if (!Array.isArray(ops) || ops.length === 0) throw new Error('操作列表为空')
+    let base: EditorStateLike | null = null
+    const stored = camera.omnicam_state
+    if (stored && typeof stored === 'object' && Array.isArray((stored as { cameras?: unknown[] }).cameras)) {
+      base = stored as unknown as EditorStateLike
+    }
+    if (!base) {
+      const response = await fetch('/easy-media/camera/editor-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera, fps: 24, frames: durationFrames }),
+      })
+      if (!response.ok) throw new Error(`读取相机状态失败（HTTP ${response.status}）`)
+      const result = await response.json() as { state?: EditorStateLike }
+      if (!result.state) throw new Error('相机状态为空')
+      base = result.state
+    }
+    const applied = applyCameraOps(base, ops)
+    try {
+      const response = await fetch('/easy-media/camera/compile-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: applied.state }),
+      })
+      const compiled = await response.json() as { prompt?: string }
+      patchCamera({
+        omnicam_state: applied.state as unknown as Record<string, unknown>,
+        ...(compiled.prompt ? { compiled_prompt: compiled.prompt } : {}),
+      })
+    } catch {
+      patchCamera({ omnicam_state: applied.state as unknown as Record<string, unknown> })
+    }
+    await applyExplicitState(applied.state as unknown as Record<string, unknown>)
+    if (applied.skipped.length) {
+      setNotice({
+        kind: 'error',
+        text: `已应用 ${applied.applied.length} 个操作，跳过 ${applied.skipped.length} 个：${applied.skipped
+          .map((item) => `${item.op}（${item.reason}）`)
+          .join('；')}`,
+      })
+    } else {
+      setNotice({ kind: 'ok', text: `已应用 ${applied.applied.length} 个相机操作` })
+    }
+    return { applied: applied.applied.length, skipped: applied.skipped.length }
   }
 
   /** 把提取/重建结果写入相机段，并载入 3D 视口。 */
