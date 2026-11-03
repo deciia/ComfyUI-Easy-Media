@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlanPreview, type StoryboardPlan } from './PlanPreview'
 import { CAMERA_MOTIONS, EXPRESSIONS, FRAMINGS, SHOT_SIZES } from '@/lib/prompt-presets'
@@ -88,43 +88,53 @@ function PresetCombo({
   options,
   placeholder,
   className,
-  listId,
   onCommit,
 }: {
   value: string
   options: string[]
   placeholder: string
   className: string
-  listId?: string
   onCommit: (next: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value)
+  const rootRef = useRef<HTMLSpanElement | null>(null)
   useEffect(() => {
     setDraft(value)
   }, [value])
+  // 打开后点击组件外部或按 Esc 关闭（用按钮打开时输入框未聚焦，不能依赖 blur）
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
   const commit = (next: string) => {
     if (next !== value) onCommit(next)
   }
   return (
-    <span className="relative inline-flex items-center">
+    <span ref={rootRef} className="relative inline-flex items-center">
       <input
         value={draft}
         placeholder={placeholder}
-        list={listId}
         className={className}
         style={fieldStyle}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => {
-          commit(draft)
-          setOpen(false)
-        }}
+        onBlur={() => commit(draft)}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
             commit(draft)
             setOpen(false)
           }
-          if (event.key === 'Escape') setOpen(false)
         }}
       />
       <button
@@ -277,19 +287,6 @@ export function StoryboardTab({
   }
   const planDetail = planSegment ? (
     <div className="flex flex-col gap-2">
-      {/* 镜头语言候选：可选可自定义（AI 写入的自由文本也照常显示） */}
-      <datalist id="em-shot-size">
-        {SHOT_SIZES.map((item) => <option key={item.key} value={item.label} />)}
-      </datalist>
-      <datalist id="em-camera-motion">
-        {CAMERA_MOTIONS.map((item) => <option key={item.key} value={item.label} />)}
-      </datalist>
-      <datalist id="em-expression">
-        {EXPRESSIONS.map((item) => <option key={item.key} value={item.label} />)}
-      </datalist>
-      <datalist id="em-composition">
-        {FRAMINGS.map((item) => <option key={item.key} value={item.label} />)}
-      </datalist>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[13px] font-medium">{planSegment.index}. {planSegment.name}</span>
         {planSegment.beat ? (
@@ -391,7 +388,6 @@ export function StoryboardTab({
                       value={String(shotAny.framing ?? '')}
                       options={SHOT_SIZES.map((item) => item.label)}
                       placeholder="景别"
-                      listId="em-shot-size"
                       className="w-20 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { framing: next })}
                     />
@@ -399,7 +395,6 @@ export function StoryboardTab({
                       value={String(shotAny.camera ?? '')}
                       options={CAMERA_MOTIONS.map((item) => item.label)}
                       placeholder="机位/运动"
-                      listId="em-camera-motion"
                       className="w-32 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { camera: next })}
                     />
@@ -407,7 +402,6 @@ export function StoryboardTab({
                       value={String(shotAny.composition ?? '')}
                       options={FRAMINGS.map((item) => item.label)}
                       placeholder="构图关系"
-                      listId="em-composition"
                       className="w-24 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { composition: next })}
                     />
@@ -443,7 +437,6 @@ export function StoryboardTab({
                       value={String(shotAny.micro_expression ?? '')}
                       options={EXPRESSIONS.map((item) => item.label)}
                       placeholder="微表情"
-                      listId="em-expression"
                       className="w-28 rounded px-1 py-0.5 pr-4.5 text-[10px] outline-none"
                       onCommit={(next) => patchShot(planFocus as number, shotIndex, { micro_expression: next })}
                     />
