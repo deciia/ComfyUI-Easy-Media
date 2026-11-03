@@ -191,6 +191,60 @@ export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   for (const listener of listeners.get(key) ?? []) listener()
 }
 
+/** 一个项目在本地留下的全部 localStorage 键前缀。 */
+const PROJECT_LS_PREFIXES = [
+  'easy-media-storyboard:',
+  'easy-media-workspace-subjects:',
+  'easy-media-workspace-resources:',
+  'easy-media-project-resources:',
+  'easy-media-bindings:',
+  'easy-media-messages:',
+  'easy-media-director-settings:',
+]
+
+/** 删除项目时联动清理：内存缓存 + 全部 localStorage 键。 */
+export function purgeWorkspace(key: string) {
+  if (!key) return
+  cache.delete(key)
+  const listenersForKey = listeners.get(key)
+  if (listenersForKey) {
+    listenersForKey.forEach((listener) => listener())
+  }
+  for (const prefix of PROJECT_LS_PREFIXES) {
+    try {
+      window.localStorage.removeItem(`${prefix}${key}`)
+    } catch {
+      /* 存储失败不阻断 */
+    }
+  }
+}
+
+/** 孤儿清扫：清掉「项目已彻底不存在」的本地键。existingNames 需包含全部项目名（含无时间线的）。 */
+export function sweepOrphanWorkspaces(existingNames: Array<string>): number {
+  const alive = new Set(existingNames.map((name) => String(name || '').trim()).filter(Boolean))
+  let removed = 0
+  try {
+    const doomed: string[] = []
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const lsKey = window.localStorage.key(index)
+      if (!lsKey) continue
+      const matched = PROJECT_LS_PREFIXES.find((prefix) => lsKey.startsWith(prefix))
+      if (!matched) continue
+      const projectName = lsKey.slice(matched.length)
+      if (!projectName || projectName === 'default') continue
+      if (!alive.has(projectName)) doomed.push(lsKey)
+    }
+    for (const lsKey of doomed) {
+      window.localStorage.removeItem(lsKey)
+      cache.delete(lsKey.slice(lsKey.indexOf(':') + 1))
+      removed += 1
+    }
+  } catch {
+    /* 存储异常不阻断 */
+  }
+  return removed
+}
+
 /** 挂载时若内存无 plan，从 localStorage 恢复分镜草稿。 */
 export function ensureHydrated(key: string) {
   const current = cache.get(key) ?? {}

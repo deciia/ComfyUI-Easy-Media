@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { purgeWorkspace, sweepOrphanWorkspaces } from './agentStore'
 import type { MultiTrackPreviewResolutionInput } from '@/lib/multitrack-utils'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
 import type { ProjectKind, TrackData } from '@/types/multitrack'
@@ -201,7 +202,16 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
 
   const refreshProjects = useCallback(async () => {
     try {
-      setProjects(await listTimelineProjects(app))
+      const rows = await listTimelineProjects(app)
+      try {
+        // 孤儿清扫：清掉「项目已彻底不存在」的本地 workspace 残留键，防止同名新项目继承旧分镜
+        const allNames = (rows as Array<{ project_name?: string }>).map((item) => String(item.project_name ?? ''))
+        const removed = sweepOrphanWorkspaces(allNames)
+        if (removed > 0) console.info('[EasyMedia] 已清扫已删项目的本地残留键：', removed)
+      } catch {
+        /* 清扫失败不影响列表 */
+      }
+      setProjects(rows)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t('multitrack.projectFailed'))
     }
@@ -504,6 +514,8 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
     try {
       const deleted = await deleteProjectTimeline(app, target)
       console.info('[EasyMedia][ProjectBar] DELETE ->', target, 'deleted=', deleted)
+      // 删除成功与否都联动清理本地 workspace 数据（timeline 已决定删除，本地残留只会造成串号）
+      if (target) purgeWorkspace(target)
       if (deleted !== true) {
         // 文件本来就不存在：仍然刷新列表，让下拉反映真实状态
         setMessage(t('multitrack.projectNoTimeline'))
