@@ -2371,63 +2371,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerShotCount')}</span>
-                    <select style={fieldStyle} value={options.shot_count} onChange={(event) => setOptions({ ...options, shot_count: event.target.value })}>
-                      {SHOT_COUNTS.map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerRewriteMode')}</span>
-                    <select style={fieldStyle} value={options.rewrite_mode} onChange={(event) => setOptions({ ...options, rewrite_mode: event.target.value })}>
-                      {REWRITE_MODES.map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerWordTarget')}</span>
-                    <input style={fieldStyle} type="number" min={0} max={1000} step={50} value={options.description_word_target} onChange={(event) => setOptions({ ...options, description_word_target: Number(event.target.value) || 0 })} />
-                  </label>
-                  <label className="col-span-2 flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerPromptMode')}</span>
-                    <select style={fieldStyle} value={options.prompt_mode} onChange={(event) => setOptions({ ...options, prompt_mode: event.target.value })}>
-                      {PROMPT_MODES.map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <label className="col-span-2 flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerSkillProfile')}</span>
-                    <select style={fieldStyle} value={options.official_skill_profile} onChange={(event) => setOptions({ ...options, official_skill_profile: event.target.value })}>
-                      {SKILL_PROFILES.map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                  <label className="col-span-2 flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerPreset')}</span>
-                    <select style={fieldStyle} value={options.creative_preset} onChange={(event) => setOptions({ ...options, creative_preset: event.target.value })}>
-                      {CREATIVE_PRESETS.map((value) => <option key={value} value={value}>{value}</option>)}
-                    </select>
-                  </label>
-                </div>
-
-                <label className="flex flex-col gap-1">
-                  <span className={labelClass}>{t('multitrack.enhancerConstraints')}</span>
-                  <textarea
-                    style={{ ...fieldStyle, minHeight: 52, resize: 'vertical' }}
-                    value={options.constraints}
-                    onChange={(event) => setOptions({ ...options, constraints: event.target.value })}
-                    placeholder={t('multitrack.enhancerConstraintsPlaceholder')}
-                  />
-                </label>
-                {options.prompt_mode === '参考模板融合' ? (
-                  <label className="flex flex-col gap-1">
-                    <span className={labelClass}>{t('multitrack.enhancerReferenceTemplate')}</span>
-                    <textarea
-                      style={{ ...fieldStyle, minHeight: 64, resize: 'vertical' }}
-                      value={options.reference_template}
-                      onChange={(event) => setOptions({ ...options, reference_template: event.target.value })}
-                    />
-                  </label>
-                ) : null}
-
                 <div className="flex flex-col gap-1">
                   <span className={labelClass}>视觉风格</span>
                   <div className="flex items-center gap-1">

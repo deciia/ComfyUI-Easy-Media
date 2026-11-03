@@ -1119,13 +1119,18 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'generate_prompt',
-        description: '为该段调用提示词生成接口，产出标准提示词并写入 finalA/finalB',
+        description: '为该段调用提示词生成接口，产出标准提示词并写入 finalA/finalB。可选参数决定提示词规格（镜头数/目标字数/自由度/模板/硬要求），不传则按默认',
         parameters: {
           type: 'object',
           properties: {
             index: { type: 'number' },
             variant: { type: 'string', enum: ['a', 'b'] },
             language: { type: 'string', enum: ['中文', 'English'] },
+            shot_count: { type: 'string', description: '镜头数量：AUTO 或具体数字' },
+            word_target: { type: 'number', description: '目标字数，0=自动' },
+            rewrite_mode: { type: 'string', enum: ['balanced', 'creative', 'precise'], description: '改写自由度' },
+            prompt_mode: { type: 'string', description: '提示词模板模式' },
+            constraints: { type: 'string', description: '硬要求：必须保留 / 不得出现' },
           },
           required: ['index'],
         },
@@ -1292,13 +1297,18 @@ export function AgentRail({
       type: 'function',
       function: {
         name: 'generate_all_prompts',
-        description: '为指定段批量生成标准提示词并写入 finalA（按段任务类型自动选模板）',
+        description: '为指定段批量生成标准提示词并写入 finalA（按段任务类型自动选模板）。可选参数同单段生成',
         parameters: {
           type: 'object',
           properties: {
             indices: { type: 'array', items: { type: 'number' }, description: '段序号数组；不传则全部段' },
             variant: { type: 'string', enum: ['a', 'b'] },
             language: { type: 'string', enum: ['中文', 'English'] },
+            shot_count: { type: 'string', description: '镜头数量：AUTO 或具体数字' },
+            word_target: { type: 'number', description: '目标字数，0=自动' },
+            rewrite_mode: { type: 'string', enum: ['balanced', 'creative', 'precise'] },
+            prompt_mode: { type: 'string' },
+            constraints: { type: 'string', description: '硬要求：必须保留 / 不得出现' },
           },
           required: [],
         },
@@ -1931,7 +1941,7 @@ export function AgentRail({
         .slice(0, 20)
       const results: Array<Record<string, unknown>> = []
       for (const index of targets) {
-        const single = await executeAgentTool('generate_prompt', { index, variant, language: args.language ?? '中文' })
+        const single = await executeAgentTool('generate_prompt', { index, variant, language: args.language ?? '中文', shot_count: args.shot_count, word_target: args.word_target, rewrite_mode: args.rewrite_mode, prompt_mode: args.prompt_mode, constraints: args.constraints })
         results.push({ index, ...single })
       }
       return { ok: true, generated: results.filter((item) => !item.error).length, total: targets.length, results }
@@ -4313,7 +4323,18 @@ export function AgentRail({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brief: materializedBrief,
-          options: { ...mapped, style_instruction: (isStyleActive(readStyle(projectKey)) ? String(readStyle(projectKey).instruction ?? '') : ''), duration_seconds: duration, output_language: String(args.language ?? '中文'), task_label: String(settings.taskType ?? '') },
+          options: {
+            ...mapped,
+            style_instruction: (isStyleActive(readStyle(projectKey)) ? String(readStyle(projectKey).instruction ?? '') : ''),
+            duration_seconds: duration,
+            output_language: String(args.language ?? '中文'),
+            task_label: String(settings.taskType ?? ''),
+            ...(args.shot_count ? { shot_count: String(args.shot_count) } : {}),
+            ...(Number(args.word_target) > 0 ? { description_word_target: Number(args.word_target) } : {}),
+            ...(args.rewrite_mode ? { rewrite_mode: String(args.rewrite_mode) } : {}),
+            ...(args.prompt_mode ? { prompt_mode: String(args.prompt_mode) } : {}),
+            ...(args.constraints ? { constraints: String(args.constraints) } : {}),
+          },
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,
           duration_seconds: duration,
