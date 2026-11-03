@@ -2150,6 +2150,13 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     name: segment.name,
                     durationFrames: segment.duration_frames,
                     brief: formatPlanSegmentBrief(segment as never),
+                    camera: (segment.shots ?? [])
+                      .map((shot) => {
+                        const item = shot as { framing?: string; camera?: string }
+                        return [item.framing, item.camera].filter(Boolean).join(' ').trim()
+                      })
+                      .filter(Boolean)
+                      .join('；'),
                   })))
                 }}
               />
@@ -2191,6 +2198,13 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     name: segment.name,
                     durationFrames: segment.duration_frames,
                     brief: formatPlanSegmentBrief(segment as never),
+                    camera: (segment.shots ?? [])
+                      .map((shot) => {
+                        const item = shot as { framing?: string; camera?: string }
+                        return [item.framing, item.camera].filter(Boolean).join(' ').trim()
+                      })
+                      .filter(Boolean)
+                      .join('；'),
                   })))
                 }}
               />

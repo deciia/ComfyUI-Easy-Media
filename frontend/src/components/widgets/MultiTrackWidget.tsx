@@ -78,6 +78,7 @@ import { createSubtitleSegmentsFromSrt } from '@/lib/subtitle-srt'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
+import { presetFromCameraText } from '@/lib/camera-plan'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
@@ -1521,6 +1522,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       continuityMode?: string
       refImageSize?: string
       stableKey?: string
+      /** 分镜里该段的运镜描述（中文自由文本，落到相机段预设） */
+      camera?: string
       images?: Array<{ name: string; subfolder?: string; sourceType?: 'input' | 'output' | 'temp' }>
     }>) => {
       const taskTrack = data.tracks.find((track) => track.type === 'task')
@@ -1585,15 +1588,82 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       if (orphans.length > 0) {
         segments.push(...orphans.map((segment) => ({ ...segment })))
       }
-      const updatedTracks = data.tracks.map((track) => (
+      let updatedTracks = data.tracks.map((track) => (
         track.id === taskTrack.id ? { ...track, segments } : track
       ))
+      // —— 分镜桥：按分镜的运镜描述补建对齐的相机段（只补缺失，不覆盖已有机位）——
+      const cameraTexts = items.map((item) => String(item.camera ?? '').trim())
+      let createdCameraSegments = 0
+      if (cameraTexts.some(Boolean)) {
+        const existingCameraTrack = data.tracks.find((track) => track.type === 'camera')
+        const existingCameraSegments = existingCameraTrack?.segments ?? []
+        const additions: MultiTrackSegment[] = []
+        items.forEach((_item, index) => {
+          const text = cameraTexts[index]
+          if (!text) return
+          const taskSegment = segments[index]
+          if (!taskSegment) return
+          const start = taskSegment.start_frame
+          const end = taskSegment.end_frame
+          const overlaps = [...existingCameraSegments, ...additions].some(
+            (segment) => Math.min(segment.end_frame, end) - Math.max(segment.start_frame, start) > 0,
+          )
+          if (overlaps) return
+          const preset = presetFromCameraText(text) ?? 'static'
+          additions.push({
+            id: uuid(),
+            start_frame: start,
+            end_frame: end,
+            color: existingCameraTrack?.color ?? MULTITRACK_TRACK_COLORS.camera,
+            content: {
+              media_type: 'none' as const,
+              camera: {
+                preset: preset as never,
+                easing: 'ease_in_out' as never,
+                keyframes: [{ frame: 0, preset: preset as never, easing: 'linear' as never }],
+              },
+            },
+          } as unknown as MultiTrackSegment)
+        })
+        if (additions.length) {
+          createdCameraSegments = additions.length
+          if (existingCameraTrack) {
+            const targetId = existingCameraTrack.id
+            updatedTracks = updatedTracks.map((track) => (
+              track.id === targetId
+                ? {
+                    ...track,
+                    segments: [...(track.segments ?? []), ...additions].sort(
+                      (left, right) => left.start_frame - right.start_frame,
+                    ),
+                  }
+                : track
+            ))
+          } else {
+            updatedTracks = [
+              ...updatedTracks,
+              {
+                id: uuid(),
+                name: 'Camera 0',
+                type: 'camera' as const,
+                color: MULTITRACK_TRACK_COLORS.camera,
+                locked: false,
+                segments: additions,
+              } as unknown as MultiTrack,
+            ]
+          }
+        }
+      }
+
       commitNormalizedTrackChange({
         ...data,
         tracks: updatedTracks,
         total_length: calculateTotalLength(updatedTracks, data.frame_rate),
       })
       // 旧片段已被替换，选中态必须指向新片段，否则编辑器会因选中失效而卸载（弹窗随之关闭）
+      if (createdCameraSegments > 0) {
+        console.info('[EasyMedia] 分镜桥：已按运镜描述补建 ' + createdCameraSegments + ' 个相机段')
+      }
       const firstNewId = segments[0]?.id
       if (firstNewId) {
         setSelectedTaskMarkerId(null)
