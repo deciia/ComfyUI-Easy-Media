@@ -37,6 +37,7 @@ import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
+import { CAMERA_PRESETS } from '@/lib/camera-presets'
 import { resolveBoundTokens } from './segmentTokens'
 
 /**
@@ -2638,6 +2639,42 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     taskType={taskTypeOfCurrentSegment()}
                     onChangePrompt={(next) => setFinalDraft(next)}
                   />
+                  {(() => {
+                    const live = (globalThis as unknown as {
+                      __easyMediaCameraTrack?: { list: () => { segments?: Array<Record<string, unknown>> } }
+                    }).__easyMediaCameraTrack
+                    const target = matchedTaskSegment
+                    if (!live || !target) return null
+                    let hits: Array<Record<string, unknown>> = []
+                    try {
+                      const snapshot = live.list()
+                      hits = (snapshot.segments ?? []).filter((segment) => (
+                        Number(segment.start_frame) < target.end_frame
+                        && Number(segment.end_frame) > target.start_frame
+                      ))
+                    } catch {
+                      return null
+                    }
+                    if (!hits.length) return null
+                    const presetPhrase = (preset: unknown) => (
+                      CAMERA_PRESETS.find((item) => item.value === preset)?.phrase ?? ''
+                    )
+                    const cameraText = hits
+                      .map((segment) => String(segment.compiled_prompt ?? '') || presetPhrase(segment.preset))
+                      .filter(Boolean)
+                      .join(' ')
+                    if (!cameraText) return null
+                    const current = String(finalDraft || finalPrompt || '')
+                    const covered = current.trim().length > 0
+                      && current.toLowerCase().includes(cameraText.toLowerCase().slice(0, 40))
+                    return (
+                      <div className="flex flex-wrap items-center gap-1 rounded border border-border px-2 py-1 text-[10px]">
+                        <span className="text-muted-foreground">相机运镜（生成时自动附加）</span>
+                        <span className="truncate" title={cameraText}>{cameraText}</span>
+                        {covered ? <span className="text-amber-500">A 稿已含运镜 → 跳过重复注入</span> : null}
+                      </div>
+                    )
+                  })()}
                                     <ReferenceBar
                     resources={resources}
                     boundIds={boundIds}

@@ -288,11 +288,52 @@ def h3_camera_prompt_for_range(project_name: Any, start_frame: Any, end_frame: A
     return " ".join(unique)
 
 
+#: 运镜去重：预设 → 可能在 A 稿里出现的同义关键词（中英）
+_CAMERA_DEDUP_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "static": ("固定", "静止", "锁定", "locked-off", "locked off", "static camera", "fixed camera"),
+    "push_in": ("推近", "推进", "推镜头", "push-in", "push in", "pushes in", "pushing in", "dolly in"),
+    "pull_out": ("拉远", "后拉", "pull-out", "pull out", "pulls out", "pulling out", "dolly out"),
+    "pan_left": ("左摇", "向左摇", "pan left"),
+    "pan_right": ("右摇", "向右摇", "pan right"),
+    "tilt_up": ("上摇", "仰拍", "向上摇", "tilt up"),
+    "tilt_down": ("下摇", "俯拍", "向下摇", "tilt down"),
+    "truck_left": ("左移", "向左横移", "truck left"),
+    "truck_right": ("右移", "向右横移", "truck right"),
+    "follow": ("跟随", "跟拍", "跟镜头", "follow", "follows", "following", "tracking shot"),
+    "orbit": ("环绕", "围绕", "绕拍", "orbit", "orbits", "orbiting", "arc shot"),
+    "crane_up": ("升镜", "升起", "上升", "crane up"),
+    "crane_down": ("降镜", "下降", "crane down"),
+    "handheld": ("手持", "晃动", "handheld", "shaky", "shakes"),
+    "zoom_in": ("变焦推", "推焦", "zoom in"),
+    "zoom_out": ("变焦拉", "拉焦", "zoom out"),
+}
+
+
+def camera_text_already_covered(prompt: Any, camera_text: Any) -> bool:
+    """A 稿是否已经包含这段运镜描述（直接包含，或含同义关键词）。"""
+    text = str(prompt or "").lower()
+    camera = str(camera_text or "").strip().lower()
+    if not camera or not text:
+        return False
+    if camera in text:
+        return True
+    for preset, phrase in CAMERA_PRESET_PHRASES.items():
+        if str(phrase).lower() not in camera:
+            continue
+        keywords = _CAMERA_DEDUP_KEYWORDS.get(preset, ())
+        if any(keyword.lower() in text for keyword in keywords):
+            return True
+    return False
+
+
 def inject_h3_camera_prompt(prompt: Any, camera_text: Any) -> str:
     """把相机描述插到 detailed_description 开头；没有该字段则前置一段。"""
     text = str(prompt or "")
     camera = str(camera_text or "").strip()
     if not camera:
+        return text
+    # 去重：A 稿自己已经写了同义运镜，就不再重复注入（相机轨优先，但不双写）
+    if camera_text_already_covered(text, camera):
         return text
     import re
 

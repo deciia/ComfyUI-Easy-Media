@@ -2821,12 +2821,44 @@ export function AgentRail({
         try {
           const snapshot = live.list()
           const segments = (snapshot.segments ?? []) as Array<Record<string, unknown>>
+          const liveWithTasks = live as unknown as { tasks?: () => unknown }
+          const tasks = typeof liveWithTasks.tasks === 'function' ? liveWithTasks.tasks() : undefined
           if (!segments.length) {
-            return { ok: true, note: '当前项目还没有相机轨，或相机轨上还没有相机段', ...snapshot }
+            return { ok: true, note: '当前项目还没有相机轨，或相机轨上还没有相机段', tasks, ...snapshot }
           }
-          return { ok: true, ...snapshot }
+          return { ok: true, tasks, ...snapshot }
         } catch (error) {
           return { error: `读取相机轨失败：${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
+    }
+    if (name === 'set_camera_track' || name === 'attach_camera_playblast') {
+      const live = (globalThis as unknown as {
+        __easyMediaCameraTrack?: {
+          upsertForTask: (taskIndex: number, cameraPatch: Record<string, unknown>) => Record<string, unknown>
+          setPlayblastForTask: (taskIndex: number, playblast: string) => Record<string, unknown>
+        }
+      }).__easyMediaCameraTrack
+      if (live) {
+        const index = Number(args.index ?? 0)
+        if (!Number.isFinite(index) || index < 1) return { error: `${name} 需要任务段号 index` }
+        try {
+          if (name === 'attach_camera_playblast') {
+            const recording = String(args.recording_path ?? '').trim()
+            if (!recording) return { error: 'recording_path 不能为空' }
+            return { ok: true, ...live.setPlayblastForTask(index, recording) }
+          }
+          return {
+            ok: true,
+            ...live.upsertForTask(index, {
+              preset: args.preset,
+              easing: args.easing,
+              keyframes: args.keyframes,
+              compiled_prompt: args.compiled_prompt,
+            }),
+          }
+        } catch (error) {
+          return { error: `${name} 执行失败：${error instanceof Error ? error.message : String(error)}` }
         }
       }
     }

@@ -92,6 +92,24 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
   const localFrame = Math.max(0, Math.min(durationFrames - 1, Math.round(currentTime - segment.start_frame)))
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
+  // 助手/外部改过本段相机状态后，自动刷新内嵌 3D 视口
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ segmentId?: string; state?: Record<string, unknown> }>).detail
+      if (!detail?.segmentId || detail.segmentId !== segment.id || !detail.state) return
+      void (async () => {
+        try {
+          await applyExplicitState(detail.state as Record<string, unknown>)
+        } catch (error) {
+          console.debug('[EasyMedia] refresh director from external state failed', error)
+        }
+      })()
+    }
+    window.addEventListener('easy-media:camera-state-applied', handler)
+    return () => window.removeEventListener('easy-media:camera-state-applied', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment.id])
+
   // 供导演台 AI / 外部脚本调用的操作协议入口（方案 B）
   useEffect(() => {
     const api = {

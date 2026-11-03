@@ -1775,6 +1775,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         tracks: nextTracks,
         total_length: calculateTotalLength(nextTracks, data.frame_rate),
       })
+      try {
+        window.dispatchEvent(new CustomEvent('easy-media:camera-state-applied', {
+          detail: { segmentId, state: result.state },
+        }))
+      } catch {
+        // 事件派发失败不影响数据写入
+      }
       return {
         applied: result.applied.length,
         skipped: result.skipped.length,
@@ -1782,7 +1789,130 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     }
 
-    const api = { list, ops: applyOps }
+    const tasks = () => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const cameraTrack = data.tracks.find((track) => track.type === 'camera')
+      const cameraSegments = cameraTrack?.segments ?? []
+      return (taskTrack?.segments ?? [])
+        .slice()
+        .sort((left, right) => left.start_frame - right.start_frame)
+        .map((segment, index) => {
+          const aligned = cameraSegments.find((cam) => (
+            cam.start_frame < segment.end_frame && cam.end_frame > segment.start_frame
+          ))
+          const camera = ((aligned?.content as unknown as { camera?: Record<string, unknown> })?.camera ?? null) as Record<string, unknown> | null
+          return {
+            index: index + 1,
+            id: segment.id,
+            start_frame: segment.start_frame,
+            end_frame: segment.end_frame,
+            camera: camera
+              ? {
+                  segment_id: aligned?.id,
+                  preset: camera.preset ?? 'static',
+                  easing: camera.easing ?? 'ease_in_out',
+                  keyframes: Array.isArray(camera.keyframes) ? (camera.keyframes as unknown[]).length : 0,
+                  playblast: camera.playblast ?? null,
+                  has_3d_state: Boolean(camera.omnicam_state),
+                }
+              : null,
+          }
+        })
+    }
+
+    const buildCameraContent = (cameraPatch: Record<string, unknown>) => {
+      const preset = String(cameraPatch.preset ?? 'static')
+      const easing = String(cameraPatch.easing ?? 'ease_in_out')
+      const keyframes = Array.isArray(cameraPatch.keyframes) && (cameraPatch.keyframes as unknown[]).length
+        ? cameraPatch.keyframes
+        : [{ frame: 0, preset, easing: 'linear' }]
+      return {
+        preset,
+        easing,
+        keyframes,
+        ...(cameraPatch.compiled_prompt ? { compiled_prompt: cameraPatch.compiled_prompt } : {}),
+        ...(cameraPatch.playblast ? { playblast: cameraPatch.playblast } : {}),
+      }
+    }
+
+    const applyTaskCamera = (taskIndex: number, cameraPatch: Record<string, unknown>) => {
+      const taskTrack = data.tracks.find((track) => track.type === 'task')
+      const taskSegment = (taskTrack?.segments ?? [])
+        .slice()
+        .sort((left, right) => left.start_frame - right.start_frame)[taskIndex - 1]
+      if (!taskSegment) throw new Error(`任务段 ${taskIndex} 不存在`)
+      const cameraTrack = data.tracks.find((track) => track.type === 'camera')
+      const cameraSegments = [...(cameraTrack?.segments ?? [])]
+      const alignedIndex = cameraSegments.findIndex((cam) => (
+        cam.start_frame < taskSegment.end_frame && cam.end_frame > taskSegment.start_frame
+      ))
+      const cameraContent = buildCameraContent(cameraPatch)
+      let nextTracks
+      if (alignedIndex >= 0) {
+        const existing = cameraSegments[alignedIndex]
+        cameraSegments[alignedIndex] = {
+          ...existing,
+          content: {
+            ...existing.content,
+            camera: {
+              ...(((existing.content as unknown as { camera?: Record<string, unknown> })?.camera) ?? {}),
+              ...cameraContent,
+            } as never,
+          },
+        }
+        nextTracks = data.tracks.map((track) => (
+          track.id === cameraTrack?.id ? { ...track, segments: cameraSegments } : track
+        ))
+      } else if (cameraTrack) {
+        cameraSegments.push({
+          id: uuid(),
+          start_frame: taskSegment.start_frame,
+          end_frame: taskSegment.end_frame,
+          color: cameraTrack.color,
+          content: { media_type: 'none' as never, camera: cameraContent as never },
+        } as unknown as MultiTrackSegment)
+        nextTracks = data.tracks.map((track) => (
+          track.id === cameraTrack.id
+            ? { ...track, segments: cameraSegments.slice().sort((left, right) => left.start_frame - right.start_frame) }
+            : track
+        ))
+      } else {
+        nextTracks = [
+          ...data.tracks,
+          {
+            id: uuid(),
+            name: 'Camera 0',
+            type: 'camera' as const,
+            color: MULTITRACK_TRACK_COLORS.camera,
+            locked: false,
+            segments: [{
+              id: uuid(),
+              start_frame: taskSegment.start_frame,
+              end_frame: taskSegment.end_frame,
+              color: MULTITRACK_TRACK_COLORS.camera,
+              content: { media_type: 'none' as never, camera: cameraContent as never },
+            }],
+          } as unknown as MultiTrack,
+        ]
+      }
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: nextTracks,
+        total_length: calculateTotalLength(nextTracks, data.frame_rate),
+      })
+      return {
+        task: taskIndex,
+        start_frame: taskSegment.start_frame,
+        end_frame: taskSegment.end_frame,
+        preset: cameraContent.preset,
+        easing: cameraContent.easing,
+      }
+    }
+
+    const upsertForTask = (taskIndex: number, cameraPatch: Record<string, unknown>) => applyTaskCamera(taskIndex, cameraPatch)
+
+    const setPlayblastForTask = (taskIndex: number, playblast: string) => applyTaskCamera(taskIndex, { playblast })
+    const api = { list, tasks, ops: applyOps, upsertForTask, setPlayblastForTask }
     const registry = globalThis as unknown as { __easyMediaCameraTrack?: typeof api }
     registry.__easyMediaCameraTrack = api
     return () => {
