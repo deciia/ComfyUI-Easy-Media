@@ -950,6 +950,50 @@ export function AgentRail({
     {
       type: 'function',
       function: {
+        name: 'camera_plan',
+        description: '直接控制 3D 相机编辑器（Director 操作协议）：创建/重命名/删除相机、改机位（camera.transform / camera.look_at）、增删关键帧（keyframe.upsert / keyframe.remove / keyframe.set_interpolation）、改时长（timeline.set_duration）。当用户要求调整 3D 机位、加关键帧、做运镜轨迹时用这个工具——它直接操作当前选中相机段的 3D 编辑器状态。只能控制"当前已选中相机段"的编辑器，未选中时先提示用户去相机轨选段。',
+        parameters: {
+          type: 'object',
+          properties: {
+            operations: {
+              type: 'array',
+              description: '操作列表，按顺序执行',
+              items: {
+                type: 'object',
+                properties: {
+                  op: {
+                    type: 'string',
+                    enum: [
+                      'camera.create', 'camera.duplicate', 'camera.delete', 'camera.rename',
+                      'camera.set_active', 'camera.transform', 'camera.look_at',
+                      'keyframe.upsert', 'keyframe.remove', 'keyframe.set_interpolation',
+                      'timeline.set_duration', 'timeline.set_range',
+                    ],
+                  },
+                  camera: { type: 'string', description: '相机 id 或名称' },
+                  name: { type: 'string', description: 'camera.create / camera.rename 的新名称' },
+                  frame: { type: 'number', description: '关键帧帧号（0 起）' },
+                  position: { type: 'array', items: { type: 'number' }, description: '[x, y, z] 机位' },
+                  target: { type: 'array', items: { type: 'number' }, description: '[x, y, z] 看向点' },
+                  fov: { type: 'number' },
+                  roll: { type: 'number' },
+                  cameraState: { type: 'object', description: 'keyframe.upsert 的相机字段（position/target/fov/roll）' },
+                  interpolation: { type: 'string', description: 'linear / ease_in_out 等' },
+                  duration_seconds: { type: 'number' },
+                  start: { type: 'number' },
+                  end: { type: 'number' },
+                },
+                required: ['op'],
+              },
+            },
+          },
+          required: ['operations'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'get_plan',
         description: '读取完整分镜脚本（每段名称/时长/beat/摘要/镜头/台词/设置/A稿长度/绑定的主体与资源）',
         parameters: { type: 'object', properties: {}, required: [] },
@@ -3969,6 +4013,27 @@ export function AgentRail({
       if (!prompt) return { error: '生成结果为空' }
       writePlanSegment(index1, variant === 'b' ? { finalB: prompt } : { finalA: prompt })
       return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
+    }
+    if (name === 'camera_plan') {
+      const api = (globalThis as unknown as {
+        easyMediaCameraOps?: {
+          segmentId: string
+          ops: (list: unknown[]) => Promise<{ applied: number; skipped: number }>
+        }
+      }).easyMediaCameraOps
+      if (!api) {
+        return {
+          error: '当前没有打开相机段编辑器：请先在多轨编辑器的相机轨上选一个相机段，再重试',
+        }
+      }
+      const operations = Array.isArray(args.operations) ? args.operations : []
+      if (!operations.length) return { error: 'operations 不能为空' }
+      try {
+        const result = await api.ops(operations as never[])
+        return { ok: true, segment: api.segmentId, applied: result.applied, skipped: result.skipped }
+      } catch (error) {
+        return { error: `camera_plan 执行失败：${error instanceof Error ? error.message : String(error)}` }
+      }
     }
     if (name === 'apply_storyboard') {
       const withPrompts = args.with_prompts === true
