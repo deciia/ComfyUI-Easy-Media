@@ -395,7 +395,7 @@ export function StoryboardTab({
           </div>
         </>
       )}
-      <div className="relative flex flex-wrap items-center gap-1 text-[10px]">
+      <div className="flex flex-wrap items-center gap-1 text-[10px]">
         <span className="text-muted-foreground">主体：</span>
         {((planSegment.subjects ?? []) as Array<{ name: string; type?: string }>).map((subject, subjectIndex) => (
           <span
@@ -422,21 +422,29 @@ export function StoryboardTab({
         ))}
         <button
           type="button"
-          className="rounded-full px-1.5 opacity-70 hover:opacity-100"
+          className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none opacity-70 hover:opacity-100"
           style={{ border: `1px dashed ${BORDER}` }}
           title="从主体池添加"
+          aria-label="从主体池添加"
           onClick={() => setAddPicker(addPicker === 'subject' ? null : 'subject')}
         >
-          ＋
+          +
         </button>
         {addPicker === 'subject' ? (() => {
           const bound = new Set(((planSegment.subjects ?? []) as Array<{ name: string }>).map((item) => item.name))
-          const poolSubjects = (readWorkspace(projectKey).subjects ?? []) as Array<{ name?: string; type?: string; subjectType?: string }>
-          const candidates = poolSubjects.filter((item) => item.name && !bound.has(String(item.name)))
+          // 主体 = 资源表里 type === 'Subject' 的条目（subjectKind 才是人物/场景/道具）
+          const poolResources = (readWorkspace(projectKey).resources ?? []) as Array<{
+            type?: string
+            name?: string
+            subjectKind?: string
+          }>
+          const candidates = poolResources.filter((item) => (
+            item.type === 'Subject' && item.name && !bound.has(String(item.name))
+          ))
           return (
             <div
-              className="absolute left-8 top-full z-20 mt-1 max-h-48 w-56 overflow-auto rounded border bg-card p-1 shadow-lg"
-              style={{ borderColor: BORDER }}
+              className="mt-1 w-full max-h-40 overflow-auto rounded border p-1"
+              style={{ borderColor: BORDER, background: FIELD_BG }}
             >
               {candidates.length ? candidates.map((item) => (
                 <button
@@ -447,17 +455,17 @@ export function StoryboardTab({
                     if (planFocus == null) return
                     const next = [
                       ...((planSegment.subjects ?? []) as Array<Record<string, unknown>>),
-                      { name: String(item.name), type: String(item.type ?? item.subjectType ?? '人物') },
+                      { name: String(item.name), type: String(item.subjectKind ?? '人物') },
                     ]
                     patchPlanSegment(planFocus, { subjects: next })
                     setAddPicker(null)
                   }}
                 >
-                  {String(item.name)}（{String(item.type ?? item.subjectType ?? '人物')}）
+                  {String(item.name)}（{String(item.subjectKind ?? '人物')}）
                 </button>
               )) : (
                 <div className="px-1.5 py-1 text-[10px] text-muted-foreground">
-                  主体池还没有可添加的主体
+                  主体池还没有可添加的主体（先去「主体与资源」新建）
                 </div>
               )}
             </div>
@@ -532,12 +540,13 @@ export function StoryboardTab({
             })}
             <button
               type="button"
-              className="rounded-full px-1.5 opacity-70 hover:opacity-100"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] leading-none opacity-70 hover:opacity-100"
               style={{ border: `1px dashed ${BORDER}` }}
               title="从资源池添加"
+              aria-label="从资源池添加"
               onClick={() => setAddPicker(addPicker === 'resource' ? null : 'resource')}
             >
-              ＋
+              +
             </button>
             {addPicker === 'resource' ? (() => {
               const boundNames = new Set(entries.map((item) => item.name))
@@ -553,8 +562,8 @@ export function StoryboardTab({
               )
               return (
                 <div
-                  className="absolute left-8 top-full z-20 mt-1 max-h-48 w-64 overflow-auto rounded border bg-card p-1 shadow-lg"
-                  style={{ borderColor: BORDER }}
+                  className="mt-1 w-full max-h-40 overflow-auto rounded border p-1"
+                  style={{ borderColor: BORDER, background: FIELD_BG }}
                 >
                   {candidates.length ? candidates.map((item) => (
                     <button
