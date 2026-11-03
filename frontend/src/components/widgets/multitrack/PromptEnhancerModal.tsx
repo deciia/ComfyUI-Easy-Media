@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Check, Copy, ListPlus, Save, Settings, Sparkles, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n'
-import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
+import { PromptContentEditor, type PromptContentEditorHandle, type PromptReferenceResource } from './PromptContentEditor'
 import { StoryboardTab, type WorkspaceTab } from './WorkspaceTabs'
 import { type WorkspaceSubject } from './WorkspacePanels'
 import { AssetsTab } from './AssetsTab'
@@ -35,7 +35,6 @@ import {
 import { ScriptTab } from './ScriptTab'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import type { MultiTrackSegment } from '@/types/multitrack'
-import { PRESET_GROUPS, togglePreset } from '@/lib/prompt-presets'
 import { cn } from '@/lib/utils'
 import { CAMERA_PRESETS } from '@/lib/camera-presets'
 import { resolveBoundTokens } from './segmentTokens'
@@ -829,6 +828,34 @@ export function PromptEnhancerModal({
   }, [workspaceKey])
 
   const resources = readWorkspace(workspaceKey).resources ?? []
+  /** 片段稿编辑器句柄：左栏写作工具栏把令牌/语法插入到光标处 */
+  const briefEditorRef = useRef<PromptContentEditorHandle | null>(null)
+  const fragmentBindingTokens = computeBindingTokens(boundIds)
+  const fragmentBoundTokens = boundIds
+    .map((id) => ({ id, token: fragmentBindingTokens.get(id) ?? '' }))
+    .filter((item) => Boolean(item.token))
+  const fragmentUnboundResources = resources.filter((item) => item.name && !boundIds.includes(item.id))
+  const fragmentShotCount = Math.max(
+    1,
+    ((activeScriptSegment as { shots?: unknown[] } | undefined)?.shots ?? []).length,
+  )
+  const insertIntoFragment = (text: string) => {
+    const handle = briefEditorRef.current
+    if (handle) {
+      handle.insertText(text)
+      return
+    }
+    const next = `${abTab === 'a' ? brief : draftPrompt}${text}`
+    if (abTab === 'a') setBrief(next)
+    else setDraftPrompt(next)
+  }
+  const bindAndInsert = (resource: ProjectResource) => {
+    const nextIds = [...boundIds, resource.id]
+    writeBindings(bindingProjectKey, bindingKey, nextIds)
+    const token = computeBindingTokens(nextIds).get(resource.id)
+    insertIntoFragment(` ${token ?? resource.name} `)
+    setWorkspaceStoreVersion((value) => value + 1)
+  }
   const workspaceSubjects: WorkspaceSubject[] = resources
     .filter((item) => item.type === 'Subject')
     .map((item) => ({
@@ -2216,44 +2243,76 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
             <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) 460px', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
-                {PRESET_GROUPS.map((group) => (
-                  <div key={group.id} className="flex flex-col gap-1">
-                    <span className={labelClass}>{group.label}</span>
-                    <div className="flex flex-wrap gap-1">
+                {/* 本段引用：点令牌插入到片段稿光标处 */}
+                <div className="flex flex-col gap-1">
+                  <span className={labelClass}>本段引用</span>
+                  <div className="flex flex-wrap gap-1">
+                    {fragmentBoundTokens.map((item) => (
                       <button
+                        key={item.id}
                         type="button"
                         className="rounded px-1.5 py-0.5 text-[11px]"
-                        style={{
-                          background: (presets[group.id] ?? []).length === 0 ? 'hsl(var(--primary, 199 89% 48%))' : 'hsl(var(--card, 240 10% 10%))',
-                          border: `1px solid ${(presets[group.id] ?? []).length === 0 ? 'hsl(var(--primary, 199 89% 48%))' : 'hsl(var(--border, 240 6% 25%))'}`,
-                          color: (presets[group.id] ?? []).length === 0 ? 'hsl(var(--background, 240 10% 8%))' : 'hsl(var(--muted-foreground, 240 5% 65%))',
-                        }}
-                        onClick={() => setPresets({ ...presets, [group.id]: [] })}
+                        style={{ border: `1px solid ${BORDER}`, color: 'hsl(var(--primary, 199 89% 48%))' }}
+                        title={`点击插入 ${item.token}`}
+                        onClick={() => insertIntoFragment(` ${item.token} `)}
                       >
-                        模型自由决定
+                        {item.token} {resources.find((resource) => resource.id === item.id)?.name ?? ''}
                       </button>
-                      {group.options.map((option) => {
-                        const active = (presets[group.id] ?? []).includes(option.key)
-                        return (
-                          <button
-                            key={option.key}
-                            type="button"
-                            title={option.key}
-                            className="rounded px-1.5 py-0.5 text-[11px]"
-                            style={{
-                              background: active ? 'hsl(var(--card, 240 10% 10%))' : 'hsl(var(--card, 240 10% 10%))',
-                              border: `1px solid ${active ? 'hsl(var(--primary, 199 89% 48%))' : 'hsl(var(--border, 240 6% 25%))'}`,
-                              color: active ? 'hsl(var(--primary, 199 89% 48%))' : 'hsl(var(--muted-foreground, 240 5% 65%))',
-                            }}
-                            onClick={() => setPresets({ ...presets, [group.id]: togglePreset(presets[group.id] ?? [], option.key) })}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
+                    ))}
+                    {fragmentUnboundResources.slice(0, 10).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-[11px] opacity-60"
+                        style={{ border: `1px dashed ${BORDER}` }}
+                        title="未绑定：点击自动绑定并插入令牌"
+                        onClick={() => bindAndInsert(item)}
+                      >
+                        + {item.name}
+                      </button>
+                    ))}
+                    {!fragmentBoundTokens.length && !fragmentUnboundResources.length ? (
+                      <span className="text-[10px] text-muted-foreground">还没有主体/资源，先去「主体与资源」建立</span>
+                    ) : null}
                   </div>
-                ))}
+                </div>
+
+                {/* 快捷插入：H3 语法片段 */}
+                <div className="flex flex-col gap-1">
+                  <span className={labelClass}>快捷插入</span>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.from({ length: fragmentShotCount }, (_, index) => index + 1).map((shotNo) => (
+                      <button
+                        key={shotNo}
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-[11px]"
+                        style={{ border: `1px solid ${BORDER}` }}
+                        title={`插入 [Shot ${shotNo}]`}
+                        onClick={() => insertIntoFragment(` [Shot ${shotNo}] `)}
+                      >
+                        [Shot {shotNo}]
+                      </button>
+                    ))}
+                    {([
+                      ['台词 <d>', '<d>[Chinese] </d>'],
+                      ['画面描述', '\n【画面描述】\n'],
+                      ['主体定义', '\n【主体定义】\n'],
+                      ['环境音', '\n【环境音】\n'],
+                      ['配乐', '\n【配乐】\n'],
+                      ['禁字幕', '\n禁止文字、字幕、水印。'],
+                    ] as const).map(([label, text]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        className="rounded px-1.5 py-0.5 text-[11px]"
+                        style={{ border: `1px solid ${BORDER}` }}
+                        onClick={() => insertIntoFragment(text)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <label className="flex flex-col gap-1">
@@ -2513,6 +2572,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   style={{ background: FIELD_BG, border: `1px solid ${BORDER}` }}
                 >
                   <PromptContentEditor
+                    ref={briefEditorRef}
                     value={abTab === 'a' ? brief : draftPrompt}
                     onChange={(next) => (abTab === 'a' ? setBrief(next) : setDraftPrompt(next))}
                     ariaLabel={t('multitrack.enhancerBrief')}

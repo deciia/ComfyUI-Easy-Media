@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AudioLines, Clapperboard, ImageIcon, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -506,7 +506,13 @@ function ReferenceIcon({ type }: Readonly<{ type: PromptReferenceType }>) {
   return <ImageIcon className="h-4 w-4" />
 }
 
-export function PromptContentEditor({
+/** 命令式接口：把文本插入到编辑器光标处（左栏写作工具栏用）。 */
+export interface PromptContentEditorHandle {
+  insertText: (text: string) => void
+  focus: () => void
+}
+
+export const PromptContentEditor = forwardRef<PromptContentEditorHandle, PromptContentEditorProps>(function PromptContentEditorInner({
   value,
   onChange,
   ariaLabel,
@@ -520,7 +526,7 @@ export function PromptContentEditor({
   highlightPipes = false,
   className,
   testId,
-}: Readonly<PromptContentEditorProps>) {
+}: Readonly<PromptContentEditorProps>, ref) {
   const t = useT()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -698,6 +704,31 @@ export function PromptContentEditor({
     onChange(nextValue)
     return true
   }
+
+  useImperativeHandle(ref, () => ({
+    insertText: (text: string) => {
+      const editor = editorRef.current
+      if (!editor) return
+      const selection = window.getSelection()
+      const inside = Boolean(
+        selection
+        && selection.rangeCount > 0
+        && editor.contains(selection.getRangeAt(0).commonAncestorContainer),
+      )
+      if (!inside && selection) {
+        // 光标不在编辑器内：放到内容末尾
+        const range = document.createRange()
+        range.selectNodeContents(editor)
+        range.collapse(false)
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+      if (!insertPlainTextAtSelection(editor, text)) appendText(editor, text)
+      editor.focus()
+      commitEditorChange()
+    },
+    focus: () => editorRef.current?.focus(),
+  }))
 
   return (
     <div
@@ -893,4 +924,4 @@ export function PromptContentEditor({
       ), document.body)}
     </div>
   )
-}
+})
