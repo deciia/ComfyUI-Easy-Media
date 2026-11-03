@@ -734,6 +734,120 @@ export function PromptEnhancerModal({
   const [creatingProject, setCreatingProject] = useState(false)
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
   const [saveCheckOpen, setSaveCheckOpen] = useState(false)
+  /** 写入当前分镜段（本段 + 当前变体）到任务轨：保存弹窗与其它入口共用 */
+  const writeCurrentSegmentNow = () => {
+                  const target = finalDraft || finalPrompt
+                  if (!target) return
+                  // 展开绑定（主体→子资源）
+                  const expand = (ids: string[]) => ids.flatMap((id) => {
+                    const resource = resources.find((item) => item.id === id)
+                    if (!resource) return []
+                    if (resource.type === 'Subject') {
+                      return (resource.childResourceIds ?? [])
+                        .map((childId) => resources.find((item) => item.id === childId))
+                        .filter((item): item is ProjectResource => Boolean(item))
+                    }
+                    return [resource]
+                  })
+                  const expanded = expand(boundIds)
+                  const imagesList = directorSettings.save.writeImages
+                    ? expanded
+                        .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
+                        .map((item) => ({
+                          name: item.imageFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                        }))
+                    : undefined
+                  const audioItems = directorSettings.save.targets.audio
+                    ? expanded
+                        .filter((item) => item.type === 'Audio' && (item.audioFile || item.name))
+                        .map((item) => ({
+                          name: item.audioFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                          trackRole: item.trackRole ?? 'voice',
+                          trackName: directorSettings.audio.roleTracks[item.trackRole ?? 'voice'],
+                          volumeDb: directorSettings.audio.defaultDb[item.trackRole ?? 'voice'] ?? 0,
+                        }))
+                    : []
+                  const videoItems = directorSettings.save.targets.video
+                    ? expanded
+                        .filter((item) => item.type === 'Video' && (item.videoFile || item.name))
+                        .map((item) => ({
+                          name: item.videoFile ?? item.name,
+                          subfolder: item.subfolder,
+                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
+                        }))
+                    : []
+                  const subtitleEnabled = directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled
+                  const targetSegmentId = matchedTrackSegmentId
+                  let written = false
+                  if (!targetSegmentId) {
+                    setError('该分镜脚本段尚未落地到任务轨；请先在「分镜编排」点「应用到任务轨」。')
+                    return
+                  }
+                  // W4：一体化保存（任务段+音视频+字幕，单次提交 → 撤销单步）
+                  if (targetSegmentId) {
+                    const allRegistry = globalThis as unknown as {
+                      __easyMediaApplyAll?: (
+                        segmentId: string,
+                        payload: Record<string, unknown>,
+                      ) => boolean
+                    }
+                    if (allRegistry.__easyMediaApplyAll) {
+                      try {
+                        const segSettings = (activeScriptSegment as unknown as {
+                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
+                        } | undefined)?.settings
+                        const planSettingsNow = (readWorkspace(bindingProjectKey).plan as {
+                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
+                        } | null)?.settings
+                        const mappedTask = taskTemplateOf(taskTypeOfCurrentSegment())
+                        written = allRegistry.__easyMediaApplyAll(targetSegmentId, {
+                          prompt: target,
+                          variant: previewVariant,
+                          // 任务模式/衔接/参考图：段级 > 脚本级（与分镜编排的优先级一致）
+                          // 传显示标签（R2V/VI2V/FMLF2V…），由写入通道统一换算成 task_mode，
+                          // 避免 VI2V 被替身成 ref（编辑任务被当成参考生成）
+                          taskMode: taskTypeOfCurrentSegment() || mappedTask.task_mode,
+                          continuityMode: segSettings?.contextMode || planSettingsNow?.contextMode || undefined,
+                          refImageSize: segSettings?.refImageSize || planSettingsNow?.refImageSize || undefined,
+                          images: imagesList,
+                          audio: audioItems,
+                          video: videoItems,
+                          subtitleEnabled,
+                          subtitleVariant: previewVariant,
+                        })
+                      } catch (error) {
+                        console.error('[EasyMedia] apply all failed', error)
+                      }
+                    }
+                  }
+                  // 回退：旧两步路径
+                  if (!written && targetSegmentId) {
+                    const legacy = globalThis as unknown as {
+                      __easyMediaSaveTracks?: (segmentId: string, payload: Record<string, unknown>) => boolean
+                      __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
+                    }
+                    if (legacy.__easyMediaSaveTracks && (audioItems.length > 0 || videoItems.length > 0 || subtitleEnabled)) {
+                      try {
+                        legacy.__easyMediaSaveTracks(targetSegmentId, { audio: audioItems, video: videoItems, subtitleEnabled, subtitleVariant: previewVariant })
+                      } catch (error) {
+                        console.error('[EasyMedia] save tracks failed', error)
+                      }
+                    }
+                    if (legacy.__easyMediaUpdateSegment) {
+                      try {
+                        written = legacy.__easyMediaUpdateSegment(targetSegmentId, { prompt: target, variant: previewVariant, images: imagesList })
+                      } catch (error) {
+                        console.error('[EasyMedia] update segment failed', error)
+                      }
+                    }
+                  }
+                  if (!written) onApply(target, brief, globalDraft)
+  }
+
   /** 清空按钮的两步确认（不用 window.confirm，桌面端可能被拦） */
   const [clearArmed, setClearArmed] = useState<'' | 'fragment' | 'final'>('')
   const [clearNotice, setClearNotice] = useState('')
@@ -1872,7 +1986,7 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   </div>
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  本次将把全部 {segs.length} 段写入任务轨（逐段带终稿提示词、绑定参考图与任务类型）
+                  范围可选：上面的「仍然保存」写全部 {segs.length} 段；「只写本段」只写第 {activeScriptIndex + 1} 段（当前 {previewVariant === 'a' ? 'A' : 'B'} 版终稿 + 本段绑定参考图 + 任务类型）
                   {directorSettings.save.writeImages ? ` · 参考图 ${(() => {
                     const pictures = boundIds.flatMap((id) => {
                       const resource = resources.find((item) => item.id === id)
@@ -1938,6 +2052,15 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 ) : null}
                 <div className="mt-1 flex justify-end gap-2">
                   <Button size="sm" variant="secondary" onClick={() => { setSaveCheckOpen(false); setReplaceArmed(false) }}>返回完善</Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={!(finalDraft || finalPrompt)}
+                    title="只写入当前分镜段：本段终稿 + 绑定参考图 + 任务类型"
+                    onClick={() => { writeCurrentSegmentNow(); setSaveCheckOpen(false) }}
+                  >
+                    只写本段（{activeScriptIndex + 1}·{previewVariant === 'a' ? 'A' : 'B'}）
+                  </Button>
                   <Button
                     size="sm"
                     variant={directorSettings.save.overwrite === 'replace' && !replaceArmed ? 'secondary' : 'default'}
@@ -2892,8 +3015,8 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-muted/30 px-3 py-2">
-              <span className="text-[11px] text-neutral-500">{t('multitrack.enhancerHint')}</span>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-muted/20 px-2 py-[3px]">
+              <span className="truncate text-[10px] text-neutral-500">{t('multitrack.enhancerHint')}</span>
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                 <span className="shrink-0 text-[11px] text-muted-foreground">参考资源</span>
                 <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -2916,130 +3039,12 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     })
                   )}
                 </div>
-                <span className="ml-auto shrink-0 text-[11px] text-neutral-500">
+                <span className="ml-auto shrink-0 text-[10px] text-neutral-500">
                   草稿 {brief.length} 字{lastGenerated ? ` · 规范版 ${(sections.length ? joinSections(sections) : lastGenerated).length} 字` : ''}
                   {referenced.length ? ` · 引用 ${referenced.length}` : ''}
                   {savedAt ? ` · 已保存 ${new Date(savedAt).toLocaleTimeString()}` : ''}
                 </span>
               </div>
-              <Button
-                className="shrink-0"
-                onClick={() => {
-                  const target = finalDraft || finalPrompt
-                  if (!target) return
-                  // 展开绑定（主体→子资源）
-                  const expand = (ids: string[]) => ids.flatMap((id) => {
-                    const resource = resources.find((item) => item.id === id)
-                    if (!resource) return []
-                    if (resource.type === 'Subject') {
-                      return (resource.childResourceIds ?? [])
-                        .map((childId) => resources.find((item) => item.id === childId))
-                        .filter((item): item is ProjectResource => Boolean(item))
-                    }
-                    return [resource]
-                  })
-                  const expanded = expand(boundIds)
-                  const imagesList = directorSettings.save.writeImages
-                    ? expanded
-                        .filter((item) => item.type === 'Picture' && (item.imageFile || item.name))
-                        .map((item) => ({
-                          name: item.imageFile ?? item.name,
-                          subfolder: item.subfolder,
-                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
-                        }))
-                    : undefined
-                  const audioItems = directorSettings.save.targets.audio
-                    ? expanded
-                        .filter((item) => item.type === 'Audio' && (item.audioFile || item.name))
-                        .map((item) => ({
-                          name: item.audioFile ?? item.name,
-                          subfolder: item.subfolder,
-                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
-                          trackRole: item.trackRole ?? 'voice',
-                          trackName: directorSettings.audio.roleTracks[item.trackRole ?? 'voice'],
-                          volumeDb: directorSettings.audio.defaultDb[item.trackRole ?? 'voice'] ?? 0,
-                        }))
-                    : []
-                  const videoItems = directorSettings.save.targets.video
-                    ? expanded
-                        .filter((item) => item.type === 'Video' && (item.videoFile || item.name))
-                        .map((item) => ({
-                          name: item.videoFile ?? item.name,
-                          subfolder: item.subfolder,
-                          sourceType: (item.sharedRoot === 'output' ? 'output' : 'input') as 'input' | 'output',
-                        }))
-                    : []
-                  const subtitleEnabled = directorSettings.save.targets.subtitle && directorSettings.subtitle.enabled
-                  const targetSegmentId = matchedTrackSegmentId
-                  let written = false
-                  if (!targetSegmentId) {
-                    setError('该分镜脚本段尚未落地到任务轨；请先在「分镜编排」点「应用到任务轨」。')
-                    return
-                  }
-                  // W4：一体化保存（任务段+音视频+字幕，单次提交 → 撤销单步）
-                  if (targetSegmentId) {
-                    const allRegistry = globalThis as unknown as {
-                      __easyMediaApplyAll?: (
-                        segmentId: string,
-                        payload: Record<string, unknown>,
-                      ) => boolean
-                    }
-                    if (allRegistry.__easyMediaApplyAll) {
-                      try {
-                        const segSettings = (activeScriptSegment as unknown as {
-                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
-                        } | undefined)?.settings
-                        const planSettingsNow = (readWorkspace(bindingProjectKey).plan as {
-                          settings?: { taskType?: string; contextMode?: string; refImageSize?: string }
-                        } | null)?.settings
-                        const mappedTask = taskTemplateOf(taskTypeOfCurrentSegment())
-                        written = allRegistry.__easyMediaApplyAll(targetSegmentId, {
-                          prompt: target,
-                          variant: previewVariant,
-                          // 任务模式/衔接/参考图：段级 > 脚本级（与分镜编排的优先级一致）
-                          // 传显示标签（R2V/VI2V/FMLF2V…），由写入通道统一换算成 task_mode，
-                          // 避免 VI2V 被替身成 ref（编辑任务被当成参考生成）
-                          taskMode: taskTypeOfCurrentSegment() || mappedTask.task_mode,
-                          continuityMode: segSettings?.contextMode || planSettingsNow?.contextMode || undefined,
-                          refImageSize: segSettings?.refImageSize || planSettingsNow?.refImageSize || undefined,
-                          images: imagesList,
-                          audio: audioItems,
-                          video: videoItems,
-                          subtitleEnabled,
-                          subtitleVariant: previewVariant,
-                        })
-                      } catch (error) {
-                        console.error('[EasyMedia] apply all failed', error)
-                      }
-                    }
-                  }
-                  // 回退：旧两步路径
-                  if (!written && targetSegmentId) {
-                    const legacy = globalThis as unknown as {
-                      __easyMediaSaveTracks?: (segmentId: string, payload: Record<string, unknown>) => boolean
-                      __easyMediaUpdateSegment?: (segmentId: string, payload: Record<string, unknown>) => boolean
-                    }
-                    if (legacy.__easyMediaSaveTracks && (audioItems.length > 0 || videoItems.length > 0 || subtitleEnabled)) {
-                      try {
-                        legacy.__easyMediaSaveTracks(targetSegmentId, { audio: audioItems, video: videoItems, subtitleEnabled, subtitleVariant: previewVariant })
-                      } catch (error) {
-                        console.error('[EasyMedia] save tracks failed', error)
-                      }
-                    }
-                    if (legacy.__easyMediaUpdateSegment) {
-                      try {
-                        written = legacy.__easyMediaUpdateSegment(targetSegmentId, { prompt: target, variant: previewVariant, images: imagesList })
-                      } catch (error) {
-                        console.error('[EasyMedia] update segment failed', error)
-                      }
-                    }
-                  }
-                  if (!written) onApply(target, brief, globalDraft)
-                }}
-                disabled={!(finalDraft || finalPrompt) || failures.length > 0 || scriptSegments.length === 0}
-              >
-                写入任务轨（{previewVariant === 'a' ? 'A' : 'B'}）
-              </Button>
             </div>
           </>
         )}
