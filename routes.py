@@ -650,6 +650,7 @@ async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
         target_fps = float(payload.get("target_fps") or 24)
         duration = float(payload.get("duration_seconds") or 0) or scene.timeline.duration_seconds
         playblast_video = None
+        playblast_file = None
         playblast_path = str(payload.get("playblast") or "").strip()
         if playblast_path:
             candidate = Path(playblast_path)
@@ -660,6 +661,7 @@ async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
                 ]
                 candidate = next((item for item in options if item.is_file()), candidate)
             if candidate.is_file():
+                playblast_file = candidate
                 try:
                     from comfy_api.latest import InputImpl
                     playblast_video = InputImpl.VideoFromFile(str(candidate))
@@ -696,6 +698,53 @@ async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
             }
             for item in result.checks
         ]
+
+        # —— 编译产物落地：按 profile 目标重采样参考视频（fps/合法帧数/分辨率）——
+        reference_info = None
+        if playblast_file is not None and playblast_video is not None:
+            try:
+                import shutil
+                import subprocess as sp
+
+                ffmpeg_bin = shutil.which("ffmpeg")
+                if ffmpeg_bin:
+                    ref_frames = max(1, int(result.timeline.frame_count))
+                    ref_fps = float(result.timeline.fps) or 24.0
+                    ref_width = max(2, int(result.timeline.width) // 2 * 2)
+                    ref_height = max(2, int(result.timeline.height) // 2 * 2)
+                    out_path = playblast_file.parent / f"reference_{playblast_file.stem}_{profile_id}.mp4"
+                    cmd = [
+                        ffmpeg_bin, "-y", "-i", str(playblast_file),
+                        "-vf", f"fps={ref_fps},tpad=stop_mode=clone:stop_duration=4,scale={ref_width}:{ref_height}",
+                        "-frames:v", str(ref_frames),
+                        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                        "-pix_fmt", "yuv420p", "-an", str(out_path),
+                    ]
+                    proc = sp.run(cmd, capture_output=True, timeout=600)
+                    if proc.returncode == 0 and out_path.is_file():
+                        try:
+                            rel = out_path.resolve().relative_to(
+                                Path(folder_paths.get_output_directory()).resolve()
+                            )
+                            rel_value = str(rel).replace("\\", "/")
+                        except Exception:
+                            rel_value = str(out_path)
+                        reference_info = {
+                            "video": rel_value,
+                            "frames": ref_frames,
+                            "fps": ref_fps,
+                            "width": ref_width,
+                            "height": ref_height,
+                            "profile": profile_id,
+                        }
+                    else:
+                        logger.warning(
+                            "EasyMedia: reference resample failed: %s",
+                            proc.stderr.decode("utf-8", "ignore")[-400:],
+                        )
+            except Exception as error:
+                logger.warning("EasyMedia: reference resample error: %s", error)
+
         return web.json_response({
             "profile": profile_id,
             "final_prompt": result.final_prompt,
@@ -708,6 +757,7 @@ async def handle_camera_monitor_compile(request: web.Request) -> web.Response:
             "frame_policy": result.timeline.frame_policy,
             "has_reference_video": result.reference_video is not None,
             "has_reference_frames": result.reference_frames is not None,
+            "reference_video": reference_info,
             "checks": checks,
         })
     except Exception as error:

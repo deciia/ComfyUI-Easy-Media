@@ -79,6 +79,15 @@ export interface CameraData {
   native_tracks?: string
   /** OmniCam 3D 编辑器原始 state_json */
   omnicam_state?: string | Record<string, unknown>
+  /** Monitor 编译产物的重采样参考视频（已按 profile 目标 fps/合法帧数/分辨率处理） */
+  compiled_reference?: {
+    video?: string
+    frames?: number
+    fps?: number
+    width?: number
+    height?: number
+    profile?: string
+  }
 }
 
 export interface MultiTrackSegmentContent {

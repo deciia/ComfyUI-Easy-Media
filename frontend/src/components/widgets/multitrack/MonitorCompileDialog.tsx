@@ -12,7 +12,7 @@ interface MonitorCompileDialogProps {
   durationFrames: number
   playblast?: string
   onClose: () => void
-  onApply: (prompt: string) => void
+  onApply: (prompt: string, reference?: MonitorCompileReference) => void
 }
 
 interface CompileResult {
@@ -29,7 +29,17 @@ interface CompileResult {
   checks?: Array<{ id?: string; label?: string; state?: string; message?: string }>
   error?: string
   need_playblast?: boolean
+  reference_video?: {
+    video?: string
+    frames?: number
+    fps?: number
+    width?: number
+    height?: number
+    profile?: string
+  } | null
 }
+
+export type MonitorCompileReference = NonNullable<CompileResult['reference_video']>
 
 export function MonitorCompileDialog({
   open,
@@ -323,13 +333,21 @@ export function MonitorCompileDialog({
                 className="h-6 px-2 text-[10px]"
                 disabled={!draft.trim()}
                 onClick={() => {
-                  onApply(draft.trim())
+                  onApply(draft.trim(), result?.reference_video ?? undefined)
                   onClose()
                 }}
               >
                 应用到相机段
               </Button>
-              <span className="text-[10px] text-muted-foreground">应用后：生成时注入任务段提示词</span>
+              {result?.reference_video?.video ? (
+                <span className="text-[9px] text-muted-foreground" title={result.reference_video.video}>
+                  并落地参考视频：{result.reference_video.frames} 帧 @
+                  {Math.round(result.reference_video.fps ?? 24)}fps → {(result.reference_video.video.split('/').pop() ?? '')}
+                </span>
+              ) : null}
+              {result?.reference_video?.video ? null : (
+                <span className="text-[10px] text-muted-foreground">应用后：生成时注入任务段提示词</span>
+              )}
             </div>
           </>
         ) : null}

@@ -856,9 +856,27 @@ export function CameraSegmentEditor({ segment, currentTime, mediaSources, onCont
           durationFrames={durationFrames}
           playblast={camera.playblast}
           onClose={() => setTab('params')}
-          onApply={(prompt) => {
-            patchCamera({ compiled_prompt: prompt })
-            setNotice({ kind: 'ok', text: 'H3 编译结果已写入相机段，生成时注入任务段提示词' })
+          onApply={(prompt, reference) => {
+            patchCamera({
+              compiled_prompt: prompt,
+              ...(reference?.video ? { compiled_reference: reference } : {}),
+            })
+            if (reference?.video) {
+              window.dispatchEvent(new CustomEvent('easy-media:mount-camera-reference', {
+                detail: {
+                  segmentId: segment.id,
+                  playblast: reference.video,
+                  startFrame: segment.start_frame,
+                  endFrame: segment.end_frame,
+                },
+              }))
+              setNotice({
+                kind: 'ok',
+                text: `H3 编译已应用：提示词注入任务段；参考视频（${reference.frames ?? '?'} 帧 @${Math.round(reference.fps ?? 24)}fps）已挂载「相机参考」轨`,
+              })
+            } else {
+              setNotice({ kind: 'ok', text: 'H3 编译结果已写入相机段，生成时注入任务段提示词' })
+            }
           }}
         />
       ) : null}
