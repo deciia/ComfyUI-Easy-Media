@@ -15,6 +15,7 @@ import {
   type StyleKind,
   type StyleState,
 } from '@/lib/style-library'
+import { StylePickerDialog } from './StylePickerDialog'
 
 /** 把 ```userprompt 段N``` 代码块写入分镜脚本段的 promptA */
 function fillPromptA(projectKey: string, segIndex: number, text: string): boolean {
@@ -229,6 +230,17 @@ export function AgentRail({
   const [messages, setMessages] = useState<AgentMessage[]>(() => readWorkspace(projectKey).messages ?? [])
   const [busy, setBusy] = useState(() => Boolean(readWorkspace(projectKey).agentBusy))
   const [input, setInput] = useState(() => readWorkspace(projectKey).chatInput ?? '')
+  const [stylePickerOpen, setStylePickerOpen] = useState(false)
+  const [styleNow, setStyleNow] = useState<StyleState>(() => readStyle(projectKey))
+  useEffect(() => {
+    setStyleNow(readStyle(projectKey))
+  }, [projectKey])
+  const [plusOpen, setPlusOpen] = useState(false)
+  const [tokenUsage, setTokenUsage] = useState<{ prompt: number; completion: number; total: number }>({
+    prompt: 0,
+    completion: 0,
+    total: 0,
+  })
   /** ask_user 的自定义回答（选项都不满意时直接写要求） */
   const [customAnswer, setCustomAnswer] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -5695,30 +5707,125 @@ export function AgentRail({
           {expanded ? '⤡' : '⤢'}
         </button>
       </div>
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          disabled={!input.trim()}
-          onClick={() => { void sendStepLoop() }}
-          title={busy ? '插话：会在助手下一步开始前插入，不打断当前步骤' : '发送'}
+      <div className="flex items-center gap-1.5" style={{ position: 'relative' }}>
+        <button
+          type="button"
+          title="更多"
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            border: `1px solid ${BORDER}`,
+            background: 'transparent',
+            color: 'inherit',
+            fontSize: 14,
+            lineHeight: 1,
+            cursor: 'pointer',
+          }}
+          onClick={() => setPlusOpen((value) => !value)}
         >
-          {busy ? '插话' : '发送'}
-        </Button>
+          ＋
+        </button>
+        {isStyleActive(styleNow) ? (
+          <button
+            type="button"
+            title="视觉风格（点击修改）"
+            className="max-w-[180px] truncate rounded px-2 py-0.5 text-[11px]"
+            style={{ border: `1px solid ${PRIMARY}`, color: PRIMARY }}
+            onClick={() => setStylePickerOpen(true)}
+          >
+            风格：{styleSummary(styleNow)}
+          </button>
+        ) : null}
+        {plusOpen ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 30,
+              zIndex: 60,
+              minWidth: 150,
+              padding: 4,
+              borderRadius: 8,
+              border: `1px solid ${BORDER}`,
+              background: FIELD_BG,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            }}
+          >
+            <button
+              type="button"
+              className="block w-full rounded px-2 py-1 text-left text-[11px] hover:bg-secondary"
+              onClick={() => {
+                setInput((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}@`)
+                setMentionQuery('')
+                setPlusOpen(false)
+              }}
+            >
+              引用主体 / 资源
+            </button>
+            <button
+              type="button"
+              className="block w-full rounded px-2 py-1 text-left text-[11px] hover:bg-secondary"
+              onClick={() => {
+                setStylePickerOpen(true)
+                setPlusOpen(false)
+              }}
+            >
+              视觉风格
+            </button>
+          </div>
+        ) : null}
+        <span style={{ flex: 1 }} />
         {busy ? (
-          <Button
-            size="sm"
-            variant="secondary"
+          <button
+            type="button"
+            title="中止本轮执行"
+            className="rounded px-2 py-1 text-[11px]"
+            style={{ border: `1px solid ${BORDER}` }}
             onClick={() => {
               abortRef.current?.abort()
               writeWorkspace(projectKey, { agentBusy: false })
               setBusy(false)
             }}
-            title="中止本轮执行"
           >
             停止
-          </Button>
+          </button>
         ) : null}
+        <button
+          type="button"
+          disabled={!input.trim()}
+          title={busy ? '插话：会在助手下一步开始前插入，不打断当前步骤' : '发送'}
+          onClick={() => { void sendStepLoop() }}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 14,
+            border: 'none',
+            background: input.trim() ? PRIMARY : 'hsl(var(--muted, 240 5% 30%))',
+            color: '#fff',
+            fontSize: 15,
+            lineHeight: 1,
+            cursor: input.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >
+          ↑
+        </button>
       </div>
+      <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
+        {tokenUsage.total > 0 ? (
+          <span>
+            本轮用量 {tokenUsage.total.toLocaleString()} tok（输入 {tokenUsage.prompt.toLocaleString()} · 输出 {tokenUsage.completion.toLocaleString()}）
+          </span>
+        ) : (
+          <span>{busy ? '执行中…' : 'Enter 发送 · Shift+Enter 换行'}</span>
+        )}
+      </div>
+      <StylePickerDialog
+        open={stylePickerOpen}
+        projectKey={projectKey}
+        onClose={() => setStylePickerOpen(false)}
+        onChanged={(next) => setStyleNow(next)}
+      />
     </div>
   )
 }
