@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { CameraData } from '@/types/multitrack'
+import { EmbeddedNodePanel } from './EmbeddedNodePanel'
+import { ensureNode, setWidgetValue, type ComfyGraphLike } from '@/lib/omnicam-embed'
 
 interface MonitorCompileDialogProps {
   open: boolean
@@ -45,6 +47,26 @@ export function MonitorCompileDialog({
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CompileResult | null>(null)
   const [draft, setDraft] = useState('')
+  const [panelTab, setPanelTab] = useState<'official' | 'quick'>('official')
+  const [panelError, setPanelError] = useState<string | null>(null)
+
+  /** 官方面板挂载前：确保 Director 存在、写入状态并连到 Monitor */
+  async function prepareOfficial(node: Record<string, unknown>, graph: ComfyGraphLike) {
+    try {
+      const { node: director } = await ensureNode('MajoorOmniCamDirector')
+      const state = camera.omnicam_state
+      if (state && typeof state === 'object') {
+        setWidgetValue(director, 'state_json', JSON.stringify(state))
+        setWidgetValue(director, 'fps', 24)
+        setWidgetValue(director, 'duration_seconds', durationFrames / 24)
+      }
+      const monitor = node
+      graph.connect?.(director, 0, monitor, 0)
+      setPanelError(null)
+    } catch (error) {
+      setPanelError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   const durationSeconds = useMemo(() => Math.max(0.1, durationFrames / 24), [durationFrames])
   const [profiles, setProfiles] = useState<Array<{ id: string; label?: string; semantic?: string }>>([])
@@ -114,6 +136,42 @@ export function MonitorCompileDialog({
             关闭
           </Button>
         </div>
+
+        <div className="flex items-center justify-between">
+          <div className="flex overflow-hidden rounded border border-border">
+            <button
+              type="button"
+              className={`px-2 py-0.5 text-[10px] ${panelTab === 'official' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setPanelTab('official')}
+            >
+              官方面板
+            </button>
+            <button
+              type="button"
+              className={`px-2 py-0.5 text-[10px] ${panelTab === 'quick' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setPanelTab('quick')}
+            >
+              快速编译
+            </button>
+          </div>
+          <span className="text-[9px] text-muted-foreground">
+            {panelTab === 'official' ? '官方面板为执行驱动：需要在工作流里执行一次才会编译' : '快速编译：HTTP 直调，即时出结果'}
+          </span>
+        </div>
+
+        {panelTab === 'official' ? (
+          <>
+            {panelError ? <div className="text-[10px] text-destructive">{panelError}</div> : null}
+            <EmbeddedNodePanel
+              nodeType="MajoorOmniCamMonitor"
+              widgetName="majoor_omnicam_monitor"
+              active={panelTab === 'official'}
+              prepare={prepareOfficial}
+              onError={(message) => setPanelError(message)}
+            />
+          </>
+        ) : (
+          <>
 
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-0.5">
@@ -254,6 +312,8 @@ export function MonitorCompileDialog({
             </div>
           </>
         ) : null}
+          </>
+        )}
       </div>
     </div>
   )
