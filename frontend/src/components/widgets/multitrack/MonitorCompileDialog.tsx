@@ -142,35 +142,42 @@ export function MonitorCompileDialog({
           ? 'flex w-full flex-col gap-2'
           : 'flex max-h-[85vh] w-[min(760px,92vw)] flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-background p-3 text-[11px]'}
       >
-        <div className="flex items-center justify-between">
-          <div className="text-[12px] font-medium">H3 编译（OmniCam Monitor）</div>
-          {inline ? null : (
-            <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
-              关闭
-            </Button>
-          )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-medium">H3 编译（OmniCam Monitor）</span>
+            <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">
+              {panelTab === 'official' ? '官方面板' : '快速编译'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="flex overflow-hidden rounded border border-border">
+              <button
+                type="button"
+                className={`px-2 py-0.5 text-[10px] ${panelTab === 'official' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+                onClick={() => setPanelTab('official')}
+              >
+                官方面板
+              </button>
+              <button
+                type="button"
+                className={`px-2 py-0.5 text-[10px] ${panelTab === 'quick' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
+                onClick={() => setPanelTab('quick')}
+              >
+                快速编译
+              </button>
+            </div>
+            {inline ? null : (
+              <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
+                关闭
+              </Button>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <div className="flex overflow-hidden rounded border border-border">
-            <button
-              type="button"
-              className={`px-2 py-0.5 text-[10px] ${panelTab === 'official' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setPanelTab('official')}
-            >
-              官方面板
-            </button>
-            <button
-              type="button"
-              className={`px-2 py-0.5 text-[10px] ${panelTab === 'quick' ? 'bg-secondary text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setPanelTab('quick')}
-            >
-              快速编译
-            </button>
-          </div>
-          <span className="text-[9px] text-muted-foreground">
-            {panelTab === 'official' ? '官方面板为执行驱动：需要在工作流里执行一次才会编译' : '快速编译：HTTP 直调，即时出结果'}
-          </span>
+        <div className="text-[9px] text-muted-foreground">
+          {panelTab === 'official'
+            ? '官方面板为执行驱动：需要在工作流里执行一次才会编译'
+            : '快速编译：HTTP 直调，即时出结果'}
         </div>
 
         {panelTab === 'official' ? (
