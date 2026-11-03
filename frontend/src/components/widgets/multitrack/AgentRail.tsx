@@ -16,6 +16,7 @@ import {
   type StyleState,
 } from '@/lib/style-library'
 import { StylePickerDialog } from './StylePickerDialog'
+import { ArrowUp, AtSign, Maximize2, Minimize2, Palette, Plus } from 'lucide-react'
 
 /** 把 ```userprompt 段N``` 代码块写入分镜脚本段的 promptA */
 function fillPromptA(projectKey: string, segIndex: number, text: string): boolean {
@@ -236,6 +237,23 @@ export function AgentRail({
     setStyleNow(readStyle(projectKey))
   }, [projectKey])
   const [plusOpen, setPlusOpen] = useState(false)
+  const plusMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!plusOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const box = plusMenuRef.current
+      if (box && !box.contains(event.target as Node)) setPlusOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPlusOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [plusOpen])
   const [tokenUsage, setTokenUsage] = useState<{ prompt: number; completion: number; total: number }>({
     prompt: 0,
     completion: 0,
@@ -5691,20 +5709,19 @@ export function AgentRail({
         <button
           type="button"
           title="更多"
+          className="flex items-center justify-center transition-colors hover:bg-white/10"
           style={{
-            width: 24,
-            height: 24,
-            borderRadius: 12,
-            border: `1px solid ${BORDER}`,
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            border: `1px solid ${plusOpen ? PRIMARY : BORDER}`,
             background: 'transparent',
-            color: 'inherit',
-            fontSize: 14,
-            lineHeight: 1,
+            color: plusOpen ? PRIMARY : 'inherit',
             cursor: 'pointer',
           }}
           onClick={() => setPlusOpen((value) => !value)}
         >
-          ＋
+          <Plus size={15} strokeWidth={2} />
         </button>
         {isStyleActive(styleNow) ? (
           <button
@@ -5719,38 +5736,41 @@ export function AgentRail({
         ) : null}
         {plusOpen ? (
           <div
+            ref={plusMenuRef}
             style={{
               position: 'absolute',
               left: 0,
-              bottom: 30,
+              bottom: 32,
               zIndex: 60,
-              minWidth: 150,
+              minWidth: 168,
               padding: 4,
-              borderRadius: 8,
+              borderRadius: 10,
               border: `1px solid ${BORDER}`,
-              background: FIELD_BG,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+              background: 'hsl(var(--card, 240 10% 10%))',
+              boxShadow: '0 10px 28px rgba(0,0,0,0.5)',
             }}
           >
             <button
               type="button"
-              className="block w-full rounded px-2 py-1 text-left text-[11px] hover:bg-secondary"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-white/10"
               onClick={() => {
                 setInput((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}@`)
                 setMentionQuery('')
                 setPlusOpen(false)
               }}
             >
+              <AtSign size={13} style={{ opacity: 0.7 }} />
               引用主体 / 资源
             </button>
             <button
               type="button"
-              className="block w-full rounded px-2 py-1 text-left text-[11px] hover:bg-secondary"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-white/10"
               onClick={() => {
                 setStylePickerOpen(true)
                 setPlusOpen(false)
               }}
             >
+              <Palette size={13} style={{ opacity: 0.7 }} />
               视觉风格
             </button>
           </div>
@@ -5766,7 +5786,6 @@ export function AgentRail({
             border: 'none',
             background: 'transparent',
             color: 'hsl(var(--muted-foreground, 240 5% 65%))',
-            fontSize: 12,
             cursor: 'pointer',
           }}
           onClick={() => {
@@ -5780,7 +5799,7 @@ export function AgentRail({
             }
           }}
         >
-          {expanded ? '⤡' : '⤢'}
+          {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
         {busy ? (
           <button
@@ -5809,12 +5828,13 @@ export function AgentRail({
             border: 'none',
             background: input.trim() ? PRIMARY : 'hsl(var(--muted, 240 5% 30%))',
             color: '#fff',
-            fontSize: 15,
-            lineHeight: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             cursor: input.trim() ? 'pointer' : 'not-allowed',
           }}
         >
-          ↑
+          <ArrowUp size={16} strokeWidth={2.4} />
         </button>
       </div>
       </div>
