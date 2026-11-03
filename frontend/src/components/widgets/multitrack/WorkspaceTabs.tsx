@@ -109,6 +109,8 @@ export function StoryboardTab({
   const [planFocus, setPlanFocus] = useState<number | null>(null)
   /** 分镜脚本详情是否处于编辑态：默认只读，点「编辑」才可改 */
   const [planEditing, setPlanEditing] = useState(false)
+  /** 主体/资源的「＋ 添加」下拉：kind 决定列哪个池 */
+  const [addPicker, setAddPicker] = useState<'subject' | 'resource' | null>(null)
 
   const plan = (readWorkspace(projectKey).plan as StoryboardPlan | null) ?? null
   const busy = Boolean(readWorkspace(projectKey).agentBusy)
@@ -393,17 +395,77 @@ export function StoryboardTab({
           </div>
         </>
       )}
-      {(planSegment.subjects ?? []).length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1 text-[10px]">
-          <span className="text-muted-foreground">主体：</span>
-          {(planSegment.subjects as Array<{ name: string; type?: string }>).map((subject) => (
-            <span key={subject.name} className="rounded-full px-1.5" style={{ border: `1px solid ${BORDER}`, color: 'hsl(var(--highlight, 45 90% 55%))' }}>
-              {subject.name}({subject.type})
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {(planSegment.resources ?? []).length > 0 ? (() => {
+      <div className="relative flex flex-wrap items-center gap-1 text-[10px]">
+        <span className="text-muted-foreground">主体：</span>
+        {((planSegment.subjects ?? []) as Array<{ name: string; type?: string }>).map((subject, subjectIndex) => (
+          <span
+            key={`${subject.name}-${subjectIndex}`}
+            className="inline-flex items-center gap-0.5 rounded-full pl-1.5 pr-0.5"
+            style={{ border: `1px solid ${BORDER}`, color: 'hsl(var(--highlight, 45 90% 55%))' }}
+          >
+            {subject.name}({subject.type})
+            <button
+              type="button"
+              className="rounded-full px-1 text-[9px] leading-none opacity-60 hover:opacity-100"
+              title="解除该主体绑定"
+              aria-label={`解除主体 ${subject.name}`}
+              onClick={() => {
+                if (planFocus == null) return
+                const next = ((planSegment.subjects ?? []) as Array<{ name: string }>)
+                  .filter((_, i) => i !== subjectIndex)
+                patchPlanSegment(planFocus, { subjects: next })
+              }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          className="rounded-full px-1.5 opacity-70 hover:opacity-100"
+          style={{ border: `1px dashed ${BORDER}` }}
+          title="从主体池添加"
+          onClick={() => setAddPicker(addPicker === 'subject' ? null : 'subject')}
+        >
+          ＋
+        </button>
+        {addPicker === 'subject' ? (() => {
+          const bound = new Set(((planSegment.subjects ?? []) as Array<{ name: string }>).map((item) => item.name))
+          const poolSubjects = (readWorkspace(projectKey).subjects ?? []) as Array<{ name?: string; type?: string; subjectType?: string }>
+          const candidates = poolSubjects.filter((item) => item.name && !bound.has(String(item.name)))
+          return (
+            <div
+              className="absolute left-8 top-full z-20 mt-1 max-h-48 w-56 overflow-auto rounded border bg-card p-1 shadow-lg"
+              style={{ borderColor: BORDER }}
+            >
+              {candidates.length ? candidates.map((item) => (
+                <button
+                  key={String(item.name)}
+                  type="button"
+                  className="block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] hover:bg-secondary"
+                  onClick={() => {
+                    if (planFocus == null) return
+                    const next = [
+                      ...((planSegment.subjects ?? []) as Array<Record<string, unknown>>),
+                      { name: String(item.name), type: String(item.type ?? item.subjectType ?? '人物') },
+                    ]
+                    patchPlanSegment(planFocus, { subjects: next })
+                    setAddPicker(null)
+                  }}
+                >
+                  {String(item.name)}（{String(item.type ?? item.subjectType ?? '人物')}）
+                </button>
+              )) : (
+                <div className="px-1.5 py-1 text-[10px] text-muted-foreground">
+                  主体池还没有可添加的主体
+                </div>
+              )}
+            </div>
+          )
+        })() : null}
+      </div>
+      <div className="relative flex flex-wrap items-center gap-1 text-[10px]">
+        {(() => {
         const pool = readWorkspace(projectKey).resources ?? []
         // 名称归一化：去扩展名/空白/标点，小写
         const norm = (text: string) => String(text ?? '')
@@ -433,7 +495,7 @@ export function StoryboardTab({
           if (!loose) return 'absent'
           return loose.status === 'ready' ? 'ready' : 'need'
         }
-        const entries = planSegment.resources as Array<{ kind?: string; name: string }>
+        const entries = (planSegment.resources ?? []) as Array<{ kind?: string; name: string }>
         const readyCount = entries.filter((item) => statusOf(item.name) === 'ready').length
         const missingCount = entries.filter((item) => statusOf(item.name) !== 'ready').length
         return (
@@ -447,14 +509,78 @@ export function StoryboardTab({
               return (
                 <span
                   key={`${resource.kind}-${resource.name}-${index}`}
-                  className="rounded-full px-1.5"
+                  className="inline-flex items-center gap-0.5 rounded-full pl-1.5 pr-0.5"
                   style={{ border: `1px solid ${color ?? BORDER}`, color }}
                   title={status === 'ready' ? '已在资源池且已绑定素材' : status === 'need' ? '在资源池但缺素材' : '还没加入资源池'}
                 >
                   {status === 'ready' ? '✓' : status === 'need' ? '缺' : '·'}{resource.kind}:{resource.name}
+                  <button
+                    type="button"
+                    className="rounded-full px-1 text-[9px] leading-none opacity-60 hover:opacity-100"
+                    title="解除该资源需求"
+                    aria-label={`解除资源 ${resource.name}`}
+                    onClick={() => {
+                      if (planFocus == null) return
+                      const next = entries.filter((_, i) => i !== index)
+                      patchPlanSegment(planFocus, { resources: next })
+                    }}
+                  >
+                    ×
+                  </button>
                 </span>
               )
             })}
+            <button
+              type="button"
+              className="rounded-full px-1.5 opacity-70 hover:opacity-100"
+              style={{ border: `1px dashed ${BORDER}` }}
+              title="从资源池添加"
+              onClick={() => setAddPicker(addPicker === 'resource' ? null : 'resource')}
+            >
+              ＋
+            </button>
+            {addPicker === 'resource' ? (() => {
+              const boundNames = new Set(entries.map((item) => item.name))
+              const poolResources = (readWorkspace(projectKey).resources ?? []) as Array<{
+                type?: string
+                name?: string
+              }>
+              const candidates = poolResources.filter((item) => (
+                item.name && item.type !== 'Subject' && !boundNames.has(String(item.name))
+              ))
+              const kindOf = (type?: string) => (
+                type === 'Audio' ? 'audio' : type === 'Video' ? 'video' : 'picture'
+              )
+              return (
+                <div
+                  className="absolute left-8 top-full z-20 mt-1 max-h-48 w-64 overflow-auto rounded border bg-card p-1 shadow-lg"
+                  style={{ borderColor: BORDER }}
+                >
+                  {candidates.length ? candidates.map((item) => (
+                    <button
+                      key={`${item.type}-${item.name}`}
+                      type="button"
+                      className="block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] hover:bg-secondary"
+                      onClick={() => {
+                        if (planFocus == null) return
+                        const next = [
+                          ...entries,
+                          { kind: kindOf(item.type), name: String(item.name) },
+                        ]
+                        patchPlanSegment(planFocus, { resources: next })
+                        setAddPicker(null)
+                      }}
+                    >
+                      {kindOf(item.type)}:{String(item.name)}
+                    </button>
+                  )) : (
+                    <div className="px-1.5 py-1 text-[10px] text-muted-foreground">
+                      资源池没有可添加的素材（先去「主体与资源」建资源）
+                    </div>
+                  )}
+                </div>
+              )
+            })() : null}
             {onOpenAssets ? (
               <button
                 type="button"
@@ -467,7 +593,8 @@ export function StoryboardTab({
             ) : null}
           </div>
         )
-      })() : null}
+        })()}
+      </div>
     </div>
   ) : null
 
