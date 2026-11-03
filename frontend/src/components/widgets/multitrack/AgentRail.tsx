@@ -2813,6 +2813,23 @@ export function AgentRail({
       }
     }
 
+    if (name === 'get_camera_track') {
+      const live = (globalThis as unknown as {
+        __easyMediaCameraTrack?: { list: () => Record<string, unknown> }
+      }).__easyMediaCameraTrack
+      if (live) {
+        try {
+          const snapshot = live.list()
+          const segments = (snapshot.segments ?? []) as Array<Record<string, unknown>>
+          if (!segments.length) {
+            return { ok: true, note: '当前项目还没有相机轨，或相机轨上还没有相机段', ...snapshot }
+          }
+          return { ok: true, ...snapshot }
+        } catch (error) {
+          return { error: `读取相机轨失败：${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
+    }
     if (name === 'get_camera_track' || name === 'set_camera_track' || name === 'attach_camera_playblast') {
       const projectName = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName
       if (!projectName) return { error: '当前没有打开的项目' }
@@ -4015,25 +4032,51 @@ export function AgentRail({
       return { ok: true, index: index1, variant, chars: prompt.length, failures: data?.failures ?? [] }
     }
     if (name === 'camera_plan') {
-      const api = (globalThis as unknown as {
+      const operations = Array.isArray(args.operations) ? args.operations : []
+      if (!operations.length) return { error: 'operations 不能为空' }
+      const targetId = typeof args.segment_id === 'string' ? args.segment_id.trim() : ''
+      const trackApi = (globalThis as unknown as {
+        __easyMediaCameraTrack?: {
+          list: () => { segments?: Array<Record<string, unknown>> }
+          ops: (segmentId: string, ops: unknown[]) => Promise<{ applied: number; skipped: number }>
+        }
+      }).__easyMediaCameraTrack
+      if (targetId) {
+        if (!trackApi) return { error: '当前没有打开的多轨编辑器' }
+        try {
+          const result = await trackApi.ops(targetId, operations)
+          return { ok: true, segment: targetId, ...result }
+        } catch (error) {
+          return { error: `camera_plan 执行失败：${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
+      const mounted = (globalThis as unknown as {
         easyMediaCameraOps?: {
           segmentId: string
           ops: (list: unknown[]) => Promise<{ applied: number; skipped: number }>
         }
       }).easyMediaCameraOps
-      if (!api) {
-        return {
-          error: '当前没有打开相机段编辑器：请先在多轨编辑器的相机轨上选一个相机段，再重试',
+      if (mounted) {
+        try {
+          const result = await mounted.ops(operations as never[])
+          return { ok: true, segment: mounted.segmentId, ...result }
+        } catch (error) {
+          return { error: `camera_plan 执行失败：${error instanceof Error ? error.message : String(error)}` }
         }
       }
-      const operations = Array.isArray(args.operations) ? args.operations : []
-      if (!operations.length) return { error: 'operations 不能为空' }
-      try {
-        const result = await api.ops(operations as never[])
-        return { ok: true, segment: api.segmentId, applied: result.applied, skipped: result.skipped }
-      } catch (error) {
-        return { error: `camera_plan 执行失败：${error instanceof Error ? error.message : String(error)}` }
+      if (trackApi) {
+        const snapshot = trackApi.list()
+        return {
+          error: '没有打开相机段编辑器：请带 segment_id 指定要修改的相机段',
+          segments: (snapshot.segments ?? []).map((item) => ({
+            id: item.id,
+            start_frame: item.start_frame,
+            end_frame: item.end_frame,
+            preset: item.preset,
+          })),
+        }
       }
+      return { error: '当前没有打开的多轨编辑器或相机段' }
     }
     if (name === 'apply_storyboard') {
       const withPrompts = args.with_prompts === true

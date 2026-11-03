@@ -78,7 +78,7 @@ import { createSubtitleSegmentsFromSrt } from '@/lib/subtitle-srt'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
-import { presetFromCameraText } from '@/lib/camera-plan'
+import { applyCameraOps, presetFromCameraText, type EditorStateLike } from '@/lib/camera-plan'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
@@ -1678,6 +1678,115 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       if (registry.__easyMediaApplyStoryboard === applyStoryboard) {
         delete registry.__easyMediaApplyStoryboard
       }
+    }
+  }, [data])
+
+  // 相机轨数据通道：导演台 AI 读取已有相机段、并对其执行 Director 操作
+  useEffect(() => {
+    const list = () => {
+      const cameraTrack = data.tracks.find((track) => track.type === 'camera')
+      const segments = (cameraTrack?.segments ?? []).slice().sort((left, right) => left.start_frame - right.start_frame)
+      return {
+        project: data.project?.name ?? '',
+        frame_rate: data.frame_rate ?? 24,
+        segments: segments.map((segment) => {
+          const camera = ((segment.content as unknown as { camera?: Record<string, unknown> })?.camera ?? {}) as Record<string, unknown>
+          const keyframes = Array.isArray(camera.keyframes) ? (camera.keyframes as unknown[]) : []
+          return {
+            id: segment.id,
+            start_frame: segment.start_frame,
+            end_frame: segment.end_frame,
+            frames: segment.end_frame - segment.start_frame,
+            preset: camera.preset ?? 'static',
+            easing: camera.easing ?? 'ease_in_out',
+            keyframes: keyframes.length,
+            playblast: camera.playblast ?? null,
+            has_3d_state: Boolean(camera.omnicam_state),
+            compiled_prompt: camera.compiled_prompt ?? '',
+          }
+        }),
+      }
+    }
+
+    const applyOps = async (segmentId: string, operations: unknown[]) => {
+      const cameraTrack = data.tracks.find((track) => track.type === 'camera')
+      if (!cameraTrack) throw new Error('当前项目没有相机轨')
+      const segment = cameraTrack.segments.find((item) => item.id === segmentId)
+      if (!segment) throw new Error(`找不到相机段：${segmentId}`)
+      if (!Array.isArray(operations) || operations.length === 0) throw new Error('操作列表为空')
+      const content = (segment.content ?? {}) as unknown as Record<string, unknown>
+      const camera = (content.camera ?? {}) as Record<string, unknown>
+      const frames = Math.max(2, segment.end_frame - segment.start_frame)
+      let base: EditorStateLike | null = null
+      const stored = camera.omnicam_state
+      if (stored && typeof stored === 'object' && Array.isArray((stored as { cameras?: unknown[] }).cameras)) {
+        base = stored as unknown as EditorStateLike
+      }
+      if (!base) {
+        const response = await fetch('/easy-media/camera/editor-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ camera, fps: data.frame_rate ?? 24, frames }),
+        })
+        if (!response.ok) throw new Error(`读取相机状态失败（HTTP ${response.status}）`)
+        const payload = await response.json() as { state?: EditorStateLike }
+        if (!payload.state) throw new Error('相机状态为空')
+        base = payload.state
+      }
+      const result = applyCameraOps(base, operations as never[])
+      let compiledPrompt: string | undefined
+      try {
+        const response = await fetch('/easy-media/camera/compile-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: result.state }),
+        })
+        if (response.ok) {
+          const payload = await response.json() as { prompt?: string }
+          if (payload.prompt) compiledPrompt = payload.prompt
+        }
+      } catch {
+        // 编译失败不影响状态写入
+      }
+      const nextTracks = data.tracks.map((track) => (
+        track.id !== cameraTrack.id
+          ? track
+          : {
+              ...track,
+              segments: track.segments.map((item) => (
+                item.id !== segmentId
+                  ? item
+                  : {
+                      ...item,
+                      content: {
+                        ...item.content,
+                        camera: {
+                          ...camera,
+                          omnicam_state: result.state as never,
+                          ...(compiledPrompt ? { compiled_prompt: compiledPrompt } : {}),
+                        } as never,
+                      },
+                    }
+              )),
+            }
+      ))
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: nextTracks,
+        total_length: calculateTotalLength(nextTracks, data.frame_rate),
+      })
+      return {
+        applied: result.applied.length,
+        skipped: result.skipped.length,
+        skipped_detail: result.skipped,
+      }
+    }
+
+    const api = { list, ops: applyOps }
+    const registry = globalThis as unknown as { __easyMediaCameraTrack?: typeof api }
+    registry.__easyMediaCameraTrack = api
+    return () => {
+      if (registry.__easyMediaCameraTrack === api) delete registry.__easyMediaCameraTrack
     }
   }, [data])
 
