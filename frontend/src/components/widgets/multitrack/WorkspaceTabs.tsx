@@ -35,6 +35,7 @@ export interface StoryboardTabProps {
   onOpenAssets?: () => void
   onOpenEnhance?: (scriptIndex?: number) => void
   planning?: boolean
+  /** 调用方（弹窗归属实例）传入的项目键；缺省时才读全局 */
   projectKey?: string
   onPlan?: any
   onAgent?: any
@@ -93,8 +94,11 @@ export function StoryboardTab({
   onImportPlanResources,
   onOpenAssets,
   onOpenEnhance,
+  projectKey: propProjectKey,
 }: StoryboardTabProps) {
-  const projectKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || 'default'
+  const fallbackKey = (globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName || ''
+  // 串号修复：优先用调用方传入的项目键（弹窗归属实例的项目名），全局只作兜底
+  const projectKey = propProjectKey || fallbackKey
   const cards = useMemo(() => buildCards(segments, frameRate), [segments, frameRate])
   const timelineSelected = cards.find((card) => card.id === selectedSegmentId) ?? null
 

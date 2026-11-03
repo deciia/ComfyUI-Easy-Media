@@ -167,9 +167,15 @@ export function ProjectBar({ app, t, data, resolution, onApply }: Readonly<Proje
       if (registry.__easyMediaResolutionSnapshot === snapshotProvider) delete registry.__easyMediaResolutionSnapshot
     }
   }, [])
-  // 导演工作台读取当前项目名（避免跨层传参）
+  // 导演工作台读取当前项目名（避免跨层传参）。
+  // 串号修复：工作台弹窗归属其它节点实例（旧项目）且正开着时，本实例不抢写全局，
+  // 否则旧项目名会把新项目的分镜工作区顶掉。
   useEffect(() => {
-    const registry = globalThis as unknown as { __easyMediaProjectName?: string }
+    if (!currentName) return
+    const registry = globalThis as unknown as {
+      __easyMediaProjectName?: string
+      __easyMediaWorkspaceModalOwner?: string
+    }
     registry.__easyMediaProjectName = currentName
   }, [currentName])
   const savedSignatureRef = useRef<string | null>(null)

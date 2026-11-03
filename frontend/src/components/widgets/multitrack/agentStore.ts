@@ -155,6 +155,9 @@ export function readWorkspace(key: string): WorkspaceCache {
 
 const DRAFT_KEY = 'easy-media-storyboard'
 
+/** 串号防线：空键与 'default' 视为无项目的草稿桶——分镜不落盘也不从盘恢复。 */
+const isScratchKey = (key: string) => !key || key === 'default'
+
 export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
   cache.set(key, { ...readWorkspace(key), ...patch })
   // 分镜/主体/资源需求变更自动镜像到 localStorage：刷新浏览器不丢
@@ -166,7 +169,7 @@ export function writeWorkspace(key: string, patch: Partial<WorkspaceCache>) {
       /* 存储失败不阻断 */
     }
   }
-  if ('plan' in patch) mirror(`${DRAFT_KEY}:${key}`, patch.plan)
+  if ('plan' in patch && !isScratchKey(key)) mirror(`${DRAFT_KEY}:${key}`, patch.plan)
   if ('subjects' in patch) mirror(`easy-media-workspace-subjects:${key}`, patch.subjects)
   if ('plannedResources' in patch) mirror(`easy-media-workspace-resources:${key}`, patch.plannedResources)
   if ('resources' in patch) mirror(`easy-media-project-resources:${key}`, patch.resources)
@@ -193,7 +196,7 @@ export function ensureHydrated(key: string) {
   const current = cache.get(key) ?? {}
   let changed = false
   const next: WorkspaceCache = { ...current }
-  if (!('plan' in next)) {
+  if (!('plan' in next) && !isScratchKey(key)) {
     try {
       const raw = window.localStorage.getItem(`${DRAFT_KEY}:${key}`)
       const plan = raw ? JSON.parse(raw) : null

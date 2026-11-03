@@ -2739,6 +2739,15 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           />
 
       {workspaceModalOpen && (globalThis as unknown as { __easyMediaWorkspaceModalOwner?: string }).__easyMediaWorkspaceModalOwner === workspaceInstanceId ? (
+        <>
+        {(() => {
+          // 弹窗打开期间，把全局项目名钉在本实例的项目上：防止画布上其它实例（旧项目）把它改回去造成串号
+          const currentProjectName = data.project?.name ?? ''
+          if (currentProjectName) {
+            ;(globalThis as unknown as { __easyMediaProjectName?: string }).__easyMediaProjectName = currentProjectName
+          }
+          return null
+        })()}
         <PromptEnhancerModal
           initialBrief=""
           initialResult=""
@@ -2756,6 +2765,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           onWriteSegmentPrompt={(id, prompt) => patchTaskSegmentContent(id, { user_prompt: prompt })}
           onAttachImages={(id, images) => attachTaskSegmentImages(id, images)}
         />
+        </>
       ) : null}
           <MultiTrackToolbar
             currentTime={currentTime}
