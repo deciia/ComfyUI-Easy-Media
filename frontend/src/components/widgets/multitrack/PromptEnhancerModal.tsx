@@ -2243,6 +2243,51 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
             <div style={{ display: 'grid', gridTemplateColumns: '270px minmax(0, 1fr) 460px', flex: 1, minHeight: 0 }}>
               {/* 左栏：预设 + 选项（任务类型/时长已移除：编辑器节点上已有） */}
               <div className="flex min-h-0 flex-col gap-3 overflow-auto p-2" style={{ borderRight: `1px solid ${BORDER}` }}>
+                {/* 分镜脚本段切换 */}
+                <div className="flex flex-col gap-1">
+                  <span className={labelClass}>分镜脚本段</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-6 px-1.5 text-[11px]"
+                      disabled={activeScriptIndex <= 0}
+                      onClick={() => selectScriptSegment(activeScriptIndex - 1)}
+                    >
+                      ◀
+                    </Button>
+                    <select
+                      style={{ ...fieldStyle, minWidth: 0, flex: 1 }}
+                      value={String(activeScriptIndex)}
+                      onChange={(event) => selectScriptSegment(Number(event.target.value))}
+                    >
+                      {scriptSegments.length === 0 ? (
+                        <option value="0">（脚本为空）</option>
+                      ) : scriptSegments.map((item, index) => {
+                        const record = item as Record<string, unknown>
+                        const hasA = Boolean(String(record.finalA ?? '').trim())
+                        const hasB = Boolean(String(record.finalB ?? '').trim())
+                        const name = String(record.name ?? `镜头 ${index + 1}`)
+                        return (
+                          <option key={index} value={String(index)}>
+                            {`${index + 1}. ${name}${hasA ? ' ✓A' : ''}${hasB ? ' ✓B' : ''}`}
+                          </option>
+                        )
+                      })}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-6 px-1.5 text-[11px]"
+                      disabled={activeScriptIndex >= scriptSegments.length - 1}
+                      onClick={() => selectScriptSegment(activeScriptIndex + 1)}
+                    >
+                      ▶
+                    </Button>
+                  </div>
+                  <span className="text-[10px] text-neutral-500">✓ = 已写最终提示词</span>
+                </div>
+
                 {/* 本段引用：点令牌插入到片段稿光标处 */}
                 <div className="flex flex-col gap-1">
                   <span className={labelClass}>本段引用</span>
@@ -2394,86 +2439,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
 
                 <div className="flex items-center justify-between gap-2">
                   <span className={labelClass}>片段提示词（A/B 原稿，可粗）</span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      title="把 A 栏的片段提示词直接作为最终提示词"
-                      disabled={!activePrompt.trim()}
-                      onClick={() => setFinalDraft(normalizeSectionHeadings(activePrompt))}
-                    >
-                      直接导入➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
-                    >
-                      英文➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
-                    >
-                      中文➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      style={{ color: clearArmed === 'final' ? '#f87171' : '#fbbf24' }}
-                      title="清空全部段的最终提示词（A/B 终稿），两步确认"
-                      onClick={() => clearAllPrompts('final')}
-                    >
-                      {clearArmed === 'final' ? '确认清空终稿？' : '清空终稿'}
-                    </Button>
-                  </div>
-                </div>
-                {clearNotice ? (
-                  <div className="text-[11px]" style={{ color: '#fbbf24' }}>{clearNotice}</div>
-                ) : null}
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="text-[11px] text-muted-foreground">分镜脚本段</span>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-6 px-2 text-[11px]"
-                    disabled={activeScriptIndex <= 0}
-                    onClick={() => selectScriptSegment(activeScriptIndex - 1)}
-                  >
-                    ◀
-                  </Button>
-                  <select
-                    style={{ ...fieldStyle, width: 220 }}
-                    value={String(activeScriptIndex)}
-                    onChange={(event) => selectScriptSegment(Number(event.target.value))}
-                  >
-                    {scriptSegments.length === 0 ? (
-                      <option value="0">（脚本为空，先去「分镜编排」新建）</option>
-                    ) : scriptSegments.map((item, index) => {
-                      const record = item as Record<string, unknown>
-                      const hasA = Boolean(String(record.finalA ?? '').trim())
-                      const hasB = Boolean(String(record.finalB ?? '').trim())
-                      const name = String(record.name ?? `镜头 ${index + 1}`)
-                      return (
-                        <option key={index} value={String(index)}>
-                          {`${index + 1}. ${name}${hasA ? ' ✓A' : ''}${hasB ? ' ✓B' : ''}`}
-                        </option>
-                      )
-                    })}
-                  </select>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="h-6 px-2 text-[11px]"
-                    disabled={activeScriptIndex >= scriptSegments.length - 1}
-                    onClick={() => selectScriptSegment(activeScriptIndex + 1)}
-                  >
-                    ▶
-                  </Button>
-                  <span className="text-[10px] text-neutral-500">✓ = 已写最终提示词；任务轨在右栏「任务轨」只读对照</span>
                 </div>
                 <div className="flex items-center gap-1">
                   {([['a', 'A · 片段提示词'], ['b', 'B · 我的尝试']] as const).map(([key, label]) => (
@@ -2743,6 +2708,45 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     onInsertTokens={(next) => setFinalDraft(next)}
                     taskMode={currentTaskModeKey()}
                   />
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      title="把片段稿直接作为最终提示词"
+                      disabled={!activePrompt.trim()}
+                      onClick={() => setFinalDraft(normalizeSectionHeadings(activePrompt))}
+                    >
+                      直接导入➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
+                    >
+                      英文➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
+                    >
+                      中文➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      style={{ color: clearArmed === 'final' ? '#f87171' : '#fbbf24' }}
+                      title="清空全部段的最终提示词（A/B 终稿），两步确认"
+                      onClick={() => clearAllPrompts('final')}
+                    >
+                      {clearArmed === 'final' ? '确认清空终稿？' : '清空终稿'}
+                    </Button>
+                  </div>
+                  {clearNotice ? (
+                    <div className="text-[11px]" style={{ color: '#fbbf24' }}>{clearNotice}</div>
+                  ) : null}
 <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
                   <span className="flex min-w-0 items-center gap-1">最终提示词
                   <span className="flex items-center gap-1">
