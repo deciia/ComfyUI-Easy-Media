@@ -5584,18 +5584,32 @@ export function AgentRail({
 
       <div
         ref={inputAreaRef}
-        style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          border: `1px solid ${BORDER}`,
+          borderRadius: 12,
+          background: FIELD_BG,
+          padding: '6px 8px 4px',
+        }}
       >
         <div
           title="上下拖动调整输入框高度"
-          style={{ height: 6, cursor: 'ns-resize', borderRadius: 3, background: 'hsl(var(--border, 240 6% 25%))', opacity: 0.6 }}
+          style={{ height: 4, cursor: 'ns-resize', borderRadius: 3, background: 'hsl(var(--border, 240 6% 25%))', opacity: 0.35, marginBottom: 4 }}
           onMouseDown={(event) => {
             heightDragRef.current = { startY: event.clientY, startHeight: inputHeight }
           }}
         />
         <textarea
           style={{
-            ...fieldStyle,
+            background: 'transparent',
+            border: 'none',
+            color: 'hsl(var(--foreground, 0 0% 90%))',
+            fontSize: 12,
+            padding: 0,
+            outline: 'none',
+            width: '100%',
             minHeight: 64,
             height: expanded ? Math.max(360, inputHeight) : inputHeight,
             maxHeight: 640,
@@ -5673,40 +5687,6 @@ export function AgentRail({
             ))}
           </div>
         )}
-        <button
-          type="button"
-          title={expanded ? '还原高度' : '放大输入框'}
-          style={{
-            position: 'absolute',
-            right: 6,
-            bottom: 6,
-            zIndex: 2,
-            width: 20,
-            height: 20,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 4,
-            border: '1px solid hsl(var(--border, 240 6% 25%))',
-            background: 'hsl(var(--background, 240 10% 8%))',
-            color: 'hsl(var(--muted-foreground, 240 5% 65%))',
-            fontSize: 11,
-            cursor: 'pointer',
-          }}
-          onClick={() => {
-            if (!expanded) {
-              prevHeightRef.current = inputHeight
-              setInputHeight(480)
-              setExpanded(true)
-            } else {
-              setInputHeight(prevHeightRef.current || 72)
-              setExpanded(false)
-            }
-          }}
-        >
-          {expanded ? '⤡' : '⤢'}
-        </button>
-      </div>
       <div className="flex items-center gap-1.5" style={{ position: 'relative' }}>
         <button
           type="button"
@@ -5776,6 +5756,32 @@ export function AgentRail({
           </div>
         ) : null}
         <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          title={expanded ? '还原高度' : '放大输入框'}
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            border: 'none',
+            background: 'transparent',
+            color: 'hsl(var(--muted-foreground, 240 5% 65%))',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            if (!expanded) {
+              prevHeightRef.current = inputHeight
+              setInputHeight(480)
+              setExpanded(true)
+            } else {
+              setInputHeight(prevHeightRef.current || 72)
+              setExpanded(false)
+            }
+          }}
+        >
+          {expanded ? '⤡' : '⤢'}
+        </button>
         {busy ? (
           <button
             type="button"
@@ -5810,6 +5816,7 @@ export function AgentRail({
         >
           ↑
         </button>
+      </div>
       </div>
       <div className="flex items-center gap-2 px-1 text-[10px] text-muted-foreground">
         {tokenUsage.total > 0 ? (
