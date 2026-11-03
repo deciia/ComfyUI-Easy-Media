@@ -34,7 +34,8 @@ import {
 } from './agentStore'
 import { ScriptTab } from './ScriptTab'
 import { formatPlanSegmentBrief } from './PlanPreview'
-import { isStyleActive, readStyle } from '@/lib/style-library'
+import { applyStyle, EMPTY_STYLE, isStyleActive, readStyle, styleSummary, type StyleState } from '@/lib/style-library'
+import { StylePickerDialog } from './StylePickerDialog'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { cn } from '@/lib/utils'
 import { CAMERA_PRESETS } from '@/lib/camera-presets'
@@ -831,6 +832,13 @@ export function PromptEnhancerModal({
   const resources = readWorkspace(workspaceKey).resources ?? []
   /** 片段稿编辑器句柄：左栏写作工具栏把令牌/语法插入到光标处 */
   const briefEditorRef = useRef<PromptContentEditorHandle | null>(null)
+  /** 视觉风格：配色/导演方法（生成时自动附加） */
+  const [styleState, setStyleState] = useState<StyleState>(() => readStyle(workspaceKey))
+  const [styleOpen, setStyleOpen] = useState(false)
+
+  useEffect(() => {
+    setStyleState(readStyle(workspaceKey))
+  }, [workspaceKey])
   const fragmentBindingTokens = computeBindingTokens(boundIds)
   const fragmentBoundTokens = boundIds
     .map((id) => ({ id, token: fragmentBindingTokens.get(id) ?? '' }))
@@ -2419,6 +2427,36 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     />
                   </label>
                 ) : null}
+
+                <div className="flex flex-col gap-1">
+                  <span className={labelClass}>视觉风格</span>
+                  <div className="flex items-center gap-1">
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={styleSummary(styleState)}>
+                      {styleSummary(styleState)}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      className="h-5 shrink-0 px-1.5 text-[10px]"
+                      onClick={() => setStyleOpen(true)}
+                    >
+                      选择
+                    </Button>
+                    {isStyleActive(styleState) ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-[10px] opacity-60 hover:opacity-100"
+                        title="关闭风格"
+                        onClick={() => {
+                          const cleared = { ...EMPTY_STYLE }
+                          setStyleState(cleared)
+                          void applyStyle(workspaceKey, cleared).catch(() => undefined)
+                        }}
+                      >
+                        清除
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               </div>
 
               {/* 中栏：草稿 + @ 引用 */}
@@ -3063,6 +3101,12 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
           </>
         )}
       </div>
+      <StylePickerDialog
+        open={styleOpen}
+        projectKey={workspaceKey}
+        onClose={() => setStyleOpen(false)}
+        onChanged={(next) => setStyleState(next)}
+      />
       <DirectorSettingsModal
         open={settingsOpen}
         settings={directorSettings}
