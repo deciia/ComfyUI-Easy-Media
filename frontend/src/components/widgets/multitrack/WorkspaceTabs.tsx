@@ -82,6 +82,87 @@ function buildCards(segments: MultiTrackSegment[], frameRate: number): Card[] {
 }
 
 /** 分镜编排：左=分镜脚本（plan）+ 任务轨片段；中=整版预览/单段详情/落地编辑。AI 对话在常驻右栏。 */
+/** 分镜镜头字段的组合框：▾ 弹全量候选，输入框仍可自由输入（AI 自由文本也照常显示）。 */
+function PresetCombo({
+  value,
+  options,
+  placeholder,
+  className,
+  listId,
+  onCommit,
+}: {
+  value: string
+  options: string[]
+  placeholder: string
+  className: string
+  listId?: string
+  onCommit: (next: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState(value)
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+  const commit = (next: string) => {
+    if (next !== value) onCommit(next)
+  }
+  return (
+    <span className="relative inline-flex items-center">
+      <input
+        value={draft}
+        placeholder={placeholder}
+        list={listId}
+        className={className}
+        style={fieldStyle}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          commit(draft)
+          setOpen(false)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commit(draft)
+            setOpen(false)
+          }
+          if (event.key === 'Escape') setOpen(false)
+        }}
+      />
+      <button
+        type="button"
+        className="absolute right-0 top-0 flex h-full items-center px-1 text-[8px] leading-none opacity-60 hover:opacity-100"
+        title="选择预设（也可直接输入）"
+        aria-label={`选择${placeholder}`}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setOpen((current) => !current)}
+      >
+        ▾
+      </button>
+      {open ? (
+        <div
+          className="absolute left-0 top-full z-40 mt-0.5 max-h-48 w-48 overflow-auto rounded border p-0.5 shadow-lg"
+          style={{ background: FIELD_BG, borderColor: BORDER }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={`block w-full truncate rounded px-1 py-0.5 text-left text-[10px] hover:bg-secondary ${option === draft ? 'text-primary' : ''}`}
+              onClick={() => {
+                setDraft(option)
+                commit(option)
+                setOpen(false)
+              }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </span>
+  )
+}
+
 export function StoryboardTab({
   segments,
   frameRate,
@@ -305,29 +386,29 @@ export function StoryboardTab({
               return (
                 <div key={shotIndex} className="rounded px-2 py-1 text-[11px] leading-relaxed" style={{ background: FIELD_BG }}>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <input
-                      defaultValue={String(shotAny.framing ?? '')}
+                    <PresetCombo
+                      value={String(shotAny.framing ?? '')}
+                      options={SHOT_SIZES.map((item) => item.label)}
                       placeholder="景别"
-                      list="em-shot-size"
-                      className="w-20 rounded px-1 py-0.5 text-[10px] outline-none"
-                      style={fieldStyle}
-                      onBlur={commitShot('framing')}
+                      listId="em-shot-size"
+                      className="w-20 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      onCommit={(next) => patchShot(planFocus as number, shotIndex, { framing: next })}
                     />
-                    <input
-                      defaultValue={String(shotAny.camera ?? '')}
+                    <PresetCombo
+                      value={String(shotAny.camera ?? '')}
+                      options={CAMERA_MOTIONS.map((item) => item.label)}
                       placeholder="机位/运动"
-                      list="em-camera-motion"
-                      className="w-32 rounded px-1 py-0.5 text-[10px] outline-none"
-                      style={fieldStyle}
-                      onBlur={commitShot('camera')}
+                      listId="em-camera-motion"
+                      className="w-32 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      onCommit={(next) => patchShot(planFocus as number, shotIndex, { camera: next })}
                     />
-                    <input
-                      defaultValue={String(shotAny.composition ?? '')}
+                    <PresetCombo
+                      value={String(shotAny.composition ?? '')}
+                      options={FRAMINGS.map((item) => item.label)}
                       placeholder="构图关系"
-                      list="em-composition"
-                      className="w-24 rounded px-1 py-0.5 text-[10px] outline-none"
-                      style={fieldStyle}
-                      onBlur={commitShot('composition')}
+                      listId="em-composition"
+                      className="w-24 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      onCommit={(next) => patchShot(planFocus as number, shotIndex, { composition: next })}
                     />
                   </div>
                   <textarea
@@ -357,13 +438,13 @@ export function StoryboardTab({
                     </div>
                   ))}
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    <input
-                      defaultValue={String(shotAny.micro_expression ?? '')}
+                    <PresetCombo
+                      value={String(shotAny.micro_expression ?? '')}
+                      options={EXPRESSIONS.map((item) => item.label)}
                       placeholder="微表情"
-                      list="em-expression"
-                      className="w-28 rounded px-1 py-0.5 text-[10px] outline-none"
-                      style={fieldStyle}
-                      onBlur={commitShot('micro_expression')}
+                      listId="em-expression"
+                      className="w-28 rounded px-1 py-0.5 pr-4 text-[10px] outline-none"
+                      onCommit={(next) => patchShot(planFocus as number, shotIndex, { micro_expression: next })}
                     />
                     <input
                       defaultValue={String(shotAny.sound ?? '')}
