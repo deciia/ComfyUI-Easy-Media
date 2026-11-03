@@ -171,9 +171,11 @@ export function ExtractMotionDialog({ open, inline, defaultVideo, sources, onClo
                 快速解算
               </button>
             </div>
-            <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
-              关闭
-            </Button>
+            {inline ? null : (
+              <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
+                关闭
+              </Button>
+            )}
           </div>
         </div>
 

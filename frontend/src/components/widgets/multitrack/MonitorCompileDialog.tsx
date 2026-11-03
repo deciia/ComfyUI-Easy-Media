@@ -144,9 +144,11 @@ export function MonitorCompileDialog({
       >
         <div className="flex items-center justify-between">
           <div className="text-[12px] font-medium">H3 编译（OmniCam Monitor）</div>
-          <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
-            关闭
-          </Button>
+          {inline ? null : (
+            <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={onClose}>
+              关闭
+            </Button>
+          )}
         </div>
 
         <div className="flex items-center justify-between">
