@@ -2657,6 +2657,45 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                   <ScriptTab projectKey={bindingProjectKey} segmentIndex={activeScriptIndex} />
                 ) : null}
                 <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto" style={{ display: resultTab === 'preview' ? undefined : 'none' }}>
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      title="把片段稿直接作为最终提示词"
+                      disabled={!activePrompt.trim()}
+                      onClick={() => setFinalDraft(normalizeSectionHeadings(activePrompt))}
+                    >
+                      导入➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
+                    >
+                      英文➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      disabled={busy || translating}
+                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
+                    >
+                      中文➡️
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-6 whitespace-nowrap px-2 text-[11px]"
+                      style={{ color: clearArmed === 'final' ? '#f87171' : '#fbbf24' }}
+                      title="清空全部段的最终提示词（A/B 终稿），两步确认"
+                      onClick={() => clearAllPrompts('final')}
+                    >
+                      {clearArmed === 'final' ? '确认清空？' : '清空'}
+                    </Button>
+                  </div>
+                  {clearNotice ? (
+                    <div className="text-[11px]" style={{ color: '#fbbf24' }}>{clearNotice}</div>
+                  ) : null}
                   <PromptQualityBar
                     prompt={finalDraft || finalPrompt || (sections.length ? joinSections(sections) : '')}
                     resources={resources}
@@ -2708,45 +2747,6 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     onInsertTokens={(next) => setFinalDraft(next)}
                     taskMode={currentTaskModeKey()}
                   />
-                  <div className="flex flex-wrap items-center justify-end gap-1">
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      title="把片段稿直接作为最终提示词"
-                      disabled={!activePrompt.trim()}
-                      onClick={() => setFinalDraft(normalizeSectionHeadings(activePrompt))}
-                    >
-                      直接导入➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('English')) void handleGenerate('English', activePrompt) }}
-                    >
-                      英文➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      disabled={busy || translating}
-                      onClick={() => { if (!askAgentGenerate('中文')) void handleGenerate('中文', activePrompt) }}
-                    >
-                      中文➡️
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-6 whitespace-nowrap px-2 text-[11px]"
-                      style={{ color: clearArmed === 'final' ? '#f87171' : '#fbbf24' }}
-                      title="清空全部段的最终提示词（A/B 终稿），两步确认"
-                      onClick={() => clearAllPrompts('final')}
-                    >
-                      {clearArmed === 'final' ? '确认清空终稿？' : '清空终稿'}
-                    </Button>
-                  </div>
-                  {clearNotice ? (
-                    <div className="text-[11px]" style={{ color: '#fbbf24' }}>{clearNotice}</div>
-                  ) : null}
 <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-400">
                   <span className="flex min-w-0 items-center gap-1">最终提示词
                   <span className="flex items-center gap-1">
