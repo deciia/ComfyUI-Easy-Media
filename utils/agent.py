@@ -604,7 +604,8 @@ async def stream_agent_step(
     collected_text: list[str] = []
     tool_buffer: dict[int, dict] = {}
     usage: dict = {}
-    timeout = aiohttp.ClientTimeout(total=180)
+    # 不设总时长上限：工具循环里模型可能长时间思考；只做防呆——30 秒连不上、600 秒无任何数据才断
+    timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=600)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(settings.base_url, json=body, headers=headers) as response:
             if response.status >= 400:
@@ -692,7 +693,8 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
         "stream": False,
     }
     headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
-    timeout = aiohttp.ClientTimeout(total=120)
+    # 压缩任务输入可达 6 万字符，同样不设总时长上限，只做无数据守护
+    timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=600)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(settings.base_url, json=body, headers=headers) as response:
             raw = await response.text()
@@ -909,11 +911,22 @@ async def run_agent_step(
             out.append({"role": role, "content": content or "已执行工具调用。"})
         return out
 
-    async def _post(payload_body: dict) -> tuple[int, str]:
-        timeout = aiohttp.ClientTimeout(total=180)
+    async def _post_once(payload_body: dict) -> tuple[int, str]:
+        # 不设总时长上限：非流式要等模型把整段结果写完，长上下文+工具时可能远超 3 分钟；
+        # 只做防呆——30 秒连不上、600 秒无任何数据才断。
+        timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=600)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(settings.base_url, json=payload_body, headers=headers) as response:
                 return response.status, await response.text()
+
+    async def _post(payload_body: dict) -> tuple[int, str]:
+        import asyncio
+
+        try:
+            return await _post_once(payload_body)
+        except (asyncio.TimeoutError, TimeoutError):
+            # 超时多为网关/链路瞬时拥塞：换一条新连接重试一次，再失败才报错
+            return await _post_once(payload_body)
 
     try:
         status, raw = await _post(body)
@@ -937,6 +950,11 @@ async def run_agent_step(
     except PromptEnhancerError as error:
         raise AgentError(str(error)) from error
     except Exception as error:  # noqa: BLE001
+        if type(error).__name__ in {"TimeoutError", "ServerTimeoutError", "ClientPayloadError"}:
+            raise AgentError(
+                "模型响应超时（已重试一次）：网络或模型端过慢，可直接再点发送重试；"
+                "若反复超时，建议换更快的模型或精简上下文"
+            ) from error
         raise AgentError(f"模型请求异常（{type(error).__name__}）：{error}") from error
 
     try:
