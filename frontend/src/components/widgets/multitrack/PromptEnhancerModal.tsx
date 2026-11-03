@@ -34,6 +34,7 @@ import {
 } from './agentStore'
 import { ScriptTab } from './ScriptTab'
 import { formatPlanSegmentBrief } from './PlanPreview'
+import { isStyleActive, readStyle } from '@/lib/style-library'
 import type { MultiTrackSegment } from '@/types/multitrack'
 import { cn } from '@/lib/utils'
 import { CAMERA_PRESETS } from '@/lib/camera-presets'
@@ -1317,11 +1318,14 @@ export function PromptEnhancerModal({
   }, [resources, boundIds, resourceTokens, imagePaths, libraryNames])
 
   function presetPayload() {
+    const styleNow = readStyle(workspaceKey)
     return {
       camera_motion: presets.camera_motion ?? [],
       expression: presets.expression ?? [],
       shot_size: presets.shot_size ?? [],
       framing: presets.framing ?? [],
+      // 视觉风格：选中的配色/导演方法编译结果，由后端拼进提示词
+      style_instruction: isStyleActive(styleNow) ? String(styleNow.instruction ?? '') : '',
     }
   }
 

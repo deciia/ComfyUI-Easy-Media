@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "note": "本项目自建风格兜底（非 T8 数据）。T8 插件存在时优先使用其资源。",
+  "colors": [
+    {
+      "id": "b01",
+      "label_zh": "冷调纪实",
+      "label_en": "Cool Documentary",
+      "category": "自建·纪实",
+      "summary_zh": "低饱和冷灰，真实环境光，适合访谈与现场记录",
+      "primary": [
+        { "hex": "#2E3A46", "name_zh": "冷灰蓝", "share": 0.4 },
+        { "hex": "#8A9BA8", "name_zh": "雾灰", "share": 0.3 },
+        { "hex": "#D8DEE2", "name_zh": "冷白", "share": 0.3 }
+      ],
+      "accents": [
+        { "hex": "#B23A2E", "name_zh": "警示红" },
+        { "hex": "#E0B84C", "name_zh": "旧金" }
+      ],
+      "color_notes": { "zh": "整体低饱和，肤色保留真实偏冷，避免广告式暖调" },
+      "lighting_notes": { "zh": "以现场实用光源为主，允许轻微明暗反差，不做戏剧化打光" }
+    },
+    {
+      "id": "b02",
+      "label_zh": "暖调生活",
+      "label_en": "Warm Everyday",
+      "category": "自建·生活",
+      "summary_zh": "米黄与暖橙，柔光，适合人物日常与vlog",
+      "primary": [
+        { "hex": "#E8D5B7", "name_zh": "米黄", "share": 0.4 },
+        { "hex": "#C9825B", "name_zh": "暖橙", "share": 0.3 },
+        { "hex": "#6B4F3A", "name_zh": "深棕", "share": 0.3 }
+      ],
+      "accents": [
+        { "hex": "#9BBF8A", "name_zh": "柔绿" },
+        { "hex": "#F2E3C6", "name_zh": "奶白" }
+      ],
+      "color_notes": { "zh": "暖而不黄，肤色自然偏暖，避免过曝的发白" },
+      "lighting_notes": { "zh": "窗光或柔光箱侧光，阴影柔和有层次" }
+    },
+    {
+      "id": "b03",
+      "label_zh": "霓虹赛博",
+      "label_en": "Neon Cyber",
+      "category": "自建·科幻",
+      "summary_zh": "青紫霓虹与深黑，高反差，夜景科技感",
+      "primary": [
+        { "hex": "#0B0F1A", "name_zh": "深空黑", "share": 0.4 },
+        { "hex": "#2BE3D0", "name_zh": "青霓虹", "share": 0.3 },
+        { "hex": "#B14CF0", "name_zh": "紫霓虹", "share": 0.3 }
+      ],
+      "accents": [
+        { "hex": "#FF4D6D", "name_zh": "信号红" },
+        { "hex": "#F5F7FF", "name_zh": "冷白高光" }
+      ],
+      "color_notes": { "zh": "以暗背景承托霓虹，饱和度集中在小面积光源" },
+      "lighting_notes": { "zh": "多光源混合，霓虹作轮廓光与背景光斑，保留湿润地面反光" }
+    },
+    {
+      "id": "b04",
+      "label_zh": "黑白高对比",
+      "label_en": "High-Contrast Mono",
+      "category": "自建·经典",
+      "summary_zh": "纯黑白，硬光深影，强调形状与轮廓",
+      "primary": [
+        { "hex": "#111111", "name_zh": "墨黑", "share": 0.5 },
+        { "hex": "#F5F5F5", "name_zh": "亮白", "share": 0.3 },
+        { "hex": "#7A7A7A", "name_zh": "中灰", "share": 0.2 }
+      ],
+      "accents": [
+        { "hex": "#C0C0C0", "name_zh": "银灰" }
+      ],
+      "color_notes": { "zh": "完全去色，靠明暗层次区分主体与环境" },
+      "lighting_notes": { "zh": "单一硬光方向，允许大面积阴影，轮廓清晰" }
+    },
+    {
+      "id": "b05",
+      "label_zh": "暗黑惊悚",
+      "label_en": "Dark Thriller",
+      "category": "自建·悬疑",
+      "summary_zh": "墨绿与血红点缀，压暗环境，视线受限",
+      "primary": [
+        { "hex": "#14201C", "name_zh": "墨绿黑", "share": 0.45 },
+        { "hex": "#3A4A44", "name_zh": "苔绿灰", "share": 0.3 },
+        { "hex": "#D6D2C4", "name_zh": "旧纸白", "share": 0.25 }
+      ],
+      "accents": [
+        { "hex": "#7B241C", "name_zh": "血红" },
+        { "hex": "#E2B23C", "name_zh": "钠灯黄" }
+      ],
+      "color_notes": { "zh": "环境整体压暗，只保留局部可见信息" },
+      "lighting_notes": { "zh": "弱光与单点光源，画面边缘留深影，允许局部欠曝" }
+    },
+    {
+      "id": "b06",
+      "label_zh": "极简产品",
+      "label_en": "Minimal Product",
+      "category": "自建·商业",
+      "summary_zh": "纯白/浅灰背景，单一材质强调，干净利落",
+      "primary": [
+        { "hex": "#FAFAFA", "name_zh": "纯白", "share": 0.5 },
+        { "hex": "#D9D9D9", "name_zh": "浅灰", "share": 0.3 },
+        { "hex": "#1A1A1A", "name_zh": "哑黑", "share": 0.2 }
+      ],
+      "accents": [
+        { "hex": "#3AA0FF", "name_zh": "品牌蓝" },
+        { "hex": "#F2B33D", "name_zh": "暖金" }
+      ],
+      "color_notes": { "zh": "背景纯净，产品质感与边缘优先级最高" },
+      "lighting_notes": { "zh": "柔光箱主光 + 轮廓光，高光干净无杂色" }
+    },
+    {
+      "id": "b07",
+      "label_zh": "复古胶片",
+      "label_en": "Vintage Film",
+      "category": "自建·复古",
+      "summary_zh": "褪色暖黄、青绿暗部，轻微颗粒与光晕",
+      "primary": [
+        { "hex": "#D8B78A", "name_zh": "胶片黄", "share": 0.4 },
+        { "hex": "#6E7F6A", "name_zh": "暗部青绿", "share": 0.3 },
+        { "hex": "#3A2E28", "name_zh": "深褐", "share": 0.3 }
+      ],
+      "accents": [
+        { "hex": "#C25B4A", "name_zh": "褪色红" },
+        { "hex": "#EFE3C8", "name_zh": "泛白高光" }
+      ],
+      "color_notes": { "zh": "整体偏暖褪色，暗部带青绿，高光轻微溢色" },
+      "lighting_notes": { "zh": "自然光或钨丝灯，容许轻微光晕与不均匀照明" }
+    },
+    {
+      "id": "b08",
+      "label_zh": "大地暖调",
+      "label_en": "Earthy Natural",
+      "category": "自建·自然",
+      "summary_zh": "土黄、赭石与橄榄绿，自然光，质朴质感",
+      "primary": [
+        { "hex": "#C4A484", "name_zh": "土黄", "share": 0.4 },
+        { "hex": "#8C5A3C", "name_zh": "赭石", "share": 0.3 },
+        { "hex": "#6B7052", "name_zh": "橄榄绿", "share": 0.3 }
+      ],
+      "accents": [
+        { "hex": "#E8D5B0", "name_zh": "干草色" },
+        { "hex": "#9F3E32", "name_zh": "陶红" }
+      ],
+      "color_notes": { "zh": "以材质本色为主，避免高饱和人工色" },
+      "lighting_notes": { "zh": "自然光为主，侧逆光带出纹理与尘埃感" }
+    }
+  ],
+  "creators": [
+    {
+      "id": "b01",
+      "label_zh": "静观长镜",
+      "label_en": "Contemplative Long Take",
+      "category": "自建·拍法",
+      "summary_zh": "固定或极缓移动，人物在画面内完成动作",
+      "methods": [
+        { "dimension": "camera", "text_zh": "机位基本固定，必要时极缓横移，不做快速推拉", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "让一个动作在单个镜头内自然完成，保留呼吸与停顿", "requires_cuts": false },
+        { "dimension": "framing", "text_zh": "中景或全景为主，保留环境信息与人物全身关系", "requires_cuts": false },
+        { "dimension": "information", "text_zh": "先给环境与位置，再让观众从动作里读出信息", "requires_cuts": false }
+      ]
+    },
+    {
+      "id": "b02",
+      "label_zh": "紧贴跟拍",
+      "label_en": "Close Follow",
+      "category": "自建·拍法",
+      "summary_zh": "贴身跟随主体移动，景别偏紧，代入感强",
+      "methods": [
+        { "dimension": "camera", "text_zh": "镜头紧贴主体同行，跟随其速度与方向，避免突然转向", "requires_cuts": false },
+        { "dimension": "framing", "text_zh": "近景或中近景，主体占画面较大比例", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "节奏跟随动作推进，不额外切镜打断", "requires_cuts": false },
+        { "dimension": "information", "text_zh": "信息由主体动作与手部细节直接给出", "requires_cuts": false }
+      ]
+    },
+    {
+      "id": "b03",
+      "label_zh": "对称克制",
+      "label_en": "Symmetric Restraint",
+      "category": "自建·拍法",
+      "summary_zh": "正中构图、水平垂直对齐，秩序感强",
+      "methods": [
+        { "dimension": "framing", "text_zh": "主体置于画面中心，水平线垂直校直，留白对称", "requires_cuts": false },
+        { "dimension": "camera", "text_zh": "机位正视、平视，不做倾斜与越轴", "requires_cuts": false },
+        { "dimension": "staging", "text_zh": "人物动作控制在画面中轴附近，避免大幅横向走位", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "节奏均匀克制，动作起止清晰", "requires_cuts": false }
+      ]
+    },
+    {
+      "id": "b04",
+      "label_zh": "悬念受限视角",
+      "label_en": "Restricted Reveal",
+      "category": "自建·拍法",
+      "summary_zh": "先藏信息，靠局部与遮挡制造疑问",
+      "methods": [
+        { "dimension": "framing", "text_zh": "用门框、前景遮挡或局部取景限制可见范围", "requires_cuts": false },
+        { "dimension": "information", "text_zh": "先给结果或局部，再逐步补齐空间关系，不提前揭底", "requires_cuts": false },
+        { "dimension": "camera", "text_zh": "机位保持观察者位置，不越到主体身后揭示全貌", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "在关键动作处留停半拍，让观众自己补全", "requires_cuts": false }
+      ]
+    },
+    {
+      "id": "b05",
+      "label_zh": "产品强调",
+      "label_en": "Product Emphasis",
+      "category": "自建·拍法",
+      "summary_zh": "局部特写与稳定运镜，突出材质与做工",
+      "methods": [
+        { "dimension": "framing", "text_zh": "以产品局部特写为主，边缘干净、构图简洁", "requires_cuts": false },
+        { "dimension": "camera", "text_zh": "缓速推近或平移展示细节，避免抖动", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "每个卖点一个短暂的停留，节奏均匀", "requires_cuts": false },
+        { "dimension": "information", "text_zh": "逐项呈现功能点，不在同一镜头里堆叠过多信息", "requires_cuts": true }
+      ]
+    },
+    {
+      "id": "b06",
+      "label_zh": "手持纪实",
+      "label_en": "Handheld Documentary",
+      "category": "自建·拍法",
+      "summary_zh": "轻微手持晃动，跟随真实动作，不做精致调度",
+      "methods": [
+        { "dimension": "camera", "text_zh": "手持拍摄，允许轻微呼吸感晃动，避免夸张摇晃", "requires_cuts": false },
+        { "dimension": "framing", "text_zh": "跟随人物自然取景，不强求完美构图", "requires_cuts": false },
+        { "dimension": "rhythm", "text_zh": "节奏贴现场真实节奏，允许不完美停顿", "requires_cuts": false },
+        { "dimension": "staging", "text_zh": "人物按自己的方式站位与动作，不刻意摆位", "requires_cuts": false }
+      ]
+    },
+    {
+      "id": "b07",
+      "label_zh": "强节奏剪辑",
+      "label_en": "Punchy Cutting",
+      "category": "自建·拍法",
+      "summary_zh": "短镜头切换、动作对接，突出效率与力度",
+      "methods": [
+        { "dimension": "editing", "text_zh": "用短镜头串联关键动作，切点落在动作进行中", "requires_cuts": true },
+        { "dimension": "rhythm", "text_zh": "前紧后松或逐段加速，避免匀速", "requires_cuts": true },
+        { "dimension": "framing", "text_zh": "景别在特写与中景之间跳变，形成力度对比", "requires_cuts": true },
+        { "dimension": "information", "text_zh": "每个镜头只承载一个信息点", "requires_cuts": true }
+      ]
+    },
+    {
+      "id": "b08",
+      "label_zh": "层次纵深",
+      "label_en": "Depth Layering",
+      "category": "自建·拍法",
+      "summary_zh": "前景中景背景分层，空间关系清晰",
+      "methods": [
+        { "dimension": "framing", "text_zh": "前中后景各放一个信息点，保持纵深可读", "requires_cuts": false },
+        { "dimension": "camera", "text_zh": "机位略微偏离正面对齐，让纵深线自然汇聚", "requires_cuts": false },
+        { "dimension": "staging", "text_zh": "人物在纵深方向上移动而非仅横向走位", "requires_cuts": false },
+        { "dimension": "information", "text_zh": "通过谁在前谁在后交代关系，而非靠台词解释", "requires_cuts": false }
+      ]
+    }
+  ]
+}

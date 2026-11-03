@@ -3,6 +3,18 @@ import { Button } from '@/components/ui/button'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import { readDirectorSettings } from './directorSettings'
 import { DEFAULT_PROMPT_RULES } from './directorSettings'
+import {
+  applyStyle,
+  EMPTY_STYLE,
+  fetchStyleList,
+  fetchStylePreview,
+  isStyleActive,
+  readStyle,
+  styleSummary,
+  writeStyle,
+  type StyleKind,
+  type StyleState,
+} from '@/lib/style-library'
 
 /** 把 ```userprompt 段N``` 代码块写入分镜脚本段的 promptA */
 function fillPromptA(projectKey: string, segIndex: number, text: string): boolean {
@@ -86,6 +98,7 @@ const TOOL_GROUP_LABELS: Record<string, string> = {
   binding: '绑定',
   generate: '生成任务轨',
   camera: '相机',
+  style: '视觉风格',
   memory: '项目记忆',
   misc: '其它',
 }
@@ -108,6 +121,7 @@ const TOOL_GROUPS: Record<string, string[]> = {
     'get_generation_status', 'list_outputs', 'save_project', 'delete_task_segments',
   ],
   camera: ['get_camera_track', 'set_camera_track', 'camera_plan', 'attach_camera_playblast'],
+  style: ['list_styles', 'set_style', 'preview_style', 'clear_style'],
   memory: ['remember', 'recall', 'memorize', 'recall_memories'],
   misc: ['list_projects', 'verify_project', 'dump_state', 'inspect_images'],
 }
@@ -146,6 +160,7 @@ const GROUP_INTENT_RULES: Array<{ group: string; pattern: RegExp }> = [
   { group: 'binding', pattern: /绑定|解绑|引用|@[\u4e00-\u9fa5A-Za-z]/i },
   { group: 'resource', pattern: /主体|资源|素材|图片|音频|配音|音乐|参考图|reference|subject|asset/i },
   { group: 'generate', pattern: /生成视频|跑一遍|运行|队列|任务轨|落轨|应用分镜|保存项目|导出|output/i },
+  { group: 'style', pattern: /风格|配色|色调|色板|导演方法|调色|style|palette/i },
   { group: 'memory', pattern: /记住|记忆|回忆|偏好|remember|memory/i },
   { group: 'misc', pattern: /项目列表|体检|排查|自检|看图|inspect/i },
   { group: 'storyboard', pattern: /分镜|脚本|第\s*\d+\s*段|镜头|beat|拆段|合并段|新增段|删除段/i },
@@ -471,6 +486,64 @@ export function AgentRail({
           properties: { name: { type: 'string', description: '技能名（list_skills 返回的 name）' } },
           required: ['name'],
         },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_styles',
+        description: '列出可选的视觉风格：配色（color）或导演方法（creator）。可按名字/分类搜索，先查再选',
+        parameters: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['color', 'creator'], description: 'color=配色，creator=导演拍法' },
+            query: { type: 'string', description: '按中文名/英文名/分类/编号搜索' },
+            limit: { type: 'number', description: '最多返回条数，默认 30' },
+          },
+          required: ['kind'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'preview_style',
+        description: '预览某个配色/导演方法会写入提示词的风格指令（不保存），确认用语是否合适',
+        parameters: {
+          type: 'object',
+          properties: {
+            color: { type: 'string', description: '配色编号；空字符串表示不用配色' },
+            creator: { type: 'string', description: '导演方法编号；空字符串表示不用' },
+            scope: { type: 'string', enum: ['color_only', 'color_and_light'] },
+            mode: { type: 'string', enum: ['on', 'experimental'] },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'set_style',
+        description: '应用视觉风格到本项目（写盘并编译指令），生成提示词时自动附加',
+        parameters: {
+          type: 'object',
+          properties: {
+            color: { type: 'string', description: '配色编号；留空=不用配色' },
+            creator: { type: 'string', description: '导演方法编号；留空=不用' },
+            scope: { type: 'string', enum: ['color_only', 'color_and_light'], description: '默认仅色彩' },
+            mode: { type: 'string', enum: ['on', 'experimental'], description: '默认 on' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'clear_style',
+        description: '关闭视觉风格（不再向提示词附加风格指令）',
+        parameters: { type: 'object', properties: {}, required: [] },
       },
     },
     {
@@ -1342,6 +1415,64 @@ export function AgentRail({
   }
 
   async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (name === 'list_styles') {
+      const kind = (String(args.kind ?? 'color') === 'creator' ? 'creator' : 'color') as StyleKind
+      const query = String(args.query ?? '')
+      const limit = Number(args.limit ?? 30) || 30
+      return fetchStyleList(kind, query, limit).then((data) => ({
+        ok: true,
+        kind,
+        source: data.source,
+        total: data.total,
+        items: data.items.map((item) => ({
+          id: item.id,
+          name: item.label_zh,
+          name_en: item.label_en,
+          category: item.category,
+          summary: item.summary_zh ?? '',
+        })),
+      })).catch((error: unknown) => ({ ok: false, error: String((error as Error)?.message ?? error) }))
+    }
+    if (name === 'preview_style') {
+      const draft: StyleState = {
+        mode: (String(args.mode ?? 'on') === 'experimental' ? 'experimental' : 'on'),
+        scope: (String(args.scope ?? 'color_only') === 'color_and_light' ? 'color_and_light' : 'color_only'),
+        color: String(args.color ?? ''),
+        creator: String(args.creator ?? ''),
+      }
+      return fetchStylePreview(draft)
+        .then((preview) => ({
+          ok: true,
+          color: preview.colorName ?? '',
+          creator: preview.creatorName ?? '',
+          source: preview.source ?? '',
+          instruction: preview.instruction,
+        }))
+        .catch((error: unknown) => ({ ok: false, error: String((error as Error)?.message ?? error) }))
+    }
+    if (name === 'set_style') {
+      const draft: StyleState = {
+        mode: (String(args.mode ?? 'on') === 'experimental' ? 'experimental' : 'on'),
+        scope: (String(args.scope ?? 'color_only') === 'color_and_light' ? 'color_and_light' : 'color_only'),
+        color: String(args.color ?? ''),
+        creator: String(args.creator ?? ''),
+      }
+      return applyStyle(projectKey, draft)
+        .then((state) => ({
+          ok: true,
+          applied: isStyleActive(state),
+          summary: styleSummary(state),
+          color: state.colorName ?? '',
+          creator: state.creatorName ?? '',
+          source: state.source ?? '',
+          instruction: state.instruction ?? '',
+        }))
+        .catch((error: unknown) => ({ ok: false, error: String((error as Error)?.message ?? error) }))
+    }
+    if (name === 'clear_style') {
+      writeStyle(projectKey, { ...EMPTY_STYLE })
+      return Promise.resolve({ ok: true, applied: false, summary: '未启用' })
+    }
     if (name === 'load_tools') {
       const rawGroups = Array.isArray(args.groups) ? args.groups.map((item) => String(item)) : []
       const valid = rawGroups.filter((group) => group in TOOL_GROUPS)
@@ -4182,7 +4313,7 @@ export function AgentRail({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           brief: materializedBrief,
-          options: { ...mapped, duration_seconds: duration, output_language: String(args.language ?? '中文'), task_label: String(settings.taskType ?? '') },
+          options: { ...mapped, style_instruction: (isStyleActive(readStyle(projectKey)) ? String(readStyle(projectKey).instruction ?? '') : ''), duration_seconds: duration, output_language: String(args.language ?? '中文'), task_label: String(settings.taskType ?? '') },
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,
           duration_seconds: duration,
@@ -4528,6 +4659,16 @@ export function AgentRail({
       const notes = (workspaceNow.notes ?? {}) as Record<string, string>
       const agent = readDirectorSettings(projectKey).agent
       const context: Record<string, unknown> = { project: projectKey, tab }
+      const styleNow = readStyle(projectKey)
+      if (isStyleActive(styleNow)) {
+        context.visual_style = {
+          summary: styleSummary(styleNow),
+          color: styleNow.colorName ?? styleNow.color,
+          creator: styleNow.creatorName ?? styleNow.creator,
+          scope: styleNow.scope,
+          mode: styleNow.mode,
+        }
+      }
       if (agent.includeNodeSettings) {
         context.frame_rate = frameRate
         context.ratio = ratio

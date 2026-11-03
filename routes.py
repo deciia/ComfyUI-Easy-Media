@@ -2647,3 +2647,34 @@ async def handle_resources_input(request: web.Request) -> web.Response:
         )
 
 
+@PromptServer.instance.routes.get("/easy-media/styles")
+async def handle_styles_list(request: web.Request) -> web.Response:
+    """列出视觉风格候选（配色/导演方法）：优先本机 T8 插件资源，否则用自建兜底。"""
+    kind = str(request.query.get("kind") or "color")
+    query = str(request.query.get("q") or "")
+    try:
+        limit = int(request.query.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        from .utils.visual_styles import list_styles
+
+        return web.json_response(list_styles(kind, query, limit))
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/styles/preview")
+async def handle_styles_preview(request: web.Request) -> web.Response:
+    """把选中的配色/导演方法编译成可附加到提示词的风格指令块。"""
+    color = str(request.query.get("color") or "")
+    creator = str(request.query.get("creator") or "")
+    scope = str(request.query.get("scope") or "color_only")
+    mode = str(request.query.get("mode") or "on")
+    try:
+        from .utils.visual_styles import compile_instruction
+
+        result = compile_instruction(color, creator, scope, mode)
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)

@@ -351,6 +351,10 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     skill_profile = str(options.get("official_skill_profile") or "")
     if skill_profile:
         lines.append(f"官方 Skill 协议：{skill_profile}（严格模式下所有说明字段使用英文，仅台词/歌词保留原语言）")
+    style_instruction = str(options.get("style_instruction") or "").strip()
+    if style_instruction:
+        lines.append(style_instruction[:4000])
+
     reference_template = str(options.get("reference_template") or "").strip()
     if reference_template:
         lines.append("参考模板（提供镜头结构/节奏/运镜/风格参照，用户素材仍为准）：\n" + reference_template[:2000])
