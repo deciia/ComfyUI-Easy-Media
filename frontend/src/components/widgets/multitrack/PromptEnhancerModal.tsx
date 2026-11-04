@@ -1596,53 +1596,100 @@ export function PromptEnhancerModal({
     const pictureCount = editorResources.filter((item) => item.type === 'image').length
     const audioCount = editorResources.filter((item) => item.type === 'audio').length
     setResultTab('ai')
+    const isAudioProject = (() => {
+      try {
+        const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { project_kind?: string } }).__easyMediaTimelineSummary
+        return String(summary ? (summary().project_kind ?? 'video') : 'video') === 'audio'
+      } catch {
+        return false
+      }
+    })()
     registry.__easyMediaAgentAsk([
       `只做第 ${activeScriptIndex + 1} 段「${name}」的片段稿：用 write_prompt(index=${activeScriptIndex + 1}, target=fragment) 写入，不要动终稿和其它段。`,
       '',
-      '【格式（照抄形状，标签不要另起一行）】',
-      '概述：<一句话：画幅 + 时长；场景、人物、基调、观众该看什么>',
-      '钩子：<一句话>',
-      '[Shot 1] 约 X.Xs｜<景别>：<机位/构图/动作/节奏>',
-      '<d>[Chinese] <台词原文></d>   ← 台词必须这样写，不要用「台词：」',
-      '[Shot 2] …（同上）',
-      '声音：<现场声；独立音频才带令牌>',
-      '规定：标签后直接接冒号与内容，同一行；不要写成「概述」独占一行再换行写字。',
-      '',
-      '**不要沿用本对话里之前那段片段稿的写法**：按下面的格式从头写。',
-      '',
-      '【事实】',
-      `本段令牌表：${bindingTable || '（无绑定）'}`,
-      `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}`,
-      '**时长与画幅不要写成标题**：放进概述第一句（如「9:16 竖屏，10 秒，维修车间内景」）。',
-      '',
-      '【写法】',
-      '第一句就是「概述：」，不要写「第 N 段｜段名（10s）」这类标题行——终稿没有标题，标题会误导。',
-      '概述（2–4 句）：第一句带时长与画幅；再写在哪儿、谁在场、什么基调（光线/景深/风格）、观众该看什么。',
-      '[Shot N] 约 Xs｜景别：只写镜头与画面实现（机位/构图/动作/节奏/切换）；概述说过的不要重复。',
-      '台词只用 <d>[Chinese] 原文</d>（每句一条），不要写成「台词：…」；声音写现场声。',
-      '优先用主体：已建 <Subject n> 的（人物/场景/道具）就用主体，没建主体的才用 <Picture n>；只想借构图时写「仅借构图」。',
-      '主体/资源直接写进句子：<Subject 1>（老赵）坐在 <Picture 1>（工作台）前…；括号紧跟令牌，保留说明只在首次出现写一次。',
-      '说话角色的音色可省（主体定义里已有）；只有独立音频（配乐/环境/音效）才写进「声音」。',
-      '语言、详略、镜头描述方式随你。',
-      '',
-      '',
-      '【样例】（照这个密度和口吻写，内容按本段换）',
-      '概述：9:16 竖屏，10 秒；维修车间内景，<Subject 1>（老赵）坐在 <Picture 1>（工作台，保留台面质感与台灯落位）前；冷调侧顶光、浅景深，写实记录风格；整段是「劝人别乱花钱却劝你修整套」的反差开场，注意力压在老赵的表情和手边那只坏油嘴上。',
-      '钩子：最不建议乱花钱的人，反而劝你修整套。',
-      '[Shot 1] 约 4.5s｜中近景：<Subject 1> 坐在 <Picture 1> 前直对镜头口播，右手压在擦布上',
-      '<d>[Chinese] 修油嘴这行，我是最不建议大家乱花钱的。</d>',
-      '[Shot 2] 约 3s｜俯拍特写：一只积碳发黑的油嘴从画外落入 <Picture 2>（保留盘内排布与积碳状态）的盘里，弹一下停住',
-      '[Shot 3] 约 2.5s｜中近景：切回同机位，<Subject 1> 抬手在台面轻按两下',
-      '<d>[Chinese] 先别急着骂，听完再决定。</d>',
-      '声音：口播 + 台面闷响，车间底噪持续；无独立配乐。',
-      '',
-      '【禁区】',
-      '不写标题行（第 N 段｜段名｜时长）；不写文件名（.jpg/.png/.wav）；不列「可用素材」清单；不写六段键名或禁字幕句；不扩展范围。',
+      ...(isAudioProject
+        ? [
+            '【格式（音频项目，照抄形状，标签不要另起一行）】',
+            '概述：<时长；一句场景（黑场/静态背景）；说话人与情绪基调>',
+            '钩子：<一句话>',
+            '[Shot 1] 约 X.Xs｜<声音表演>：<语速/音量/停顿/气口/咬字/尾音>',
+            '<d>[Chinese] <台词原文></d>',
+            '[Shot 2] …（同上）',
+            '声音：<近讲距离 / 环境底噪 / 有无配乐>',
+            '规定：标签后直接接冒号与内容，同一行。',
+            '',
+            '【音频写法】',
+            '真正的主体是台词与表演：语速快慢、音量大小、停顿与气口、咬字松紧、尾音上扬或下坠，按时间顺序写清。',
+            '画面只写一句带过（如「画面黑场，无可见内容」「画面定格水面」），不写景别、机位、构图、光线、镜头运动。',
+            '若绑定 <Audio n> 作音色参考，必须声明「只取音色，不复用其语速/停顿/节奏/情绪」。',
+            '没有配乐就写「无独立配乐」。',
+            '',
+            '【样例】（照这个密度和口吻写，内容按本段换）',
+            '概述：9 秒纯口播音频，画面黑场；<Subject 1>（老赵）近讲，基调是压着嗓子的笃定。',
+            '钩子：四万多公里不换柴油滤芯，滤芯一堵，油路供不上。',
+            '[Shot 1] 约 4.5s｜压低嗓音快报症状，两句之间几乎不换气，「轨压往下掉」处加重',
+            '<d>[Chinese] 四万多公里不换柴油滤芯，滤芯一堵，油路供不上，轨压往下掉。</d>',
+            '[Shot 2] 约 4.5s｜停顿半拍后放慢，「先查明白再换件」逐字收紧，尾音收住',
+            '<d>[Chinese] 老赵教你查明白再换件。</d>',
+            '声音：单一条近讲人声，音色参照 <Audio 1>（只取音色），轻微房间底噪与换气声；无独立配乐。',
+            '',
+            '【禁区】',
+            '不写景别/机位/构图/光线/镜头运动；不写人物外貌与表情表演；不写标题行；不写文件名；不列可用素材清单；不扩展范围。',
+          ]
+        : [
+          '【格式（照抄形状，标签不要另起一行）】',
+          '概述：<一句话：画幅 + 时长；场景、人物、基调、观众该看什么>',
+          '钩子：<一句话>',
+          '[Shot 1] 约 X.Xs｜<景别>：<机位/构图/动作/节奏>',
+          '<d>[Chinese] <台词原文></d>   ← 台词必须这样写，不要用「台词：」',
+          '[Shot 2] …（同上）',
+          '声音：<现场声；独立音频才带令牌>',
+          '规定：标签后直接接冒号与内容，同一行；不要写成「概述」独占一行再换行写字。',
+          '',
+          '**不要沿用本对话里之前那段片段稿的写法**：按下面的格式从头写。',
+          '',
+          '【事实】',
+          `本段令牌表：${bindingTable || '（无绑定）'}`,
+          `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}`,
+          '**时长与画幅不要写成标题**：放进概述第一句（如「9:16 竖屏，10 秒，维修车间内景」）。',
+          '',
+          '【写法】',
+          '第一句就是「概述：」，不要写「第 N 段｜段名（10s）」这类标题行——终稿没有标题，标题会误导。',
+          '概述（2–4 句）：第一句带时长与画幅；再写在哪儿、谁在场、什么基调（光线/景深/风格）、观众该看什么。',
+          '[Shot N] 约 Xs｜景别：只写镜头与画面实现（机位/构图/动作/节奏/切换）；概述说过的不要重复。',
+          '台词只用 <d>[Chinese] 原文</d>（每句一条），不要写成「台词：…」；声音写现场声。',
+          '优先用主体：已建 <Subject n> 的（人物/场景/道具）就用主体，没建主体的才用 <Picture n>；只想借构图时写「仅借构图」。',
+          '主体/资源直接写进句子：<Subject 1>（老赵）坐在 <Picture 1>（工作台）前…；括号紧跟令牌，保留说明只在首次出现写一次。',
+          '说话角色的音色可省（主体定义里已有）；只有独立音频（配乐/环境/音效）才写进「声音」。',
+          '语言、详略、镜头描述方式随你。',
+          '',
+          '',
+          '【样例】（照这个密度和口吻写，内容按本段换）',
+          '概述：9:16 竖屏，10 秒；维修车间内景，<Subject 1>（老赵）坐在 <Picture 1>（工作台，保留台面质感与台灯落位）前；冷调侧顶光、浅景深，写实记录风格；整段是「劝人别乱花钱却劝你修整套」的反差开场，注意力压在老赵的表情和手边那只坏油嘴上。',
+          '钩子：最不建议乱花钱的人，反而劝你修整套。',
+          '[Shot 1] 约 4.5s｜中近景：<Subject 1> 坐在 <Picture 1> 前直对镜头口播，右手压在擦布上',
+          '<d>[Chinese] 修油嘴这行，我是最不建议大家乱花钱的。</d>',
+          '[Shot 2] 约 3s｜俯拍特写：一只积碳发黑的油嘴从画外落入 <Picture 2>（保留盘内排布与积碳状态）的盘里，弹一下停住',
+          '[Shot 3] 约 2.5s｜中近景：切回同机位，<Subject 1> 抬手在台面轻按两下',
+          '<d>[Chinese] 先别急着骂，听完再决定。</d>',
+          '声音：口播 + 台面闷响，车间底噪持续；无独立配乐。',
+          '',
+          '【禁区】',
+          '不写标题行（第 N 段｜段名｜时长）；不写文件名（.jpg/.png/.wav）；不列「可用素材」清单；不写六段键名或禁字幕句；不扩展范围。',
+          ]),
     ].join('\n'))
     return true
   }
 
 function askAgentGenerate(language: '中文' | 'English') {
+  const isAudioFinal = (() => {
+    try {
+      const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { project_kind?: string } }).__easyMediaTimelineSummary
+      return String(summary ? (summary().project_kind ?? 'video') : 'video') === 'audio'
+    } catch {
+      return false
+    }
+  })()
   const registry = globalThis as unknown as { __easyMediaAgentAsk?: (text: string) => void }
   const segmentName = String((activeScriptSegment as unknown as { name?: string })?.name ?? `第 ${activeScriptIndex + 1} 段`)
 
@@ -1666,11 +1713,27 @@ function askAgentGenerate(language: '中文' | 'English') {
     `- 目标字数：${options.description_word_target || '不限'}；镜头数：${options.shot_count}`,
     `- 硬要求（必须遵守）：${String(options.constraints || '').trim() || '无'}`,
     `- 偏好预设：运镜 [${(presets.camera_motion ?? []).join('、') || '不指定'}]；景别 [${(presets.shot_size ?? []).join('、') || '不指定'}]；微表情 [${(presets.expression ?? []).join('、') || '不指定'}]；构图 [${(presets.framing ?? []).join('、') || '不指定'}]`,
+    ...(isAudioFinal
+      ? [
+          '- 音频项目：上面的运镜/景别/微表情/构图偏好不适用，忽略即可；重心放在台词与声音表演（语速/音量/停顿/气口/咬字/尾音）',
+        ]
+      : []),
     '',
+    ...(isAudioFinal
+      ? [
+          '【音频项目写法（优先于技能默认）】',
+          '保留 H3 官方字段，但以声音为主线：',
+          '- subject_definitions：把 <Audio n> 声明为音色/音色身份参考，并明确「只取音色，不复用语速/停顿/节奏/情绪」；',
+          '- detailed_description：用 [Shot N] 与 At 00:0X.XXX 标时序；每段先一句画面交代（黑场/静态背景），其余写台词与声音表演；',
+          '- overall_soundscape：近讲距离、房间底噪、音色质感；',
+          '- non_diegetic_music：无配乐写 N/A。',
+          '',
+        ]
+      : []),
     '【三份输入，先读】',
     '1. get_segment：完整分镜（镜头/台词/时长/settings），镜头数与台词以它为准；',
     '2. get_prompt_context：本段绑定与保留项，编号照抄；',
-    '3. 文末片段稿：用户的意图与补充，优先级高于你的自由发挥。需要时 read_skill h3-prompt-spec。',
+    '3. 文末片段稿：用户的意图与补充，优先级高于你的自由发挥。需要时 read_skill ' + (isAudioFinal ? 'audiobook-prompts 或 koubo-script' : 'h3-prompt-spec') + '。',
     '',
     '【六段怎么写】',
     'subject_definitions：每令牌一行，写成模型能直接使用的事实，不许引用面板或文件名：',
