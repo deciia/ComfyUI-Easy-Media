@@ -405,25 +405,49 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     constraints = str(options.get("constraints") or "").strip()
     if constraints:
         lines.append("硬性要求：" + constraints)
-    lines.append(
-        "归一化要求：输出必须使用官方结构（subject_definitions / detailed_description（含 [Shot N] 与 At 00:0X.XXX 时间戳）/ "
-        "overall_soundscape / non_diegetic_music）。R2V/VI2V 必须含 subject_definitions 六段式；T2V/L2V 可用三段式。"
-        "用户片段中的中文自由描述、中文章节名都要就地改写成官方字段；"
-        "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌保持编号含义不变，禁止重命名或重定义已有令牌；"
-        "允许为人物/场景/风格这类可复用单元新建 <Subject n>，并在其定义里内嵌引用作为来源的 <Picture n>（图片本身不是某一镜的首帧/关键帧时不单列）；"
-        "At 时间戳必须递增且不得超过目标时长；禁止出现文字、字幕、logo、水印。"
-    )
-    lines.append(
-        "输出格式（硬性）：每个使用到的段名必须单独占一行、紧跟一个英文半角冒号，正文另起一行。"
-        "正确示例：\n"
-        "subject_definitions:\n"
-        "<Subject 1> is the mechanic in <Picture 1>: mid-fifties, short grey-flecked crew cut, light stubble, dark grey work jacket with rolled cuffs; preserve face, hair, build and wardrobe; do not copy the four-view layout itself.\n"
-        "<Picture 2> is the first frame of [Shot 1], showing the workbench from a slight high angle.\n\n"
-        "summary:\n坠落之后的幽暗深海…\n\n"
-        "retention_analysis:\n- <Subject 1> …\n"
-        "禁止写成「## subject_definitions」「**subject_definitions**」「subject_definitions」后直接接正文，"
-        "也不要使用中文全角冒号。"
-    )
+    if project_kind == "audio":
+        lines.append(
+            "归一化要求（音频项目）：本项目的产物是音频，输出以声音为唯一主线。"
+            "detailed_description 只写声音事件与其发生时间（At 00:0X.XXX），禁止出现画面、景别、机位、构图、光线、画布比例；"
+            "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
+            "non_diegetic_music 明确写有或 none。不需要 subject_definitions 的画面定义，也不需要 [Shot] 镜头调度。"
+            "用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变。"
+            "禁止出现文字、字幕、logo、水印。"
+        )
+        lines.append(
+            "输出格式（硬性，音频项目）：每个使用的段名单独占一行、紧跟英文半角冒号，正文另起一行。"
+            "示例：\n"
+            "summary:\n本段是一条 9 秒纯口播音频，主持人报出车辆症状。\n\n"
+            "detailed_description:\nAt 00:00.000 主持人开口，压低嗓音快速报症状；At 00:03.200 停顿半拍后继续。\n"
+            "S1 says: <d>[Chinese] 重卡爬坡，轨压往下掉。</d>\n\n"
+            "overall_soundscape:\n室内近场收音，单人声，轻微房间底噪与换气声，无第二人声。\n\n"
+            "non_diegetic_music:\nnone"
+        )
+    elif project_kind == "image":
+        lines.append(
+            "归一化要求（图片项目）：输出是对静态画面的描述（主体、构图、镜头、光线、材质与风格），"
+            "不要写时间轴、镜头切换、台词与配音；禁止出现文字、字幕、logo、水印。"
+        )
+    else:
+        lines.append(
+            "归一化要求：输出必须使用官方结构（subject_definitions / detailed_description（含 [Shot N] 与 At 00:0X.XXX 时间戳）/ "
+            "overall_soundscape / non_diegetic_music）。R2V/VI2V 必须含 subject_definitions 六段式；T2V/L2V 可用三段式。"
+            "用户片段中的中文自由描述、中文章节名都要就地改写成官方字段；"
+            "<Subject n>/<Picture n>/<Audio n>/<Video n>/<d>…</d> 令牌保持编号含义不变，禁止重命名或重定义已有令牌；"
+            "允许为人物/场景/风格这类可复用单元新建 <Subject n>，并在其定义里内嵌引用作为来源的 <Picture n>（图片本身不是某一镜的首帧/关键帧时不单列）；"
+            "At 时间戳必须递增且不得超过目标时长；禁止出现文字、字幕、logo、水印。"
+        )
+        lines.append(
+            "输出格式（硬性）：每个使用到的段名必须单独占一行、紧跟一个英文半角冒号，正文另起一行。"
+            "正确示例：\n"
+            "subject_definitions:\n"
+            "<Subject 1> is the mechanic in <Picture 1>: mid-fifties, short grey-flecked crew cut, light stubble, dark grey work jacket with rolled cuffs; preserve face, hair, build and wardrobe; do not copy the four-view layout itself.\n"
+            "<Picture 2> is the first frame of [Shot 1], showing the workbench from a slight high angle.\n\n"
+            "summary:\n坠落之后的幽暗深海…\n\n"
+            "retention_analysis:\n- <Subject 1> …\n"
+            "禁止写成「## subject_definitions」「**subject_definitions**」「subject_definitions」后直接接正文，"
+            "也不要使用中文全角冒号。"
+        )
     lines.append(
         "用户片段（片段提示词：可能是白话提纲/分镜脚本/口语描述，**不要求六段式**，也不需要 H3 语法；\n"
         "你的任务是把它加上主体与资源引用，改写成结构规范的最终提示词）：\n" + brief
