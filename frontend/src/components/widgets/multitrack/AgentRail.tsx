@@ -1477,35 +1477,7 @@ export function AgentRail({
     return { task_type: 't2v', task_mode: 'default' }
   }
 
-  /** 去掉引号内的台词复述：描述里出现的、与 <d> 内容重复的引文会被模型一起念出来。 */
-function stripQuotedDialogue(text: string): { text: string; replaced: number } {
-  const normalize = (value: string) => value.replace(/[\s，。！？；：、—…「」『』“”"'（）()]/g, '')
-  const bodies = Array.from(text.matchAll(/<d>[\s\S]*?<\/d>/gi))
-    .map((m) => normalize(String(m[0]).replace(/<[^>]+>/g, '')))
-    .filter((body) => body.length >= 4)
-  if (!bodies.length) return { text, replaced: 0 }
-  const sharesRun = (candidate: string) => {
-    for (let i = 0; i + 4 <= candidate.length; i += 1) {
-      const window4 = candidate.slice(i, i + 4)
-      if (bodies.some((body) => body.includes(window4))) return true
-    }
-    return false
-  }
-  let replaced = 0
-  // 只在 <d> 之外替换
-  const parts = text.split(/(<d>[\s\S]*?<\/d>)/gi)
-  const out = parts.map((part) => {
-    if (/^<d>[\s\S]*<\/d>$/i.test(part)) return part
-    return part.replace(/[「『“"]([^」』”"]{2,60})[」』”"]/g, (whole, inner: string) => {
-      const normalized = normalize(inner)
-      if (normalized.length < 4 || !sharesRun(normalized)) return whole
-      replaced += 1
-      return '该句'
-    })
-  })
-  return { text: out.join(''), replaced }
-}
-
+  
 async function executeAgentTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (name === 'list_styles') {
       const kind = (String(args.kind ?? 'color') === 'creator' ? 'creator' : 'color') as StyleKind
@@ -3156,12 +3128,7 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
           instruction: '令牌编号与本段绑定不一致。请只改编号（文字不要动），改完再调用 write_prompt 写一次；确实想按原样写入可传 auto_align=true。',
         }
       }
-      const alignedText = autoAlign ? alignedResult.text : rawText
-      // 终稿落盘前把「描述里复述台词的引文」清成「该句」，避免模型把引文也念一遍
-      const cleaned = String(args.target ?? '').trim() === 'final'
-        ? stripQuotedDialogue(alignedText)
-        : { text: alignedText, replaced: 0 }
-      const text = cleaned.text
+      const text = autoAlign ? alignedResult.text : rawText
       const variant = String(args.variant ?? 'a') === 'b' ? 'b' : 'a'
       const planNow = readPlan() as { segments?: Array<Record<string, unknown>> } | null
       const planSegments = (planNow?.segments ?? []) as Array<Record<string, unknown>>
