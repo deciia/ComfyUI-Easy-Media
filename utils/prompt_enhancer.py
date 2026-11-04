@@ -414,7 +414,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             "（如“画面黑场，无可见内容”），其余篇幅写台词与声音表演：语气、语速、停顿、呼吸、气口、近讲距离；"
             "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
             "non_diegetic_music 明确写有或 none。画面细节（景别/机位/构图/光线）只需保持中性、简单一句即可，不必展开。"
-            "时间轴标记默认用官方的 [Shot N]（推荐写法）；社区里也有 [Audio Segment N] 这类写法，同样可用，不要因为它非官方就改写。同一份提示词里选一种体例即可。若把 <Audio n> 当作音色参考，subject_definitions 里必须写明「只取音色与发声特征，不复用其语速/停顿/节奏/情绪」，避免模型照抄参考音频的读法；无配乐时 non_diegetic_music 写 N/A。用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变；"
+            "时间轴标记默认用官方的 [Shot N]（推荐写法）；社区里也有 [Audio Segment N] 这类写法，同样可用，不要因为它非官方就改写。同一份提示词里选一种体例即可。说话人一律写成官方稳定 ID 并带圆括号：`(S1)`、`(S2)`，不要写成裸 `S1` 或 `<S1>`；首次出现时前面带身份或主体令牌，例如 `<Subject 1> (S1) says: <d>[Chinese] …</d>`；音色引用在 subject_definitions 里写成 `<Audio 1> is the voice-timbre reference for <Subject 1> (S1).`。若把 <Audio n> 当作音色参考，subject_definitions 里必须写明「只取音色与发声特征，不复用其语速/停顿/节奏/情绪」，避免模型照抄参考音频的读法；无配乐时 non_diegetic_music 写 N/A。用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变；"
             "禁止出现文字、字幕、logo、水印。"
         )
         lines.append(
@@ -423,7 +423,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             "summary:\n本段是一条 9 秒纯口播音频，画面黑场，主持人报出车辆症状。\n\n"
             "detailed_description:\n[Shot 1] 画面黑场，无可见内容，只有一条近讲人声。"
             "At 00:00.000 主持人开口，压低嗓音快速报症状；At 00:03.200 停顿半拍后继续。\n"
-            "S1 says: <d>[Chinese] 重卡爬坡，轨压往下掉。</d>\n\n"
+            "<Subject 1> (S1) says: <d>[Chinese] 重卡爬坡，轨压往下掉。</d>\n\n"
             "overall_soundscape:\n室内近场收音，单人声，轻微房间底噪与换气声，无第二人声。\n\n"
             "non_diegetic_music:\nnone"
         )
