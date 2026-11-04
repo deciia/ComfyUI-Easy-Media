@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { formatPlanSegmentBrief } from './PlanPreview'
 import { readDirectorSettings } from './directorSettings'
-import { DEFAULT_PROMPT_RULES } from './directorSettings'
+import { DEFAULT_PROMPT_RULES, AUDIO_PROMPT_RULES, IMAGE_PROMPT_RULES } from './directorSettings'
 import {
   applyStyle,
   EMPTY_STYLE,
@@ -5129,7 +5129,12 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
           messages: chatMessages,
           context: buildContext(),
           tools: activeTools,
-          system_extra: readDirectorSettings(projectKey).agent.promptRules || DEFAULT_PROMPT_RULES,
+          system_extra: (() => {
+            const configured = String(readDirectorSettings(projectKey).agent.promptRules || '').trim()
+            const kindRules = projectKind === 'audio' ? AUDIO_PROMPT_RULES : projectKind === 'image' ? IMAGE_PROMPT_RULES : DEFAULT_PROMPT_RULES
+            // 音频项目：用户规则后面再追加一份音频规范，保证格式不跑偏
+            return projectKind === 'audio' ? [configured, AUDIO_PROMPT_RULES].filter(Boolean).join('\n\n') : (configured || kindRules)
+          })(),
         })
         // 优先流式（逐字出现）：失败自动回退非流式；回退时只补未显示的后缀，避免重复
         let data: { ok?: boolean; text?: string; tool_calls?: unknown[]; error?: string } | null = null

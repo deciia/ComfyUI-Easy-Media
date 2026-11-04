@@ -238,6 +238,47 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
 
 直接开始干活，不要解释你有哪些工具。"""
 
+_AUDIO_PROMPT_SPEC = '''  4. 两类稿子别混（**音频项目**，时间轴用 [Audio Segment N]，不是 [Shot N]）：
+     - 片段稿（target=fragment）：白话工作稿，标签与内容同一行：
+       概述：<时长；一句场景；说话人与情绪基调>
+       [Audio Segment 1] At 00:0X.XXX｜<声音表演>：<语速/音量/停顿/气口/咬字/尾音>
+       <d>[Chinese] <台词原文></d>
+       声音：<近讲距离 / 环境底噪 / 有无配乐>
+     - 终稿（target=final）：六段齐全（subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music）：
+       · subject_definitions：`<Audio 1> 是 <Subject 1> (老赵) 的音色参考：只取音色、共鸣与音高质感；不复用语速、停顿节奏与情绪节奏，这些按本段台词重新生成。`——用中文写；`<Subject n>` 一句话说明说话人与身份即可，不写五官/服装等外观七要素。
+       · summary：中文写时长、说话人、整体声音基调与本段任务；**不写画幅、不写分辨率**。
+       · detailed_description：
+         - 第一个 [Audio Segment N] 之前先写一段总述（1–2 句）：时长、说话人、整体声音基调。
+         - 时间轴用 `[Audio Segment N] At 00:0X.XXX`；不写景别/机位/构图/光线/镜头运动。
+         - 每个 [Audio Segment N] 只描述一个说话人、只放一句台词，结尾用「他说：」或「她说：」紧跟 `<d>[Chinese] 原文</d>`；说话人写半角圆括号稳定 ID `(S1)`。
+         - 声音用中文完整第三人称陈述句，四句骨架：①谁在说 + 声音质感；②音色沿用谁 + 什么独立生成；③目标演绎（语速/停顿/情绪机制）；④节奏重声明（可省）。
+         - 句间静默单独成句（如「句间静默约 0.3 秒。」）。
+         - 不写「黑场」「无可见元素」这类画面占位；画面可自然简述一句，也可以不写。
+         - 不要写对演员说戏的祈使句（如「语速再提一点，把车主的判断原样掀过去」）、不要用引号复述台词、不要把描述写成可朗读的散文——这些都会被当成台词念出来。
+       · overall_soundscape：没有环境声就写 N/A；non_diegetic_music：无配乐写 N/A。
+       · 不编造分镜里没有的台词；片段稿里用户的补充必须体现。
+'''
+
+
+_AUDIO_SPEC_HEAD, _AUDIO_SPEC_BODY = AGENT_TOOL_PROMPT.split("4. 两类稿子别混：", 1)
+_AUDIO_SPEC_VIDEO_BODY, _AUDIO_SPEC_REST = _AUDIO_SPEC_BODY.split("5. 优先用主体：", 1)
+AGENT_TOOL_PROMPT_AUDIO = (
+    _AUDIO_SPEC_HEAD
+    + "4. 两类稿子别混：\n"
+    + _AUDIO_PROMPT_SPEC
+    + "5. 优先用主体："
+    + _AUDIO_SPEC_REST
+)
+
+
+def _tool_prompt_for(context: dict | None) -> str:
+    """按项目类型选系统提示词：音频项目用音频版第 4 节，其它用默认（视频）版。"""
+    kind = str((context or {}).get("project_kind") or "").strip().lower()
+    if kind == "audio":
+        return AGENT_TOOL_PROMPT_AUDIO
+    return AGENT_TOOL_PROMPT
+
+
 
 AGENT_SUMMARY_PROMPT = """你是 EasyMedia「导演工作台」的助手。一轮任务刚执行完毕，工具调用与结果都在对话里。
 
@@ -359,16 +400,6 @@ def _compact_context(context: dict | None) -> dict:
     }
 
 
-def _apply_kind_overrides(system: str, context: dict | None) -> str:
-    """按项目类型在系统提示词**末尾**追加覆盖块：优先级高于技能、用户规则与默认风格。"""
-    kind = str((context or {}).get("project_kind") or "").strip().lower()
-    if kind == "audio":
-        return system + AUDIO_KIND_OVERRIDE
-    if kind == "image":
-        return system + IMAGE_KIND_OVERRIDE
-    return system
-
-
 def build_decision_messages(messages: list[dict], context: dict | None, system_extra: str = "") -> list[dict]:
     system = AGENT_SYSTEM_PROMPT + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
     if system_extra:
@@ -384,7 +415,7 @@ def build_decision_messages(messages: list[dict], context: dict | None, system_e
     history = _sanitize_tool_history(history)
     if not history:
         history = [{"role": "user", "content": "你好"}]
-    return [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history]
+    return [{"role": "system", "content": system}, *history]
 
 
 def parse_decision(raw: str) -> dict:
@@ -610,7 +641,7 @@ async def stream_agent_step(
         tools = None
         base_prompt = AGENT_SUMMARY_PROMPT
     else:
-        base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
+        base_prompt = _tool_prompt_for(context) if tools else AGENT_SYSTEM_PROMPT
     system = base_prompt + _skills_hint() + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
@@ -661,7 +692,7 @@ async def stream_agent_step(
 
     body: dict = {
         "model": settings.model,
-        "messages": [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history],
+        "messages": [{"role": "system", "content": system}, *history],
         "temperature": 0.3,
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -756,7 +787,7 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
     body = {
         "model": settings.model,
         "messages": [
-            {"role": "system", "content": _apply_kind_overrides(system, context)},
+            {"role": "system", "content": system},
             {"role": "user", "content": "\n".join(lines)[:60000]},
         ],
         "temperature": 0.2,
@@ -847,7 +878,7 @@ def _minimal_agent_messages(system: str, items: list[dict]) -> list[dict]:
         + summary
     )
     return [
-        {"role": "system", "content": _apply_kind_overrides(system, context)},
+        {"role": "system", "content": system},
         {"role": "user", "content": merged[:12000]},
     ]
 
@@ -871,7 +902,7 @@ async def run_agent_step(
         tools = None
         base_prompt = AGENT_SUMMARY_PROMPT
     else:
-        base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
+        base_prompt = _tool_prompt_for(context) if tools else AGENT_SYSTEM_PROMPT
     system = (
         base_prompt
         + _skills_hint()
@@ -950,7 +981,7 @@ async def run_agent_step(
 
     body: dict[str, Any] = {
         "model": settings.model,
-        "messages": [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history],
+        "messages": [{"role": "system", "content": system}, *history],
         "temperature": 0.3,
         "stream": False,
     }
