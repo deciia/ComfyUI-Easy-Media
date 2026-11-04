@@ -1484,6 +1484,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         }
       }),
       ratio: String(resolutionRef.current?.aspect_ratio || ''),
+      project_kind: String(data.project?.kind ?? 'video'),
       audio: data.tracks
         .filter((track) => track.type === 'audio')
         .flatMap((track) => track.segments.map((segment) => String(((segment.content as unknown as { file_name?: string; user_prompt?: string })?.file_name || (segment.content as unknown as { user_prompt?: string })?.user_prompt || '').split('\n')[0].slice(0, 40))))

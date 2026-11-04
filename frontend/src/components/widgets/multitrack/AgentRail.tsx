@@ -355,12 +355,33 @@ export function AgentRail({
   }, [projectKey, input])
 
   const plan = readWorkspace(projectKey).plan ?? null
+  // 项目信息优先取「分镜页/时间线」的真实来源，避免与左栏显示不一致
+  const planSettings = (((plan as unknown as { settings?: Record<string, unknown> } | null)?.settings) ?? {}) as Record<string, unknown>
+  const planSegments = ((plan as unknown as { segments?: unknown[] } | null)?.segments ?? []) as unknown[]
+  const timelineInfo = (() => {
+    try {
+      const summary = (globalThis as unknown as {
+        __easyMediaTimelineSummary?: () => { ratio?: string; project_kind?: string }
+      }).__easyMediaTimelineSummary
+      return (summary ? summary() : {}) as { ratio?: string; project_kind?: string }
+    } catch {
+      return {} as { ratio?: string; project_kind?: string }
+    }
+  })()
+  const projectKind = String(timelineInfo.project_kind ?? 'video')
+  const kindLabel = projectKind === 'audio' ? '音频项目' : projectKind === 'image' ? '图片项目' : '视频项目'
+  const planRatio = String(planSettings.ratio ?? '').trim()
+  const timelineRatio = String(timelineInfo.ratio ?? ratio ?? '').trim()
+  const ratioLabel = planRatio && timelineRatio && planRatio !== timelineRatio
+    ? `${planRatio}（计划）/ ${timelineRatio}（节点）`
+    : (planRatio || timelineRatio || '16:9')
+  const segmentCount = planSegments.length || segments.length
   const contextChips = useMemo(() => {
-    const chips = [`项目 ${projectKey || '未命名'}`, `${segments.length} 段`, `${frameRate}fps`, ratio]
+    const chips = [`项目 ${projectKey || '未命名'}`, kindLabel, `${segmentCount} 段`, `${frameRate}fps`, ratioLabel]
     if (subjects.length) chips.push(`${subjects.length} 主体`)
     if (resources.length) chips.push(`${resources.length} 资源`)
     return chips
-  }, [projectKey, segments.length, frameRate, ratio, subjects.length, resources.length])
+  }, [projectKey, kindLabel, segmentCount, frameRate, ratioLabel, subjects.length, resources.length])
 
   const traceRows = useMemo(
     () => messages.flatMap((message, messageIndex) => (
@@ -4737,7 +4758,28 @@ export function AgentRail({
       const todos = (workspaceNow.todos ?? []) as Array<{ text?: string; status?: string }>
       const notes = (workspaceNow.notes ?? {}) as Record<string, string>
       const agent = readDirectorSettings(projectKey).agent
-      const context: Record<string, unknown> = { project: projectKey, tab }
+      const context: Record<string, unknown> = {
+        project: projectKey,
+        tab,
+        project_kind: projectKind,
+      }
+      {
+        const settingsNow = (((plan as unknown as { settings?: Record<string, unknown> } | null)?.settings) ?? {})
+        const ratioNow = String((settingsNow as Record<string, unknown>).ratio ?? '').trim()
+        const taskTypeNow = String((settingsNow as Record<string, unknown>).taskType ?? '').trim()
+        const contextNow = String((settingsNow as Record<string, unknown>).contextMode ?? '').trim()
+        if (ratioNow || taskTypeNow || contextNow) {
+          context.plan_settings = {
+            ratio: ratioNow || undefined,
+            taskType: taskTypeNow || undefined,
+            contextMode: contextNow || undefined,
+          }
+        }
+        if (ratioNow && timelineRatio && ratioNow !== timelineRatio) {
+          context.node_ratio = timelineRatio
+          context.ratio_note = `分镜计划的画幅是 ${ratioNow}，节点/时间线是 ${timelineRatio}；生成前确认以哪个为准`
+        }
+      }
       const styleNow = readStyle(projectKey)
       if (isStyleActive(styleNow)) {
         context.visual_style = {
