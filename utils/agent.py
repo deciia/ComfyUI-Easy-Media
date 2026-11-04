@@ -62,6 +62,34 @@ AGENT_SYSTEM_PROMPT = """你是 EasyMedia「导演工作台」里的项目智能
 reply 要用中文、简洁、像同事说话，不要复述 JSON。
 """
 
+AUDIO_KIND_OVERRIDE = """
+
+【本项目是音频项目（project_kind=audio）——以下规则覆盖上面所有镜头写法】
+1. 时间轴用 [Audio Segment N] + At 00:0X.XXX；不要用 [Shot N]，不要写景别/机位/构图/镜头运动。
+2. 不写画幅与分辨率（画布固定 64×64）。不要写「黑场」「无可见元素」这类画面占位；画面可省，或自然简述一句。
+3. 字段用 subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music；
+   不需要视频的七要素逐镜描述，也不需要 (appears in [Shot N]) 这类镜头标注。
+4. 声音写法（中文完整第三人称陈述句，四句骨架）：
+   ① 谁在说 + 声音质感：老赵 (S1) 的声音质感偏低沉偏沙。
+   ② 音色沿用谁 + 什么独立生成：音色身份沿用 <Audio 1>，语速与情绪演绎独立生成。
+   ③ 目标演绎（语速/停顿/情绪机制）：本句语速偏快，句中不停顿，尾音收住不上扬。
+   ④ 节奏重声明（可省）：节奏与停顿按目标台词重新生成，不沿用参考音频。
+   结尾必须写「他说：」或「她说：」，紧跟 <d>[Chinese] 台词原文</d>。
+5. 每个 [Audio Segment N] 只描述一个说话人、只放一句台词；句间静默单独成句（如「句间静默约 0.3 秒。」）。
+6. 音色参考写法：<Audio 1> 是 <Subject 1> (老赵) 的音色参考：只取音色、共鸣与音高质感；不复用语速、停顿节奏与情绪节奏，这些按目标台词重新生成。
+7. 禁止：对演员说戏的祈使句（如「语速再提一点，把车主的判断原样掀过去」）；用引号复述台词；把描述写成可朗读的散文。这些都会被当成台词念出来。
+8. overall_soundscape 在没有环境声时写 N/A；non_diegetic_music 无配乐写 N/A。
+9. 只处理用户要求的那一段，不要顺手重写其它段。
+"""
+
+IMAGE_KIND_OVERRIDE = """
+
+【本项目是图片项目（project_kind=image）】
+时间轴与镜头调度不适用；只输出静态画面描述（主体、构图、光线、材质、风格），不写台词、配音与镜头运动。
+"""
+
+
+
 
 AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体。你通过**调用工具**干活，而不是输出 JSON 动作。
 
@@ -195,6 +223,7 @@ AGENT_SUMMARY_PROMPT = """你是 EasyMedia「导演工作台」的助手。一�
 
 def _compact_context(context: dict | None) -> dict:
     context = context or {}
+    _out_kind = str(context.get("project_kind") or "").strip().lower()
     segments = []
     for segment in (context.get("segments") or [])[:40]:
         segments.append(
@@ -224,6 +253,7 @@ def _compact_context(context: dict | None) -> dict:
             }
         )
     return {
+        "project_kind": _out_kind or None,
         "project": context.get("project") or "",
         "frame_rate": context.get("frame_rate"),
         "ratio": context.get("ratio"),
@@ -301,6 +331,11 @@ def _compact_context(context: dict | None) -> dict:
 
 def build_decision_messages(messages: list[dict], context: dict | None, system_extra: str = "") -> list[dict]:
     system = AGENT_SYSTEM_PROMPT + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
+    _kind = str((context or {}).get("project_kind") or "").strip().lower()
+    if _kind == "audio":
+        system += AUDIO_KIND_OVERRIDE
+    elif _kind == "image":
+        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     history = []
@@ -542,6 +577,11 @@ async def stream_agent_step(
     else:
         base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = base_prompt + _skills_hint() + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
+    _kind = str((context or {}).get("project_kind") or "").strip().lower()
+    if _kind == "audio":
+        system += AUDIO_KIND_OVERRIDE
+    elif _kind == "image":
+        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
@@ -808,6 +848,11 @@ async def run_agent_step(
         + "\n当前项目上下文（JSON）：\n"
         + json.dumps(_compact_context(context), ensure_ascii=False)
     )
+    _kind = str((context or {}).get("project_kind") or "").strip().lower()
+    if _kind == "audio":
+        system += AUDIO_KIND_OVERRIDE
+    elif _kind == "image":
+        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
