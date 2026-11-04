@@ -338,8 +338,11 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         lines.append(
             "本项目是音频生成项目：仍然使用 H3 能理解的标准字段与表达方式（画面描述、台词、声音、配乐、禁止项），"
             "但内容重心放在**声音侧**——音色、语速、语气、停顿与呼吸、口型与近讲距离、环境底噪、有无配乐。"
-            "画面部分只做最低限度交代（例如“画面黑场，无可见内容”或一句静态背景），"
-            "不要展开景别、机位、构图、光线、镜头运动与人物外貌表演；台词必须用 <d>…</d> 包裹并保持原文。"
+            "画面可以自由描写（简要即可，不需要黑场，也可以写场景/人物/光线），但重点是声音；"
+            "台词必须用 <d>…</d> 包裹并保持原文。"
+            "**语言分离（关键）**：声音与表演描述用英文写（vocal color / pace / pauses / emphasis），"
+            "台词保持中文原文只出现在 <d> 里；中文描述里不要复述台词内容，避免模型把描述当台词念。"
+            "**段落结构对齐参考写法**：每个 [Shot N] 或 [Audio Segment N] 只描述一个说话人，结尾用 He says: / She says: 直接引出台词 <d>，描述里不出现台词原文。"
             "描述写成**指令式短句**（分号断开的动词/名词短语），不要写成可朗读的叙述句："
             "「语速再提；否定词轻带；机械件名重读；破折号硬停 0.5 秒」这种形式；"
             "每个 [Shot] 的描述控制在 80 字以内，只写「怎么说」，不复述要说什么。"
@@ -413,7 +416,8 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         lines.append(
             "归一化要求（音频项目）：保留 H3 官方字段（subject_definitions / detailed_description / "
             "overall_soundscape / non_diegetic_music），但写法以声音为主线。"
-            "detailed_description 用 [Shot N] 与 At 00:0X.XXX 标注声音事件时序，每段先一句画面交代"
+            "detailed_description 用 [Shot N] 与 At 00:0X.XXX 标注时序，画面可自由描写（不必黑场），"
+            "声音/表演描述建议用英文写，中文只在 <d> 台词里出现；每个镜头结尾用 He says: / She says: 引出台词；"
             "（如“画面黑场，无可见内容”），其余篇幅写台词与声音表演：语气、语速、停顿、呼吸、气口、近讲距离；"
             "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
             "non_diegetic_music 明确写有或 none。画面细节（景别/机位/构图/光线）只需保持中性、简单一句即可，不必展开。"
