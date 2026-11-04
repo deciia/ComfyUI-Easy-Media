@@ -2552,6 +2552,9 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
         const speakerLines = prompt.split('\n').filter((line) => /<d>\[Chinese\]/i.test(line))
         const badSpeaker = speakerLines.filter((line) => !/\(S\d+([,，]S\d+)*\)/.test(line))
         if (badSpeaker.length) {
+      if (/（S\d+/.test(prompt)) {
+        problems.push({ level: 'warn', message: '说话人编号用了全角括号「（S1）」：应改成英文半角 (S1)' })
+      }
           problems.push({ level: 'warn', message: `有 ${badSpeaker.length} 行台词没带圆括号说话人 ID（应为 <Subject 1> (S1) says: <d>…</d>）` })
         }
       }
