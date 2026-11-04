@@ -414,7 +414,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             "（如“画面黑场，无可见内容”），其余篇幅写台词与声音表演：语气、语速、停顿、呼吸、气口、近讲距离；"
             "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
             "non_diegetic_music 明确写有或 none。画面细节（景别/机位/构图/光线）只需保持中性、简单一句即可，不必展开。"
-            "若把 <Audio n> 当作音色参考，subject_definitions 里必须写明「只取音色与发声特征，不复用其语速/停顿/节奏/情绪」，避免模型照抄参考音频的读法；无配乐时 non_diegetic_music 写 N/A。用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变；"
+            "结构标记只允许 [Shot N] 与 At 00:0X.XXX：不要自创 [Audio Segment N]、[Segment N]、[Cue N]、[S1] 之类的标记，音频项目同样用 [Shot N] 承接时间轴。若把 <Audio n> 当作音色参考，subject_definitions 里必须写明「只取音色与发声特征，不复用其语速/停顿/节奏/情绪」，避免模型照抄参考音频的读法；无配乐时 non_diegetic_music 写 N/A。用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变；"
             "禁止出现文字、字幕、logo、水印。"
         )
         lines.append(

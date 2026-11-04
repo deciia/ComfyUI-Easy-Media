@@ -2496,6 +2496,9 @@ export function AgentRail({
           problems.push({ level: 'warn', kind: 'shot', message: `${label} 有景别但没有构图关系：构图决定表情能否被看见，建议补一个` })
         }
       })
+      if (/\[(Audio\s*Segment|Segment|Cue|Scene)\s*\d+\]/i.test(prompt)) {
+        problems.push({ level: 'error', message: '出现了非标准结构标记（如 [Audio Segment 1]）：时间轴统一用 [Shot N]' })
+      }
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
       if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
