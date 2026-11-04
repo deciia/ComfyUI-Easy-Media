@@ -735,7 +735,34 @@ export function PromptEnhancerModal({
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
   const [saveCheckOpen, setSaveCheckOpen] = useState(false)
   /** 写入当前分镜段（本段 + 当前变体）到任务轨：保存弹窗与其它入口共用 */
+  /** 分镜计划画幅 vs 节点画幅 */
+  const planRatioNow = String(((scriptPlan as unknown as { settings?: Record<string, unknown> } | null)?.settings?.ratio) ?? '').trim()
+  const nodeRatioNow = (() => {
+    try {
+      const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary
+      return String(summary ? (summary().ratio ?? '') : '').trim()
+    } catch {
+      return ''
+    }
+  })()
+  const ratioMismatch = Boolean(planRatioNow && nodeRatioNow && planRatioNow !== nodeRatioNow)
+  /** 按勾选把计划画幅写到节点；返回提示文案（空=没做） */
+  const applyPlanRatio = (): string => {
+    if (!overwriteRatio || !ratioMismatch) return ''
+    const registry = globalThis as unknown as {
+      __easyMediaSetResolution?: (input: { aspect_ratio?: string }) => boolean
+    }
+    try {
+      const ok = registry.__easyMediaSetResolution?.({ aspect_ratio: planRatioNow })
+      return ok ? `已把节点画幅改为 ${planRatioNow}（像素总量未变）` : ''
+    } catch {
+      return ''
+    }
+  }
+
   const writeCurrentSegmentNow = () => {
+    const ratioApplied = applyPlanRatio()
+    if (ratioApplied) setRatioNotice(ratioApplied)
                   const target = finalDraft || finalPrompt
                   if (!target) return
                   // 展开绑定（主体→子资源）
@@ -949,6 +976,9 @@ export function PromptEnhancerModal({
   /** 视觉风格：配色/导演方法（生成时自动附加） */
   const [styleState, setStyleState] = useState<StyleState>(() => readStyle(workspaceKey))
   const [styleOpen, setStyleOpen] = useState(false)
+  /** 保存时是否用分镜计划的画幅覆盖节点（默认勾选；只改比例，不同步像素总量） */
+  const [overwriteRatio, setOverwriteRatio] = useState(true)
+  const [ratioNotice, setRatioNotice] = useState('')
 
   useEffect(() => {
     setStyleState(readStyle(workspaceKey))
@@ -1985,6 +2015,24 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                     ))}
                   </div>
                 </div>
+                {ratioMismatch ? (
+                  <div className="mt-1 border-t pt-1" style={{ borderColor: BORDER }}>
+                    <div className="mb-1 text-[11px] text-muted-foreground">画幅</div>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <span>
+                        分镜计划 <b>{planRatioNow}</b> · 节点 <b>{nodeRatioNow}</b>
+                      </span>
+                      <label className="flex cursor-pointer items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={overwriteRatio}
+                          onChange={(event) => setOverwriteRatio(event.target.checked)}
+                        />
+                        用分镜计划的比例覆盖节点（项目级，影响所有段）
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="text-[11px] text-muted-foreground">
                   范围可选：上面的「仍然保存」写全部 {segs.length} 段；「只写本段」只写第 {activeScriptIndex + 1} 段（当前 {previewVariant === 'a' ? 'A' : 'B'} 版终稿 + 本段绑定参考图 + 任务类型）
                   {directorSettings.save.writeImages ? ` · 参考图 ${(() => {
@@ -2071,6 +2119,8 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                         setReplaceArmed(true)
                         return
                       }
+                      const ratioApplied = applyPlanRatio()
+                      if (ratioApplied) setRatioNotice(ratioApplied)
                       registry(plan.segments.map((segment, index) => {
                         const settings = ((segment as { settings?: Record<string, unknown> }).settings ?? {}) as Record<string, unknown>
                         const segIds: string[] = []
@@ -3040,7 +3090,9 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
             </div>
 
             <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-muted/20 px-2 py-[3px]">
-              <span className="truncate text-[10px] text-neutral-500">{t('multitrack.enhancerHint')}</span>
+              <span className="truncate text-[10px] text-neutral-500">
+                {ratioNotice || t('multitrack.enhancerHint')}
+              </span>
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                 <span className="shrink-0 text-[11px] text-muted-foreground">参考资源</span>
                 <div className="flex min-w-0 flex-wrap items-center gap-1">

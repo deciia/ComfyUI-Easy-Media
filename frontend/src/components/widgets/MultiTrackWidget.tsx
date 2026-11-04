@@ -1439,6 +1439,36 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  // 写入节点画幅（save 弹窗「用分镜计划的比例覆盖节点」用）：只改 aspect_ratio，像素总量不动
+  useEffect(() => {
+    const registry = globalThis as unknown as {
+      __easyMediaSetResolution?: (input: { aspect_ratio?: string }) => boolean
+    }
+    registry.__easyMediaSetResolution = (input) => {
+      const ratio = String(input?.aspect_ratio ?? '').trim()
+      if (!ratio) return false
+      const widgets = ((node as { widgets?: Array<{ name?: string; value?: unknown; callback?: (value: unknown) => void }> })?.widgets ?? [])
+      const widget = widgets.find((item) => item?.name === 'resolution.aspect_ratio')
+      if (!widget) return false
+      if (widget.value === ratio) return true
+      widget.value = ratio
+      try {
+        widget.callback?.(ratio)
+      } catch {
+        // 节点值已写入，回调异常忽略
+      }
+      try {
+        ;(app as { canvas?: { setDirty?: (dirty: boolean, canvas?: unknown) => void } } | null)?.canvas?.setDirty?.(true)
+      } catch {
+        // 忽略画布刷新失败
+      }
+      return true
+    }
+    return () => {
+      delete (globalThis as { __easyMediaSetResolution?: unknown }).__easyMediaSetResolution
+    }
+  }, [node])
+
   // 项目栏「工作台」按钮：选中第一个任务片段并通知编辑器打开弹窗
   useEffect(() => {
     const openWorkspace = () => {
