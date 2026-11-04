@@ -2256,6 +2256,30 @@ async function handleGenerate(language?: '中文' | 'English', sourcePrompt?: st
                 onUnbindFile={onUnbindProjectResourceFile}
               />
             )}
+              <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-muted/20 px-2 py-[3px] text-[10px] text-neutral-500">
+                <span className="truncate">
+                  {workspaceTab === 'storyboard'
+                    ? '分镜编排：按段写脚本，应用到任务轨后才进生成'
+                    : '主体与资源：先建主体，再把图片 / 音频 / 视频挂到主体下'}
+                </span>
+                <span className="ml-auto shrink-0">
+                  {workspaceTab === 'storyboard'
+                    ? (() => {
+                        const segs = ((scriptPlan as { segments?: Array<Record<string, unknown>> } | null)?.segments ?? [])
+                        const shots = segs.reduce((sum, seg) => sum + (Array.isArray(seg.shots) ? (seg.shots as unknown[]).length : 0), 0)
+                        const seconds = segs.reduce((sum, seg) => sum + Number(seg.duration_seconds ?? 0), 0)
+                        const withFinal = segs.filter((seg) => String(seg.finalA ?? seg.finalB ?? '').trim()).length
+                        return `${segs.length} 段 · ${seconds.toFixed(1)}s · ${shots} 镜 · 已写终稿 ${withFinal}`
+                      })()
+                    : (() => {
+                        const list = resources ?? []
+                        const subjectCount = list.filter((item) => item.type === 'Subject').length
+                        const assets = list.filter((item) => item.type !== 'Subject')
+                        const ready = assets.filter((item) => Boolean(item.imageFile || item.audioFile || item.videoFile)).length
+                        return `主体 ${subjectCount} · 资源 ${assets.length} · 就绪 ${ready}`
+                      })()}
+                </span>
+              </div>
             </div>
             {workspaceTab === 'assets' ? (
               <div className="flex min-h-0 w-[460px] shrink-0 flex-col" style={{ borderLeft: `1px solid ${BORDER}` }}>
