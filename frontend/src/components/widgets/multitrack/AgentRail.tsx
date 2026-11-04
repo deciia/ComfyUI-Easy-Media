@@ -2516,6 +2516,28 @@ async function executeAgentTool(name: string, args: Record<string, unknown>): Pr
           problems.push({ level: 'warn', message: '台词在正文里被重复引用：描述里提到台词时改用「这一句/后半句」指代，否则会读两遍' })
         }
       }
+      // 音频项目：单镜描述过长容易被当成朗读内容
+      const auditProjectKind = (() => {
+        try {
+          const summary = (globalThis as unknown as {
+            __easyMediaTimelineSummary?: () => { project_kind?: string }
+          }).__easyMediaTimelineSummary
+          return String(summary ? (summary().project_kind ?? 'video') : 'video')
+        } catch {
+          return 'video'
+        }
+      })()
+      if (auditProjectKind === 'audio') {
+        const shotBlocks = prompt.split(/\n(?=\[Shot\s+\d+\])/)
+        const tooLong = shotBlocks.filter((block) => {
+          const lines = block.split('\n')
+          const first = lines.length > 1 ? lines[1] : ''
+          return first.length > 140
+        })
+        if (tooLong.length) {
+          problems.push({ level: 'warn', message: `有 ${tooLong.length} 个镜头描述过长（>140 字）：描述写成指令式短句更稳，过长容易被连描述一起念` })
+        }
+      }
       // 说话人必须是带圆括号的稳定 ID：(S1)、(S2)…
       if (/<d>\[Chinese\]/i.test(prompt)) {
         const speakerLines = prompt.split('\n').filter((line) => /<d>\[Chinese\]/i.test(line))
