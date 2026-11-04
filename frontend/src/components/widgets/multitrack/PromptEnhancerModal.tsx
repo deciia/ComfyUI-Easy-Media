@@ -745,7 +745,14 @@ export function PromptEnhancerModal({
       return ''
     }
   })()
-  const ratioMismatch = Boolean(planRatioNow && nodeRatioNow && planRatioNow !== nodeRatioNow)
+  const isAudioKind = (() => {
+    try {
+      const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { project_kind?: string } }).__easyMediaTimelineSummary
+      return String(summary ? (summary().project_kind ?? 'video') : 'video') === 'audio'
+    } catch {
+      return false
+    }
+  })()\n  const ratioMismatch = Boolean(!isAudioKind && planRatioNow && nodeRatioNow && planRatioNow !== nodeRatioNow)
   /** 按勾选把计划画幅写到节点；返回提示文案（空=没做） */
   const applyPlanRatio = (): string => {
     if (!overwriteRatio || !ratioMismatch) return ''
@@ -1655,7 +1662,7 @@ export function PromptEnhancerModal({
           '',
           '【事实】',
           `本段令牌表：${bindingTable || '（无绑定）'}`,
-          `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}`,
+          `可用编号：Subject ≤ ${subjectCount}，Picture ≤ ${pictureCount}，Audio ≤ ${audioCount}；时长 ${seconds || '?'} 秒；${isAudioProject ? '画幅不写（音频项目，画面黑场）' : `画幅 ${aspectRatio}`}`,
           '**时长与画幅不要写成标题**：放进概述第一句（如「9:16 竖屏，10 秒，维修车间内景」）。',
           '',
           '【写法】',
@@ -1714,9 +1721,9 @@ function askAgentGenerate(language: '中文' | 'English') {
     '',
     '【事实】',
     `本段令牌表：${bindingTable || '（无绑定）'}`,
-    `可用编号：Subject ≤ ${tokenRows.filter((item) => item.type === 'subject').length}，Picture ≤ ${tokenRows.filter((item) => item.type === 'image').length}，Audio ≤ ${tokenRows.filter((item) => item.type === 'audio').length}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}；镜头数 ${shotCount}`,
+    `可用编号：Subject ≤ ${tokenRows.filter((item) => item.type === 'subject').length}，Picture ≤ ${tokenRows.filter((item) => item.type === 'image').length}，Audio ≤ ${tokenRows.filter((item) => item.type === 'audio').length}；时长 ${seconds || '?'} 秒；${isAudioFinal ? '画幅不写（音频项目，画面黑场）' : `画幅 ${aspectRatio}`}；镜头数 ${shotCount}`,
     ...(isAudioFinal
-      ? ['画幅以分镜计划为准（音频项目画布通常 64×64，画面本身无意义，只写「画面黑场」）；不要写成节点分辨率的比例']
+      ? ['画幅不要写：音频项目画布固定 64×64（1:1），画面本身无意义，画面部分只写「画面黑场」；不要出现 16:9、1:1 这类比例']
       : []),
     '',
     '【用户设置（按这里的选，不要按默认；与技能默认冲突时以这里为准）】',

@@ -377,11 +377,13 @@ export function AgentRail({
     : (planRatio || timelineRatio || '16:9')
   const segmentCount = planSegments.length || segments.length
   const contextChips = useMemo(() => {
-    const chips = [`项目 ${projectKey || '未命名'}`, kindLabel, `${segmentCount} 段`, `${frameRate}fps`, ratioLabel]
+    const chips = [`项目 ${projectKey || '未命名'}`, kindLabel, `${segmentCount} 段`, `${frameRate}fps`]
+    // 音频项目画布固定 64x64，比例没有参考价值，不展示
+    if (projectKind !== 'audio') chips.push(ratioLabel)
     if (subjects.length) chips.push(`${subjects.length} 主体`)
     if (resources.length) chips.push(`${resources.length} 资源`)
     return chips
-  }, [projectKey, kindLabel, segmentCount, frameRate, ratioLabel, subjects.length, resources.length])
+  }, [projectKey, kindLabel, segmentCount, frameRate, ratioLabel, projectKind, subjects.length, resources.length])
 
   const traceRows = useMemo(
     () => messages.flatMap((message, messageIndex) => (

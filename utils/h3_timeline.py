@@ -346,6 +346,17 @@ def create_timeline(
     if isinstance(payload, dict):
         payload = dict(payload)
         payload["project_kind"] = kind
+        # 音频项目画布固定 64x64（1:1）；否则会沿用工作流节点的 16:9 默认值
+        if kind == "audio" and not payload.get("resolution"):
+            payload["resolution"] = {
+                "preset": "64x64",
+                "width": 64,
+                "height": 64,
+                "aspect_ratio": "1:1",
+                "megapixels": 0.004096,
+                "resize_method": "resize to pixel",
+                "resize_to_pixel": 1,
+            }
     save_timeline(safe_name, payload)
     return load_timeline(safe_name)
 
