@@ -1591,7 +1591,11 @@ export function PromptEnhancerModal({
     const seconds = Number(segment?.duration_seconds ?? 0) || 0
     const tokenRows = editorResources.filter((item) => item.type === 'subject' || item.type === 'image' || item.type === 'audio')
     const bindingTable = tokenRows.map((item) => `${item.token}=${item.label}`).join('｜')
-  const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
+  const aspectRatio = String(
+    ((scriptPlan as unknown as { settings?: { ratio?: string } } | null)?.settings?.ratio)
+    || ((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio)
+    || '9:16',
+  )
     const subjectCount = editorResources.filter((item) => item.type === 'subject').length
     const pictureCount = editorResources.filter((item) => item.type === 'image').length
     const audioCount = editorResources.filter((item) => item.type === 'audio').length
@@ -1700,13 +1704,20 @@ function askAgentGenerate(language: '中文' | 'English') {
     ? ((activeScriptSegment as { shots?: unknown[] }).shots ?? []).length
     : 0
   const seconds = Number((activeScriptSegment as { duration_seconds?: number } | undefined)?.duration_seconds ?? 0) || 0
-  const aspectRatio = String((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio ?? '9:16')
+  const aspectRatio = String(
+    ((scriptPlan as unknown as { settings?: { ratio?: string } } | null)?.settings?.ratio)
+    || ((globalThis as unknown as { __easyMediaTimelineSummary?: () => { ratio?: string } }).__easyMediaTimelineSummary?.()?.ratio)
+    || '9:16',
+  )
   const directive = [
     `只做第 ${activeScriptIndex + 1} 段「${segmentName}」的终稿：用 write_prompt(index=${activeScriptIndex + 1}, target=final) 写入，不要动片段稿和其它段（${language === 'English' ? '英文' : '中文'}正文）。`,
     '',
     '【事实】',
     `本段令牌表：${bindingTable || '（无绑定）'}`,
     `可用编号：Subject ≤ ${tokenRows.filter((item) => item.type === 'subject').length}，Picture ≤ ${tokenRows.filter((item) => item.type === 'image').length}，Audio ≤ ${tokenRows.filter((item) => item.type === 'audio').length}；时长 ${seconds || '?'} 秒；画幅 ${aspectRatio}；镜头数 ${shotCount}`,
+    ...(isAudioFinal
+      ? ['画幅以分镜计划为准（音频项目画布通常 64×64，画面本身无意义，只写「画面黑场」）；不要写成节点分辨率的比例']
+      : []),
     '',
     '【用户设置（按这里的选，不要按默认；与技能默认冲突时以这里为准）】',
     `- 规范来源：${options.official_skill_profile}`,

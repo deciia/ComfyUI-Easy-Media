@@ -4797,9 +4797,13 @@ export function AgentRail({
             contextMode: contextNow || undefined,
           }
         }
-        if (ratioNow && timelineRatio && ratioNow !== timelineRatio) {
-          context.node_ratio = timelineRatio
-          context.ratio_note = `分镜计划的画幅是 ${ratioNow}，节点/时间线是 ${timelineRatio}；生成前确认以哪个为准`
+        if (ratioNow) {
+          // 画幅以分镜计划为准；节点分辨率只作参考，避免模型把节点值写进提示词
+          context.canvas_ratio = ratioNow
+          if (timelineRatio && ratioNow !== timelineRatio) {
+            context.node_ratio = timelineRatio
+            context.ratio_note = `写提示词时画幅只用 ${ratioNow}（分镜计划）；节点分辨率 ${timelineRatio} 仅作参考，不要写进提示词`
+          }
         }
       }
       const styleNow = readStyle(projectKey)
