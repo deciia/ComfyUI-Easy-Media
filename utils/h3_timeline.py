@@ -289,7 +289,19 @@ def save_timeline(
             if abs(current_updated - base_value) > 1e-6:
                 raise TimelineConflictError(safe_name, current_updated)
 
+    incoming_kind = ""
+    if isinstance(timeline, dict):
+        incoming_kind = str(timeline.get("project_kind") or "").strip().lower()
     normalised = _coerce_timeline(timeline, safe_name)
+    # 未显式携带类型时沿用磁盘上的类型：避免一次保存把 audio/image 项目写成 video
+    if not incoming_kind and path.is_file():
+        try:
+            existing = load_timeline(safe_name)
+            existing_kind = str(existing.get("project_kind") or "").strip().lower()
+            if existing_kind in PROJECT_KINDS:
+                normalised["project_kind"] = existing_kind
+        except (FileNotFoundError, ValueError):
+            pass
     serialised = json.dumps(normalised, ensure_ascii=False, indent=2)
     encoded = serialised.encode("utf-8")
     if len(encoded) > TIMELINE_MAX_BYTES:

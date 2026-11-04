@@ -133,7 +133,7 @@ export async function saveProjectTimeline(
     project_name: payload.projectName,
     timeline: {
       version: 1,
-      project_kind: payload.projectKind ?? null,
+      ...(payload.projectKind ? { project_kind: payload.projectKind } : {}),
       resolution: payload.resolution ?? null,
       format: payload.format ?? null,
       track_data: payload.trackData,
