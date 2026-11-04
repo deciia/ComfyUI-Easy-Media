@@ -1748,6 +1748,7 @@ function askAgentGenerate(language: '中文' | 'English') {
           '- subject_definitions：把 <Audio n> 声明为音色/音色身份参考，并明确「只取音色，不复用语速/停顿/节奏/情绪」；',
           '- detailed_description：用 [Shot N] 与 At 00:0X.XXX 标时序；每段先一句画面交代（黑场/静态背景），其余写台词与声音表演；',
           '- 时间轴默认用官方的 [Shot N]；[Audio Segment N] 这类写法也可用，不必改写。',
+          '- 描述里不要用引号复述台词原文或片段（会与 <d> 重复朗读）：用「这一句」「后半句」「末四字」指代。',
           '- overall_soundscape：近讲距离、房间底噪、音色质感；',
           '- non_diegetic_music：无配乐写 N/A。',
           '',

@@ -2498,6 +2498,23 @@ export function AgentRail({
           problems.push({ level: 'warn', kind: 'shot', message: `${label} 有景别但没有构图关系：构图决定表情能否被看见，建议补一个` })
         }
       })
+      // 台词在正文里被引号复述 → 模型会连引文一起念，听起来像读两遍
+      {
+        const stripped = prompt.replace(/<d>[\s\S]*?<\/d>/gi, '')
+        const dialogueBodies = Array.from(prompt.matchAll(/<d>[^<]*?\[[A-Za-z]+\]\s*([\s\S]*?)<\/d>/gi))
+          .map((m) => String(m[1] ?? '').replace(/[\s，。！？；：、—…「」『』]/g, ''))
+          .filter((text) => text.length >= 6)
+        const flatOutside = stripped.replace(/[\s，。！？；：、—…「」『』]/g, '')
+        const duplicated = dialogueBodies.some((body) => {
+          for (let i = 0; i + 6 <= body.length; i += 1) {
+            if (flatOutside.includes(body.slice(i, i + 6))) return true
+          }
+          return false
+        })
+        if (duplicated) {
+          problems.push({ level: 'warn', message: '台词在正文里被重复引用：描述里提到台词时改用「这一句/后半句」指代，否则会读两遍' })
+        }
+      }
       // 说话人必须是带圆括号的稳定 ID：(S1)、(S2)…
       if (/<d>\[Chinese\]/i.test(prompt)) {
         const speakerLines = prompt.split('\n').filter((line) => /<d>\[Chinese\]/i.test(line))
