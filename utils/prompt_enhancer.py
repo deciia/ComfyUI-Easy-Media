@@ -346,7 +346,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             "可以写完整陈述句，也可以补充属性短语（如「语速偏快；破折号硬停 0.5 秒」）增加密度。"
             "**绝对不要写**对演员说戏的祈使句——「语速再提一点，把车主的判断原样掀过去」这类含动作宾语的句子会被当台词念。"
             "**结构（照参考写法）**：第一个 [Shot] 之前先写一段总述（1–2 句）：时长、说话人、整体声音基调；"
-            "每个 [Shot] 只描述一个说话人、只放一句台词，结尾用「(S1)说：」或 He says: 引出 <d>。"
+            "每个 [Audio Segment N] 只描述一个说话人（音频项目默认用 Audio Segment N，不用 Shot N），"
             "**静默与停顿单独成句**（安全，不会被念）：如「句间静默约 0.5 秒。」「末尾自然静默约 0.5 秒。」"
             "**情绪用机制描述**，不用形容词：写「压低音量、放慢语速、句前短暂迟疑」而不是「有点难过」。"
             "**每段可声明一次**「本句节奏与停顿按目标台词重新生成，不沿用参考音频」——"
@@ -421,7 +421,7 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         lines.append(
             "归一化要求（音频项目）：保留 H3 官方字段（subject_definitions / detailed_description / "
             "overall_soundscape / non_diegetic_music），但写法以声音为主线。"
-            "detailed_description 用 [Shot N] 与 At 00:0X.XXX 标注时序，画面可自由描写（不必黑场），"
+            "detailed_description 用 [Audio Segment N] 与 At 00:0X.XXX 标注时序，画面可自由描写（不必黑场），"
             "中文描述写成属性短语（音色/语速/停顿），不写说戏的祈使句；台词只在 <d> 里；每个镜头结尾用 He says: / She says: 引出台词；"
             "（如“画面黑场，无可见内容”），其余篇幅写台词与声音表演：语气、语速、停顿、呼吸、气口、近讲距离；"
             "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
