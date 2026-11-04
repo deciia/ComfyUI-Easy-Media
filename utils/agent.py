@@ -64,7 +64,7 @@ reply 要用中文、简洁、像同事说话，不要复述 JSON。
 
 AUDIO_KIND_OVERRIDE = """
 
-【本项目是音频项目（project_kind=audio）——以下规则覆盖上面所有镜头写法】
+【本项目是音频项目（project_kind=audio）——本节最后追加，优先级最高：覆盖上面全部内容、任何技能文档（含 h3-prompt-spec）与用户自定义规则】
 1. 时间轴用 [Audio Segment N] + At 00:0X.XXX；不要用 [Shot N]，不要写景别/机位/构图/镜头运动。
 2. 不写画幅与分辨率（画布固定 64×64）。不要写「黑场」「无可见元素」这类画面占位；画面可省，或自然简述一句。
 3. 字段用 subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music；
@@ -80,6 +80,36 @@ AUDIO_KIND_OVERRIDE = """
 7. 禁止：对演员说戏的祈使句（如「语速再提一点，把车主的判断原样掀过去」）；用引号复述台词；把描述写成可朗读的散文。这些都会被当成台词念出来。
 8. overall_soundscape 在没有环境声时写 N/A；non_diegetic_music 无配乐写 N/A。
 9. 只处理用户要求的那一段，不要顺手重写其它段。
+10. 若技能文档写 [Shot N] / 七要素镜头描述 / 逐镜机位，那是视频规范：音频项目不适用，一律按本节执行。
+【音频终稿范例（照这个形状写，内容按本段换）】
+subject_definitions:
+<Audio 1> 是 <Subject 1> (老赵) 的音色参考：只取音色、共鸣与音高质感；不复用语速、停顿节奏与情绪节奏，这些按本段台词重新生成。
+<Subject 1> (老赵) 是本段唯一说话人 (S1)。
+
+summary:
+中文单人近讲口播，9 秒。老赵 (S1) 只沿用 <Audio 1> 的音色身份，语速、停顿与情绪按本段台词独立生成。无第二人声，无配乐。
+
+detailed_description:
+（本段约 9 秒。单人近讲口播，语速偏快；两句之间留一次短气口，结尾干净收住。）
+
+[Audio Segment 1] At 00:00.000
+老赵 (S1) 只沿用 <Audio 1> 的音色身份；目标演绎独立生成：接近日常对话的语速、句尾平收、克制的情绪控制。
+本句起得干脆，按陈述事实的方式说，不额外加重任何字眼。
+他说：
+<d>[Chinese] 重卡爬坡，轨压往下掉。</d>
+
+[Audio Segment 2] At 00:03.000
+句间静默约 0.3 秒，留一次自然吸气。
+老赵 (S1) 的语速略提，否定词一带而过，机械件名咬实但不加重音量；破折号处硬停约 0.4 秒。
+他说：
+<d>[Chinese] 别一上来就咬定是油嘴——</d>
+
+overall_soundscape:
+N/A
+
+non_diegetic_music:
+N/A
+
 """
 
 IMAGE_KIND_OVERRIDE = """
@@ -329,13 +359,18 @@ def _compact_context(context: dict | None) -> dict:
     }
 
 
+def _apply_kind_overrides(system: str, context: dict | None) -> str:
+    """按项目类型在系统提示词**末尾**追加覆盖块：优先级高于技能、用户规则与默认风格。"""
+    kind = str((context or {}).get("project_kind") or "").strip().lower()
+    if kind == "audio":
+        return system + AUDIO_KIND_OVERRIDE
+    if kind == "image":
+        return system + IMAGE_KIND_OVERRIDE
+    return system
+
+
 def build_decision_messages(messages: list[dict], context: dict | None, system_extra: str = "") -> list[dict]:
     system = AGENT_SYSTEM_PROMPT + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
-    _kind = str((context or {}).get("project_kind") or "").strip().lower()
-    if _kind == "audio":
-        system += AUDIO_KIND_OVERRIDE
-    elif _kind == "image":
-        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     history = []
@@ -349,7 +384,7 @@ def build_decision_messages(messages: list[dict], context: dict | None, system_e
     history = _sanitize_tool_history(history)
     if not history:
         history = [{"role": "user", "content": "你好"}]
-    return [{"role": "system", "content": system}, *history]
+    return [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history]
 
 
 def parse_decision(raw: str) -> dict:
@@ -577,11 +612,6 @@ async def stream_agent_step(
     else:
         base_prompt = AGENT_TOOL_PROMPT if tools else AGENT_SYSTEM_PROMPT
     system = base_prompt + _skills_hint() + "\n当前项目上下文（JSON）：\n" + json.dumps(_compact_context(context), ensure_ascii=False)
-    _kind = str((context or {}).get("project_kind") or "").strip().lower()
-    if _kind == "audio":
-        system += AUDIO_KIND_OVERRIDE
-    elif _kind == "image":
-        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
@@ -631,7 +661,7 @@ async def stream_agent_step(
 
     body: dict = {
         "model": settings.model,
-        "messages": [{"role": "system", "content": system}, *history],
+        "messages": [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history],
         "temperature": 0.3,
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -726,7 +756,7 @@ async def compact_messages(messages: list[dict], config: dict | None = None) -> 
     body = {
         "model": settings.model,
         "messages": [
-            {"role": "system", "content": system},
+            {"role": "system", "content": _apply_kind_overrides(system, context)},
             {"role": "user", "content": "\n".join(lines)[:60000]},
         ],
         "temperature": 0.2,
@@ -817,7 +847,7 @@ def _minimal_agent_messages(system: str, items: list[dict]) -> list[dict]:
         + summary
     )
     return [
-        {"role": "system", "content": system},
+        {"role": "system", "content": _apply_kind_overrides(system, context)},
         {"role": "user", "content": merged[:12000]},
     ]
 
@@ -848,11 +878,6 @@ async def run_agent_step(
         + "\n当前项目上下文（JSON）：\n"
         + json.dumps(_compact_context(context), ensure_ascii=False)
     )
-    _kind = str((context or {}).get("project_kind") or "").strip().lower()
-    if _kind == "audio":
-        system += AUDIO_KIND_OVERRIDE
-    elif _kind == "image":
-        system += IMAGE_KIND_OVERRIDE
     if system_extra:
         system += "\n\n用户配置的技能/系统提示词（优先级高于默认风格）：\n" + system_extra[:4000]
     if tools:
@@ -925,7 +950,7 @@ async def run_agent_step(
 
     body: dict[str, Any] = {
         "model": settings.model,
-        "messages": [{"role": "system", "content": system}, *history],
+        "messages": [{"role": "system", "content": _apply_kind_overrides(system, context)}, *history],
         "temperature": 0.3,
         "stream": False,
     }
