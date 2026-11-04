@@ -45,10 +45,28 @@ export interface StoryboardPlan {
 /** 把一段分镜脚本渲染成可读文本（写入任务的 user_brief，供提示词增强使用）。 */
 export function formatPlanSegmentBrief(segment: PlanSegment): string {
   const lines: string[] = []
+  // 音频项目只给声音层：不把景别/机位/构图/微表情喂给模型，避免它写出画面
+  const kind = (() => {
+    try {
+      const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { project_kind?: string } }).__easyMediaTimelineSummary
+      return String(summary ? (summary().project_kind ?? 'video') : 'video')
+    } catch {
+      return 'video'
+    }
+  })()
+  const audioOnly = kind === 'audio'
   if (segment.beat) lines.push(`beat：${segment.beat}`)
   if (segment.duration_seconds) lines.push(`时长：${segment.duration_seconds}s（${segment.duration_frames}帧）`)
   if (segment.summary) lines.push(`本段：${segment.summary}`)
   for (const shot of segment.shots) {
+    if (audioOnly) {
+      for (const line of shot.dialogue) {
+        lines.push(`${line.speaker ? `${line.speaker}：` : ''}「${line.line}」`)
+      }
+      if (shot.sound) lines.push(`声音：${shot.sound}`)
+      if (shot.transition) lines.push(`衔接：${shot.transition}`)
+      continue
+    }
     lines.push(`[${shot.framing}]${shot.camera ? ` ${shot.camera}` : ''}${shot.composition ? `·${shot.composition}` : ''}${shot.action ? `：${shot.action}` : ''}`)
     for (const line of shot.dialogue) {
       lines.push(`${line.speaker ? `${line.speaker}：` : ''}「${line.line}」`)
