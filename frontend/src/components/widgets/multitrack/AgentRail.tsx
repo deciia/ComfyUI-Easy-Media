@@ -4310,16 +4310,37 @@ export function AgentRail({
       const planForPrompt = readPlan() as (StoryboardPlanLike & { segments: Array<Record<string, unknown>> }) | null
       const scriptSegment = (planForPrompt?.segments?.[index1 - 1] ?? {}) as Record<string, unknown>
       const scriptText = (key: string) => String(scriptSegment[key] ?? '').trim()
-      const shotLines = Array.isArray(scriptSegment.shots)
-        ? (scriptSegment.shots as Array<Record<string, unknown>>).map((shot, i) =>
-            `镜头${i + 1} ${String(shot.framing ?? '')}：${String(shot.action ?? '')}`.trim())
+      const shotList = Array.isArray(scriptSegment.shots)
+        ? (scriptSegment.shots as Array<Record<string, unknown>>)
         : []
-      const compositeBrief = [
-        String(scriptSegment.summary ?? '').trim(),
-        String(scriptSegment.beat ?? '').trim(),
-        ...shotLines,
-        String(scriptSegment.director_note ?? '').trim(),
-      ].filter(Boolean).join('\n')
+      const shotLines = shotList.map((shot, i) =>
+        `镜头${i + 1} ${String(shot.framing ?? '')}：${String(shot.action ?? '')}`.trim())
+      const dialogueLines = shotList.flatMap((shot) => {
+        const lines = Array.isArray(shot.dialogue) ? (shot.dialogue as Array<{ speaker?: string; line?: string }>) : []
+        return lines
+          .filter((item) => String(item?.line ?? '').trim())
+          .map((item) => `${String(item.speaker ?? '').trim() || '旁白'}：「${String(item.line ?? '').trim()}」`)
+      })
+      const soundLines = shotList
+        .map((shot) => String(shot.sound ?? '').trim())
+        .filter(Boolean)
+      // 音频项目只给声音素材：不把景别/机位/构图喂给模型，避免它写出画面
+      const compositeBrief = (projectKind === 'audio'
+        ? [
+            String(scriptSegment.summary ?? '').trim(),
+            String(scriptSegment.beat ?? '').trim(),
+            ...dialogueLines,
+            ...soundLines,
+            String(scriptSegment.director_note ?? '').trim(),
+          ]
+        : [
+            String(scriptSegment.summary ?? '').trim(),
+            String(scriptSegment.beat ?? '').trim(),
+            ...shotLines,
+            ...dialogueLines,
+            ...soundLines,
+            String(scriptSegment.director_note ?? '').trim(),
+          ]).filter(Boolean).join('\n')
       const sourcePrompt = (
         (variant === 'b' ? scriptText('promptB') : scriptText('promptA'))
         || scriptText('promptA')
@@ -4416,6 +4437,7 @@ export function AgentRail({
           },
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,
+          project_kind: projectKind,
           duration_seconds: duration,
           language: String(args.language ?? '中文'),
           subjects: subjectList,

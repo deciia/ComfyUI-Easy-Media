@@ -333,6 +333,18 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         f"目标长度（0=自动）：{options.get('description_word_target') or 0}",
         f"提示词模式：{options.get('prompt_mode') or '官方增强'}",
     ]
+    project_kind = str(options.get("project_kind") or payload.get("project_kind") or "").strip().lower()
+    if project_kind == "audio":
+        lines.append(
+            "本项目是音频生成项目：只输出声音层的描述。禁止写任何画面内容——"
+            "景别、机位、构图、光线、画布比例、镜头运动、人物外貌与表情表演一律不要出现；"
+            "台词必须用 <d>…</d> 包裹并保持原文；必须写清音色/语速/语气/停顿/呼吸、环境底噪与禁止项。"
+        )
+    elif project_kind == "image":
+        lines.append(
+            "本项目是图片生成项目：只输出静态画面描述（主体、构图、光线、材质、风格与禁止项），"
+            "不要写时间轴、镜头切换、台词与配音。"
+        )
 
     def _family(label: str, values: object, hint: str) -> None:
         if isinstance(values, list):
@@ -340,10 +352,11 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
             if chosen and chosen != ["模型自由决定"]:
                 lines.append(f"{label}（必须体现）：{'、'.join(chosen)}；{hint}")
 
-    _family("运镜", options.get("camera_motion"), "用规范镜头语言写进每个镜头")
-    _family("微表情", options.get("expression"), "写成可观察的面部细节，不要抽象形容词")
-    _family("景别", options.get("shot_size"), "每个镜头明确景别")
-    _family("构图关系", options.get("framing"), "写清人物与环境的相对位置")
+    if project_kind != "audio":
+        _family("运镜", options.get("camera_motion"), "用规范镜头语言写进每个镜头")
+        _family("微表情", options.get("expression"), "写成可观察的面部细节，不要抽象形容词")
+        _family("景别", options.get("shot_size"), "每个镜头明确景别")
+        _family("构图关系", options.get("framing"), "写清人物与环境的相对位置")
 
     word_target = options.get("description_word_target")
     if word_target:

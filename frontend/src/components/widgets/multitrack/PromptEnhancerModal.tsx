@@ -1536,6 +1536,14 @@ export function PromptEnhancerModal({
           global_prompt: globalDraft,
           task_type: mapped.task_type,
           task_mode: mapped.task_mode,
+          project_kind: (() => {
+            try {
+              const summary = (globalThis as unknown as { __easyMediaTimelineSummary?: () => { project_kind?: string } }).__easyMediaTimelineSummary
+              return String(summary ? (summary().project_kind ?? 'video') : 'video')
+            } catch {
+              return 'video'
+            }
+          })(),
           duration_seconds: segmentDuration || undefined,
           language,
         // D2：主体带令牌/描述/保留项（绑定主体用契约编号，未绑定按池序续号）
