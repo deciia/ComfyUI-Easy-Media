@@ -2507,6 +2507,14 @@ export function AgentRail({
         }
       }
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
+      // 说话人必须是带圆括号的稳定 ID：(S1)、(S2)…
+      if (/<d>\[Chinese\]/i.test(prompt)) {
+        const speakerLines = prompt.split('\n').filter((line) => /<d>\[Chinese\]/i.test(line))
+        const badSpeaker = speakerLines.filter((line) => !/\(S\d+([,，]S\d+)*\)/.test(line))
+        if (badSpeaker.length) {
+          problems.push({ level: 'warn', message: `有 ${badSpeaker.length} 行台词没带圆括号说话人 ID（应为 <Subject 1> (S1) says: <d>…</d>）` })
+        }
+      }
       if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误
       // 只在「<Picture n> 被当成人物定义的主语」时报错；<Subject n> 行内引用来源图是官方写法
