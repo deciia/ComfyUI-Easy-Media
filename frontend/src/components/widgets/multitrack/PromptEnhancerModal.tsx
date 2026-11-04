@@ -752,7 +752,8 @@ export function PromptEnhancerModal({
     } catch {
       return false
     }
-  })()\n  const ratioMismatch = Boolean(!isAudioKind && planRatioNow && nodeRatioNow && planRatioNow !== nodeRatioNow)
+  })()
+  const ratioMismatch = Boolean(!isAudioKind && planRatioNow && nodeRatioNow && planRatioNow !== nodeRatioNow)
   /** 按勾选把计划画幅写到节点；返回提示文案（空=没做） */
   const applyPlanRatio = (): string => {
     if (!overwriteRatio || !ratioMismatch) return ''
