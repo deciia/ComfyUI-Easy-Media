@@ -1661,6 +1661,7 @@ export function PromptEnhancerModal({
           '规定：标签后直接接冒号与内容，同一行；不要写成「概述」独占一行再换行写字。',
           '',
           '**不要沿用本对话里之前那段片段稿的写法**：按下面的格式从头写。',
+      '写之前先 read_skill h3-prompt-spec（音频项目再读 audiobook-prompts），说话人按它写成 (S1)。',
           '',
           '【事实】',
           `本段令牌表：${bindingTable || '（无绑定）'}`,
@@ -1753,6 +1754,7 @@ function askAgentGenerate(language: '中文' | 'English') {
         ]
       : []),
     '【三份输入，先读】',
+    '写终稿前先 read_skill h3-prompt-spec（音频项目再读 audiobook-prompts），说话人写成 (S1)，音色引用写成 <Subject 1> (S1)。',
     '1. get_segment：完整分镜（镜头/台词/时长/settings），镜头数与台词以它为准；',
     '2. get_prompt_context：本段绑定与保留项，编号照抄；',
     '3. 文末片段稿：用户的意图与补充，优先级高于你的自由发挥。需要时 read_skill ' + (isAudioFinal ? 'audiobook-prompts 或 koubo-script' : 'h3-prompt-spec') + '。',

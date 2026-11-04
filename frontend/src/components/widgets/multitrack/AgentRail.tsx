@@ -2498,6 +2498,14 @@ export function AgentRail({
           problems.push({ level: 'warn', kind: 'shot', message: `${label} 有景别但没有构图关系：构图决定表情能否被看见，建议补一个` })
         }
       })
+      // 说话人必须是带圆括号的稳定 ID：(S1)、(S2)…
+      if (/<d>\[Chinese\]/i.test(prompt)) {
+        const speakerLines = prompt.split('\n').filter((line) => /<d>\[Chinese\]/i.test(line))
+        const badSpeaker = speakerLines.filter((line) => !/\(S\d+([,，]S\d+)*\)/.test(line))
+        if (badSpeaker.length) {
+          problems.push({ level: 'warn', message: `有 ${badSpeaker.length} 行台词没有带圆括号的说话人 ID（应写成 <Subject 1> (S1) says: <d>…</d>）` })
+        }
+      }
       if (/(^|[^A-Za-z])(None|N\/A|undefined)([^A-Za-z]|$)/.test(prompt)) problems.push({ level: 'error', message: '含 None / N/A / undefined 占位' })
       if (!fragmentMode) {
       // 身份必须用 <Subject n>：用 <Picture> 定义人物/四视图/面部特征，无论本段有没绑主体都是硬错误

@@ -124,7 +124,7 @@ AGENT_TOOL_PROMPT = """你是 EasyMedia「导演工作台」的项目智能体�
        retention_analysis 里出现的「参考图」「四视图」必须能对应到某个已定义令牌，否则删掉或改成文字描述。
      · detailed_description：逐镜写七要素——构图、主体外观与位置、环境与光线、动作与状态变化、镜头运动、当前声音、参考内容在这镜哪里生效；不要退化成剧情摘要或参考关系清单。
      · [Shot 1] 无时间戳；其后 `[Shot N] At MM:SS.mmm, …`，时间戳递增且小于总时长。
-     · 台词只出现在视觉时间线：`<Subject n> (Sx) says: <d>[Chinese] 原文</d>`；(Sx) 不进定义行、不进 <d>；与分镜一字不改。
+     · 台词只出现在视觉时间线：`<Subject n> (Sx) says: <d>[Chinese] 原文</d>`；说话人必须是**带圆括号的稳定 ID** `(S1)`/`(S2)`，不能写成裸 `S1`，也不能把名字塞进括号（如 `S1 (老赵)`）；`(Sx)` 不进 `<d>` 内部；与分镜台词一字不改。音色引用行则相反，必须带 `(Sx)`：`<Audio 1> is the voice-timbre reference for <Subject 1> (S1).`
      · overall_soundscape 只写环境声与可见动作造成的声音，不复述台词；non_diegetic_music 写 N/A 或具体配乐。
      · 不编造分镜里没有的镜头/台词/动作，不声称分辨率，不把未提供的素材写成输入；片段稿里的用户补充必须体现。
 5. 优先用主体：已建 <Subject n> 就用主体，没建主体的才用 <Picture n>；只借构图时注明「仅借构图」。
