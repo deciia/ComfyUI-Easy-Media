@@ -336,9 +336,10 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
     project_kind = str(options.get("project_kind") or payload.get("project_kind") or "").strip().lower()
     if project_kind == "audio":
         lines.append(
-            "本项目是音频生成项目：只输出声音层的描述。禁止写任何画面内容——"
-            "景别、机位、构图、光线、画布比例、镜头运动、人物外貌与表情表演一律不要出现；"
-            "台词必须用 <d>…</d> 包裹并保持原文；必须写清音色/语速/语气/停顿/呼吸、环境底噪与禁止项。"
+            "本项目是音频生成项目：仍然使用 H3 能理解的标准字段与表达方式（画面描述、台词、声音、配乐、禁止项），"
+            "但内容重心放在**声音侧**——音色、语速、语气、停顿与呼吸、口型与近讲距离、环境底噪、有无配乐。"
+            "画面部分只做最低限度交代（例如“画面黑场，无可见内容”或一句静态背景），"
+            "不要展开景别、机位、构图、光线、镜头运动与人物外貌表演；台词必须用 <d>…</d> 包裹并保持原文。"
         )
     elif project_kind == "image":
         lines.append(
@@ -407,18 +408,21 @@ def build_messages(payload: dict, settings: ProviderSettings) -> list[dict]:
         lines.append("硬性要求：" + constraints)
     if project_kind == "audio":
         lines.append(
-            "归一化要求（音频项目）：本项目的产物是音频，输出以声音为唯一主线。"
-            "detailed_description 只写声音事件与其发生时间（At 00:0X.XXX），禁止出现画面、景别、机位、构图、光线、画布比例；"
+            "归一化要求（音频项目）：保留 H3 官方字段（subject_definitions / detailed_description / "
+            "overall_soundscape / non_diegetic_music），但写法以声音为主线。"
+            "detailed_description 用 [Shot N] 与 At 00:0X.XXX 标注声音事件时序，每段先一句画面交代"
+            "（如“画面黑场，无可见内容”），其余篇幅写台词与声音表演：语气、语速、停顿、呼吸、气口、近讲距离；"
             "台词一律用 <d>…</d> 包裹并保持原文与说话人；overall_soundscape 写环境底噪、音色与空间感；"
-            "non_diegetic_music 明确写有或 none。不需要 subject_definitions 的画面定义，也不需要 [Shot] 镜头调度。"
-            "用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变。"
+            "non_diegetic_music 明确写有或 none。画面细节（景别/机位/构图/光线）只需保持中性、简单一句即可，不必展开。"
+            "用户片段中的中文描述就地改写成上述字段；<Subject n>/<Audio n>/<d>…</d> 令牌含义不变；"
             "禁止出现文字、字幕、logo、水印。"
         )
         lines.append(
-            "输出格式（硬性，音频项目）：每个使用的段名单独占一行、紧跟英文半角冒号，正文另起一行。"
+            "输出格式（硬性，音频项目）：H3 官方字段不变，每个段名单独占一行、紧跟英文半角冒号。"
             "示例：\n"
-            "summary:\n本段是一条 9 秒纯口播音频，主持人报出车辆症状。\n\n"
-            "detailed_description:\nAt 00:00.000 主持人开口，压低嗓音快速报症状；At 00:03.200 停顿半拍后继续。\n"
+            "summary:\n本段是一条 9 秒纯口播音频，画面黑场，主持人报出车辆症状。\n\n"
+            "detailed_description:\n[Shot 1] 画面黑场，无可见内容，只有一条近讲人声。"
+            "At 00:00.000 主持人开口，压低嗓音快速报症状；At 00:03.200 停顿半拍后继续。\n"
             "S1 says: <d>[Chinese] 重卡爬坡，轨压往下掉。</d>\n\n"
             "overall_soundscape:\n室内近场收音，单人声，轻微房间底噪与换气声，无第二人声。\n\n"
             "non_diegetic_music:\nnone"
