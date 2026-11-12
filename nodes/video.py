@@ -90,6 +90,58 @@ def _play_notify_sound(file_name: str):
 
 # 输出格式（参考班长「🎥 视频合并」的格式清单）：第一个是默认值，保持原行为
 _SAVE_KIND_OPTIONS = ["video", "images", "audio"]
+
+# 2026-11-10：保存类型按上游输入自动判定；图片帧数超过该阈值时存视频，否则存多张图片。
+_AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT = 2
+
+
+def _project_task_segment_count(project_name: str) -> int:
+    """按项目名读时间线，统计任务轨片段数；读不到返回 0。"""
+    name = str(project_name or "").strip()
+    if not name:
+        return 0
+    import json
+    from pathlib import Path
+
+    safe = "".join(ch if ch not in '\\/:*?"<>|' else "_" for ch in name)
+    path = Path(folder_paths.get_output_directory()) / "easy_media" / "projects" / safe / "timeline.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # 部分项目（如 ysxz-ep1）没有 timeline.json，任务段只存在于 project.json 的
+        # task_segments —— 退而读它，统计其条数
+        try:
+            pjson = json.loads(
+                (path.parent / "project.json").read_text(encoding="utf-8")
+            )
+            task_segments = pjson.get("task_segments")
+            return len(task_segments) if isinstance(task_segments, list) else 0
+        except (OSError, ValueError):
+            return 0
+    track_data = data.get("track_data") if isinstance(data, dict) else None
+    tracks = track_data.get("tracks") if isinstance(track_data, dict) else None
+    if not isinstance(tracks, list):
+        return 0
+    total = 0
+    for track in tracks:
+        if isinstance(track, dict) and track.get("type") == "task":
+            segments = track.get("segments")
+            if isinstance(segments, list):
+                total += len(segments)
+    return total
+
+
+def _image_batch_count(images) -> int:
+    """统计图片输入的帧数：list/tuple 取长度；4 维张量取 shape[0]；其余视为单张。"""
+    if isinstance(images, (list, tuple)):
+        return len(images)
+    shape = getattr(images, "shape", None)
+    if shape is not None and len(shape) >= 4:
+        try:
+            return int(shape[0])
+        except (TypeError, ValueError):
+            return 1
+    return 1
 _IMAGE_FORMAT_OPTIONS = ["PNG", "JPG", "WEBP"]
 _AUDIO_FORMAT_OPTIONS = ["WAV", "MP3", "FLAC"]
 
@@ -401,23 +453,37 @@ class EasySaveVideo(io.ComfyNode):
                     default=False,
                     tooltip="出片后卸载模型并清理显存（出错也会清理）。",
                 ),
-                io.Combo.Input(
-                    "save_kind",
-                    options=list(_SAVE_KIND_OPTIONS),
-                    default="video",
-                    tooltip="输出形态：video=视频；images=图像序列；audio=音频文件。",
+                io.Int.Input(
+                    "image_to_video_threshold",
+                    default=_AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT,
+                    min=-1,
+                    tooltip=(
+                        "图片转视频阈值（保存类型按上游输入自动判定）："
+                        "图片帧数大于该值时存视频，否则存多张图片；"
+                        "设为 -1 时对齐「项目名称」所填项目在多轨编辑器里的任务片段数"
+                        "（每段一张候选帧时永远存多张图片）。"
+                        "图片+音频、或有视频输入时始终存视频，只有音频时存音频。"
+                    ),
+                ),
+                io.String.Input(
+                    "project_name",
+                    default="",
+                    tooltip=(
+                        "项目名称：阈值=-1 时读取该项目的时间线任务片段数作为实际阈值；"
+                        "留空且阈值=-1 时回退默认阈值 2。"
+                    ),
                 ),
                 io.Combo.Input(
                     "image_format",
                     options=list(_IMAGE_FORMAT_OPTIONS),
                     default="PNG",
-                    tooltip="save_kind=images 时的图片格式。",
+                    tooltip="自动判定为多张图片时的图片格式。",
                 ),
                 io.Combo.Input(
                     "audio_format",
                     options=list(_AUDIO_FORMAT_OPTIONS),
                     default="WAV",
-                    tooltip="save_kind=audio 时的音频格式。",
+                    tooltip="自动判定为音频时的音频格式。",
                 ),
                 io.MultiType.Input(
                     "media",
@@ -467,7 +533,8 @@ class EasySaveVideo(io.ComfyNode):
         adopt_source_video: bool = False,
         cleanup_after_save: bool = False,
         notify_sound: str = _NOTIFY_MUTE,
-        save_kind: str = "video",
+        image_to_video_threshold: int = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT,
+        project_name: str = "",
         image_format: str = "PNG",
         audio_format: str = "WAV",
         media=None,
@@ -495,15 +562,12 @@ class EasySaveVideo(io.ComfyNode):
         if media is not None:
             if _is_audio_dict(media):
                 audio = media if audio is None else audio
-                save_kind = "audio"
                 media = None
             elif _is_image_batch(media):
                 images = media if images is None else images
-                save_kind = "images"
                 media = None
             elif _is_video_object(media):
                 video = media if video is None else video
-                save_kind = "video"
                 media = None
             else:
                 raise ValueError(
@@ -547,31 +611,50 @@ class EasySaveVideo(io.ComfyNode):
         write_temp = output_mode_key in {"preview_only", "hide"}
 
         pass_images = None
-        kind = str(save_kind or "video").strip().lower()
 
-        # 按实际接入的输入槽决定可保存类型（与前端按钮禁用规则一致）
+        # 2026-11-10：保存类型按上游实际输入自动判定（不再手动切换）。
+        # 有视频→视频；图片帧数>阈值 或 图片+音频→视频；有图片→多张图片；只有音频→音频。
         has_audio_input = audio is not None
         has_image_input = images is not None
         has_video_input = video is not None
-        if has_video_input:
-            allowed_kinds = {"video", "images", "audio"}
-        elif has_image_input and has_audio_input:
-            allowed_kinds = {"video", "images", "audio"}
-        elif has_image_input:
-            allowed_kinds = {"video", "images"}
-        elif has_audio_input:
-            allowed_kinds = {"audio"}
+        try:
+            threshold = int(image_to_video_threshold)
+        except (TypeError, ValueError):
+            threshold = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT
+        if threshold == -1:
+            # 阈值 -1：对齐多轨编辑器当前项目的任务片段数
+            segment_count = _project_task_segment_count(project_name)
+            if segment_count > 0:
+                threshold = segment_count
+                print(
+                    f"[EasyMedia] 阈值=-1：已对齐项目「{str(project_name).strip()}」任务片段数 {segment_count}"
+                )
+            else:
+                threshold = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT
+                print(
+                    f"[EasyMedia] 阈值=-1：项目「{str(project_name).strip()}」读取不到任务片段，回退默认阈值 {threshold}"
+                )
         else:
-            allowed_kinds = set()
-        if allowed_kinds and kind not in allowed_kinds:
-            readable = {"video": "视频", "images": "图片", "audio": "音频"}
+            threshold = max(1, threshold)
+        image_frame_count = _image_batch_count(images) if has_image_input else 0
+        readable = {"video": "视频", "images": "图片", "audio": "音频"}
+        if has_video_input:
+            kind = "video"
+            evidence = "视频输入"
+        elif has_image_input and (image_frame_count > threshold or has_audio_input):
+            kind = "video"
+            evidence = f"图片流 {image_frame_count} 张" + (" + 音频" if has_audio_input else "")
+        elif has_image_input:
+            kind = "images"
+            evidence = f"图片 {image_frame_count} 张（≤ 阈值 {threshold}）"
+        elif has_audio_input:
+            kind = "audio"
+            evidence = "音频输入"
+        else:
             raise ValueError(
-                "当前接线的输入不支持保存为"
-                f"{readable.get(kind, kind)}（可用："
-                + "、".join(readable[k] for k in ("video", "images", "audio") if k in allowed_kinds)
-                + "）。只接音频时只能存音频；只接图片时只能存视频或图片；"
-                "接视频、或图片+音频时三种都可用。"
+                "保存媒体：上游没有任何有效输入（图像/视频/音频均为空），无法判定保存类型。"
             )
+        print(f"[EasyMedia] 保存类型={readable[kind]}（依据：{evidence}）")
         if input_mode_key == "video":
             source_video = video
             if source_video is None:
@@ -684,11 +767,28 @@ class EasySaveVideo(io.ComfyNode):
 
         # 面板自带播放器：不再返回 ui.PreviewVideo，避免 ComfyUI 在节点上再插一个原生播放器
         # （否则会出现「面板播放器 + 原生播放器」两个，历史上反复被反馈）。
-        custom_ui = {"easy_video_info": [video_info]}
+        # ComfyTV 读取结果时需要标准键（images/audio/videos/gifs/video/3d），
+        # 本节点历史上只返回 easy_video_info，导致 ComfyTV 报 "save node produced no files"。
+        # 用 videos 键（ComfyUI 前端不处理该键，不会多出一个原生播放器）。
+        # 保存类型为图片/音频时改用 images / audio 标准键，让 ComfyTV 阶段卡片
+        # 能直接取到对应媒体（ComfyUI 前端对这些键有自己的渲染器：images 会
+        # 出预览图、audio 会出现播放器，与面板播放器并存；因此仅在非 video
+        # 保存时启用，视频保存维持 videos 键不动）。
+        _std_key = {"images": "images", "audio": "audio"}.get(kind, "videos")
+        save_ui = {
+            _std_key: [
+                {
+                    "filename": file,
+                    "subfolder": subfolder,
+                    "type": "temp" if write_temp else "output",
+                }
+            ]
+        }
+        custom_ui = {"easy_video_info": [video_info], **save_ui}
 
         if hide_preview:
             return io.NodeOutput(pass_images, source_video, pass_audio, relative_path,
-                                 ui={"easy_video_info": [video_info]})
+                                 ui={"easy_video_info": [video_info], **save_ui})
 
         return io.NodeOutput(
             pass_images,
@@ -712,7 +812,7 @@ def _save_media_output(
     prompt,
     extra_pnginfo,
 ):
-    """save_kind=images / audio 的落盘，返回与 _save_video_output 同形状的元组。"""
+    """自动判定为图片 / 音频时的落盘，返回与 _save_video_output 同形状的元组。"""
     from PIL import Image
     import numpy as np
 

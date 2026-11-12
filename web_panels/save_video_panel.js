@@ -37,7 +37,7 @@ const PARAM_WIDGETS = [
   "custom_save_path",
   "adopt_source_video",
   "cleanup_after_save",
-  "save_kind",
+  "image_to_video_threshold",
   "image_format",
   "audio_format",
   "notify_sound",
@@ -118,8 +118,20 @@ function el(tag, css, text) {
   return node;
 }
 
+// 2026-11-10：save_kind 已删除，保存类型由后端按上游输入自动判定。
+// 这里只是面板展示用的静态估计（按接线），运行时以后端日志为准：
+// 有视频/图片 → 视频形态（图片帧数 ≤ 阈值时后端实际存多张图片）；只接音频 → 音频形态。
 function currentKind(node) {
-  return String(node?.widgets?.find((w) => w.name === "save_kind")?.value ?? "video");
+  // 优先用最近一次实际保存结果（运行时后端判定，随工作流持久化在 properties.easyVideoInfo）；
+  // 多媒体槽是联合类型，静态接线估不出真实形态（media 里装音频时曾误显示"自动：视频"）
+  const saved = node?.properties?.easyVideoInfo?.kind ?? node?._easyVideoInfo?.kind;
+  if (saved === "audio" || saved === "images" || saved === "video") return saved;
+  const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+  const connected = (name) => inputs.some((input) => input?.name === name && input.link != null);
+  if (connected("audio") && !connected("images") && !connected("video") && !connected("media")) {
+    return "audio";
+  }
+  return "video";
 }
 
 /**
@@ -197,22 +209,14 @@ function buildPanel() {
     "div",
     `display:flex;align-items:center;gap:4px;height:${KIND_BAR_HEIGHT}px;flex:0 0 auto;padding:0 6px;background:#1b1b1b;border-bottom:1px solid #333;box-sizing:border-box;`,
   );
-  const kindButtons = new Map();
-  for (const item of KIND_ICONS) {
-    const btn = el(
-      "button",
-      "width:24px;height:19px;padding:0;border-radius:4px;border:1px solid #4a4a4a;background:rgba(20,20,20,.85);color:#ddd;cursor:pointer;font-size:12px;line-height:17px;",
-      item.icon,
-    );
-    btn.title = item.title;
-    btn.addEventListener("mousedown", (event) => event.stopPropagation());
-    btn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setSaveKind(panel, item.kind);
-    });
-    kindBar.appendChild(btn);
-    kindButtons.set(item.kind, btn);
-  }
+  // 只读识别徽标：显示按接线估计的保存形态（实际类型由后端按输入自动判定）
+  const kindBadge = el(
+    "span",
+    "padding:0 8px;height:19px;display:inline-flex;align-items:center;border-radius:4px;border:1px solid #39a0ff;background:rgba(29,78,216,.35);color:#cfe4ff;font-size:12px;line-height:17px;user-select:none;",
+    "自动：视频",
+  );
+  kindBadge.title = "保存类型按上游输入自动判定：视频/图片流+音频→视频；图片≤阈值→多张图片；只接音频→音频";
+  kindBar.appendChild(kindBadge);
   // 右侧三个按钮（都在三角形折叠键左边 → 详情、调色台，最右是三角形）：
   //   📋 视频详情折叠（默认折叠） / 🎨 调色台 / ▲ 只折叠上方的设置参数
   const barBtnCss = `width:22px;height:19px;padding:0;${BTN_CSS}`;
@@ -396,7 +400,7 @@ function buildPanel() {
     colorBtn,
     paramsBtn,
     kindBar,
-    kindButtons,
+    kindBadge,
     colorBody,
     bakeBtn,
     colorStatus,
@@ -626,48 +630,39 @@ function availableKinds(node) {
   return ["video", "images", "audio"].filter((kind) => allowed.has(kind));
 }
 
-function syncKindButtons(panel) {
-  const node = panel?.node;
-  if (!node || !panel?.kindButtons) return;
-  const allowed = availableKinds(node);
-  // 当前形态不被输入支持 → 自动切到第一个可用形态（优先图片/音频，最后才是视频）
-  if (!allowed.includes(currentKind(node))) {
-    const fallback = ["images", "audio", "video"].find((kind) => allowed.includes(kind)) || "video";
-    const widget = node.widgets?.find((w) => w.name === "save_kind");
-    if (widget) {
-      widget.value = fallback;
-      try {
-        widget.callback?.(fallback);
-      } catch {
-        /* 忽略回调异常：值已写入 */
-      }
-    }
+// ComfyTV 的类型判定只读画布文件里第一个接线输入槽的 type 串（按逗号拆分取第一个命中）。
+// 让「多媒体」槽的联合类型串跟随保存类型重排：ComfyTV 即可把节点判定为对应保存类型。
+// 四个 token 全保留，litegraph 连线校验是交集匹配不受影响，后端运行时逻辑也不变。
+const MEDIA_TYPE_ORDERS = {
+  images: "IMAGE,VIDEO,AUDIO,EASY_MEDIA",
+  video: "VIDEO,IMAGE,AUDIO,EASY_MEDIA",
+  audio: "AUDIO,IMAGE,VIDEO,EASY_MEDIA",
+};
+
+function applyMediaSlotTypeOrder(node) {
+  const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+  const media = inputs.find((input) => input?.name === "media");
+  if (!media) return;
+  const connected = (name) => inputs.some((input) => input?.name === name && input.link != null);
+  // 按接线重排：audio 槽接线 → AUDIO 开头；video 槽接线 → VIDEO 开头；
+  // 只接 media（或图片）时保持 VIDEO 开头（与 P3a 视频项目现状一致）。
+  let order = MEDIA_TYPE_ORDERS.video;
+  if (connected("audio")) order = MEDIA_TYPE_ORDERS.audio;
+  else if (connected("video")) order = MEDIA_TYPE_ORDERS.video;
+  if (media.type !== order) {
+    media.type = order;
+    node.setDirtyCanvas?.(true, true);
   }
-  const current = currentKind(node);
-  for (const [kind, btn] of panel.kindButtons) {
-    const active = kind === current;
-    const usable = allowed.includes(kind);
-    btn.style.borderColor = active ? "#39a0ff" : "#4a4a4a";
-    btn.style.background = active ? "rgba(29,78,216,.85)" : "rgba(20,20,20,.85)";
-    btn.style.opacity = usable ? (active ? "1" : "0.7") : "0.28";
-    btn.style.cursor = usable ? "pointer" : "not-allowed";
-    btn.disabled = !usable;
-    const baseTitle = (KIND_ICONS.find((item) => item.kind === kind) || {}).title || kind;
-    btn.title = usable ? baseTitle : `${baseTitle}（当前输入不支持，需要接 ${kind === "audio" ? "音频" : kind === "images" ? "图像+音频" : "视频/图像+音频"}）`;
-  }
-  applyKindWidgets(node, current);
 }
 
-function setSaveKind(panel, kind) {
+function syncKindButtons(panel) {
   const node = panel?.node;
-  if (!node) return;
-  const widget = node.widgets?.find((w) => w.name === "save_kind");
-  if (widget) {
-    widget.value = kind;
-    widget.callback?.(kind);
-  }
-  syncKindButtons(panel);
-  panel.refreshLayout?.();
+  if (!node || !panel?.kindBadge) return;
+  const current = currentKind(node);
+  applyMediaSlotTypeOrder(node);
+  const labels = { video: "自动：视频", images: "自动：图片", audio: "音频" };
+  panel.kindBadge.textContent = labels[current] || labels.video;
+  applyKindWidgets(node, current);
 }
 
 function colorTune() {
@@ -807,6 +802,7 @@ function saveSelectedImageAs(panel) {
 
 function applyInfo(panel, info) {  if (!info) return;
   panel.info = info;
+  panel.syncKindButtons = () => syncKindButtons(panel);
   // 持久化到 node.properties：切换工作流标签页会重建节点，内存里的 _easyVideoInfo 会丢；
   // 只有 properties 会随工作流一起序列化/还原，切回来才能把上一次的成片重新加载出来。
   if (panel.node) {
@@ -909,6 +905,9 @@ function applyInfo(panel, info) {  if (!info) return;
   }
   panel.pathText.textContent = info.path || info.filename || "—";
   panel.pathText.title = info.path || "";
+  // 2026-11-10：徽标/槽类型串必须跟随本次实际保存形态刷新（applyInfo 只刷预览不刷徽标，
+  // 曾导致视频运行后面板仍显示上一次「自动：图片」）
+  panel.syncKindButtons?.();
   panel.refreshLayout?.();
 }
 
@@ -975,7 +974,14 @@ app.registerExtension({
     nodeType.prototype.onExecuted = function (message, ...rest) {
       const result = onExecuted?.apply(this, [message, ...rest]);
       const info = Array.isArray(message?.easy_video_info) ? message.easy_video_info[0] : null;
-      if (info) this._easyVideoInfo = info;
+      if (info) {
+        this._easyVideoInfo = info;
+        // 2026-11-10：真正写入 properties，随工作流序列化；否则刷新/重载后徽标与预览丢失
+        try {
+          if (!this.properties) this.properties = {};
+          this.properties.easyVideoInfo = info;
+        } catch (e) { /* 只影响持久化，不影响本次显示 */ }
+      }
       if (info) {
         try {
           applyInfo(ensurePanel(this), info);

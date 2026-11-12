@@ -7,6 +7,7 @@ import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import { installTrackDataRealignment } from '@/lib/track-data-realign';
 import { installDynamicComboRuntimeRebuild } from '@/lib/dynamic-combo-runtime-rebuild';
+import { collapseResourceBindingWidgets, installResourceDynamicSlots } from '@/lib/resource-binding-widgets'
 import { installDynamicListInputs } from '@/lib/dynamic-list-inputs';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
@@ -16,6 +17,7 @@ import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidg
 import type { ProjectData } from '@/types/project'
 import type { SubjectData } from '@/components/widgets/multitrack/SubjectLibraryWidget'
 import { DEFAULT_PROJECT_DATA } from '@/types/project'
+import type { ResourceMediaValue } from '@/components/widgets'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 import { installWorkflowSubmission } from '@/lib/workflow-submission'
 import { installProjectSamplingPreview } from '@/lib/project-sampling-preview-node'
@@ -30,7 +32,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget, SubjectLibraryWidget },
+  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget, SubjectLibraryWidget, ResourceMediaWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -76,6 +78,8 @@ comfyApp.registerExtension({
     installTrackDataRealignment(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
     installDynamicComboRuntimeRebuild(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
     installDynamicListInputs(nodeType, nodeData)
+    collapseResourceBindingWidgets(nodeType, nodeData)
+    installResourceDynamicSlots(nodeType, nodeData)
   },
 
   getNodeMenuItems(node) {
@@ -133,6 +137,16 @@ comfyApp.registerExtension({
         domWidgetOptions: {
           getMinHeight: () => 44,
           getMaxHeight: () => 44,
+          hideOnZoom: false,
+          serialize: true,
+        },
+      }),
+      // 资源采集器面板：图像/视频/音频的本地素材槽（上传后写入 input 目录）
+      RESOURCE_MEDIA: createReactWidget<ResourceMediaValue>(ResourceMediaWidget, {
+        defaultValue: JSON.stringify({ images: [], videos: [], audio: [] }),
+        keepResponsiveWidthInLiteGraph: true,
+        domWidgetOptions: {
+          getMinHeight: () => 430,
           hideOnZoom: false,
           serialize: true,
         },

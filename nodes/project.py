@@ -390,6 +390,19 @@ def _h3_project_kind(project_name: Any) -> str:
     return kind if kind in {"video", "audio", "image"} else "video"
 
 
+_H3_SAMPLING_MODE_FOLLOW = "跟随节点"
+_H3_SAMPLING_MODE_CHOICES = (
+    _H3_SAMPLING_MODE_FOLLOW,
+    "single",
+    "dual",
+    "dual_t8",
+    "selflift",
+    "passthrough",
+    "audio_first",
+    "image_first",
+)
+
+
 def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     """Normalize the DynamicCombo value and accept a plain legacy mode value."""
     config = _first_input(value)
@@ -1068,11 +1081,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "仅音频分辨率",
-                    options=["64x64", "32x32"],
+                    options=["64x64", "32x32", "跟随上游"],
                     default="64x64",
                     tooltip=(
                         "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
-                        "32x32（更快）。真实音频时长仍由段时长决定。"
+                        "32x32（更快）；「跟随上游」= 不缩图，直接用多轨信息里的分辨率"
+                        "（其它模式的默认行为）。真实音频时长仍由段时长决定。"
                     ),
                 ),
                 io.Boolean.Input(
@@ -1208,6 +1222,46 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "例如 0,3,7,11,15,19,21；只填 15 表示单帧。"
                     ),
                 ),
+                # 2026-11-07：ComfyTV 侧栏只能渲染普通控件（DynamicCombo 会被整块跳过），
+                # 因此把「采样模式」与 selflift 的两个子项各做一份普通控件覆盖入口。
+                # 默认「跟随节点 / 0」= 不生效，旧工作流与画布行为完全不变。
+                io.Combo.Input(
+                    "采样模式覆盖",
+                    options=list(_H3_SAMPLING_MODE_CHOICES),
+                    default=_H3_SAMPLING_MODE_FOLLOW,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "仅 ComfyTV 侧栏使用：非「跟随节点」时覆盖画布上的采样模式下拉"
+                        "（selflift 会归一化）。P3a 日常使用保持「跟随节点」。"
+                    ),
+                ),
+                io.Float.Input(
+                    "过渡点覆盖",
+                    default=0.0,
+                    min=0.0,
+                    max=10000.0,
+                    step=0.05,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "仅 ComfyTV：>0 时覆盖 selflift 的过渡点（0~1 比例、≥1 步数）；"
+                        "0 = 跟随画布上 selflift 子项。"
+                    ),
+                ),
+                io.Float.Input(
+                    "低清比例覆盖",
+                    default=0.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.001,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "仅 ComfyTV：>0 时覆盖 selflift 的低清比例（0.25~1）；"
+                        "0 = 跟随画布上 selflift 子项。"
+                    ),
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
@@ -1273,14 +1327,24 @@ class EasyMultiTrackProject(io.ComfyNode):
         sampling_mode, sampling_config = _h3_sampling_mode_config(
             kwargs.get("sampling_mode")
         )
-        project_kind = _h3_project_kind(_first_input(kwargs.get("project_name"), ""))
-        forced_mode = {"audio": "audio_first", "image": "image_first"}.get(project_kind)
-        if forced_mode and sampling_mode != forced_mode:
+        sample_mode_override = str(
+            _first_input(kwargs.get("采样模式覆盖"), _H3_SAMPLING_MODE_FOLLOW)
+        ).strip()
+        if (
+            sample_mode_override
+            and sample_mode_override != _H3_SAMPLING_MODE_FOLLOW
+            and sample_mode_override in _H3_SAMPLING_MODE_CHOICES
+            and sample_mode_override != sampling_mode
+        ):
             print(
-                f"[EasyMedia] 项目 {kwargs.get('project_name')!r} 类型为 {project_kind}，"
-                f"采样模式 {sampling_mode} 已强制为 {forced_mode}"
+                f"[EasyMedia] 采样模式覆盖：{sampling_mode} → {sample_mode_override}"
+                "（来自 ComfyTV 侧栏）"
             )
-            sampling_mode, sampling_config = _h3_sampling_mode_config(forced_mode)
+            sampling_mode, sampling_config = _h3_sampling_mode_config(
+                sample_mode_override
+            )
+        # 项目类型（图片/音频/视频）与采样模式解耦：不再按项目类型强制 image_first / audio_first，
+        # 采样模式完全由输入决定（ComfyTV 侧才能手动设置）。
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
@@ -1289,6 +1353,30 @@ class EasyMultiTrackProject(io.ComfyNode):
         image_candidate_frames = str(
             _first_input(kwargs.get("图片候选帧"), "15")
         ).strip()
+        _effective = []
+        _ignored = []
+        if is_audio_first:
+            _effective += ["视频提交次数", "仅音频分辨率"]
+        else:
+            _ignored += ["视频提交次数", "仅音频分辨率"]
+        if is_image_first:
+            _effective.append("图片候选帧")
+        else:
+            _ignored.append("图片候选帧")
+        if sampling_mode in ("dual", "dual_t8") or is_selflift:
+            _effective += ["二采放大倍率", "放大模型", "禁用二采噪声"]
+        else:
+            _ignored += ["二采放大倍率", "放大模型", "禁用二采噪声"]
+        if is_selflift:
+            _effective += ["过渡点", "低清比例", "卸载放大模型", "w_min", "w_max"]
+        else:
+            _ignored += ["过渡点", "低清比例", "w_min", "w_max"]
+        print(
+            f"[EasyMedia] 采样模式={sampling_mode}；生效："
+            + ("、".join(_effective) or "无")
+            + "；忽略："
+            + ("、".join(_ignored) or "无")
+        )
         try:
             multirate_video_steps = int(
                 _first_input(
@@ -1339,6 +1427,12 @@ class EasyMultiTrackProject(io.ComfyNode):
             if raw_point is None:
                 raw_point = kwargs.get("transition_ratio")
             try:
+                point_override = float(_first_input(kwargs.get("过渡点覆盖"), 0.0))
+            except (TypeError, ValueError):
+                point_override = 0.0
+            if math.isfinite(point_override) and point_override > 0.0:
+                raw_point = point_override
+            try:
                 transition_point = float(_first_input(raw_point, 0.6))
             except (TypeError, ValueError):
                 transition_point = 0.6
@@ -1357,6 +1451,14 @@ class EasyMultiTrackProject(io.ComfyNode):
             lowres_scale = float(
                 _first_input(sampling_config.get("lowres_scale"), 0.6)
             )
+            try:
+                lowres_override = float(
+                    _first_input(kwargs.get("低清比例覆盖"), 0.0)
+                )
+            except (TypeError, ValueError):
+                lowres_override = 0.0
+            if math.isfinite(lowres_override) and lowres_override > 0.0:
+                lowres_scale = min(1.0, max(0.25, lowres_override))
             upscaler_unload = bool(
                 _first_input(kwargs.get("upscaler_unload"), True)
             )
@@ -1469,23 +1571,25 @@ class EasyMultiTrackProject(io.ComfyNode):
         first_pass_height = int(info["height"])
         if is_audio_first:
             # 有声剧：把画面压到最低档，算力交给音频；真实音频时长仍由段时长决定。
-            placeholder_size = (
-                32
-                if str(
+            # 2026-11-07：新增「跟随上游」= 不缩图，直接继承多轨信息的分辨率。
+            placeholder_raw = str(
+                _first_input(
+                    kwargs.get("仅音频分辨率"),
                     _first_input(
-                        kwargs.get("仅音频分辨率"),
+                        sampling_config.get("仅音频分辨率"),
                         _first_input(
-                            sampling_config.get("仅音频分辨率"),
-                            _first_input(
-                                sampling_config.get("audio_first_resolution"),
-                                _first_input(kwargs.get("audio_first_resolution"), "64x64"),
-                            ),
+                            sampling_config.get("audio_first_resolution"),
+                            _first_input(kwargs.get("audio_first_resolution"), "64x64"),
                         ),
-                    )
-                ).startswith("32")
-                else 64
-            )
-            first_pass_width = first_pass_height = placeholder_size
+                    ),
+                )
+            ).strip()
+            if placeholder_raw == "跟随上游":
+                placeholder_size = 0
+            else:
+                placeholder_size = 32 if placeholder_raw.startswith("32") else 64
+            if placeholder_size:
+                first_pass_width = first_pass_height = placeholder_size
         audio_only = is_audio_first or (first_pass_width, first_pass_height) == (32, 32)
         fps = float(info["frame_rate"])
         target_width, target_height = h3_second_pass_dimensions(
@@ -2547,13 +2651,39 @@ class EasyMultiTrackProject(io.ComfyNode):
             else:
                 report_segment_step(0.76)
                 if is_image_first:
-                    decoded_images = graph.node(
-                        "VAEDecode",
-                        id=f"decode_image_frames_{task_index}",
-                        samples=final_latent,
-                        vae=vae,
-                    )
-                    output_images = decoded_images.out(0)
+                    if has_output_vae:
+                        # 2026-11-07：图片模式也支持 HyperVAE 2× ——
+                        # 与视频路径一样先 cleanGpuUsed 腾显存，再用 AVDecode 拆出
+                        # video_latent（HyperVAE 只吃 [B,24,T,H,W]，拒绝 AV 合并 latent），
+                        # 最后交给 HyperVAE 解码出 2× 分辨率的帧。
+                        cleaned_latent = graph.node(
+                            "easy cleanGpuUsed",
+                            id=f"pre_decode_clean_{task_index}",
+                            anything=final_latent,
+                        ).out(0)
+                        av_decoded = graph.node(
+                            "easy deciiaH3AVDecode",
+                            id=f"av_decode_{task_index}",
+                            av_latent=cleaned_latent,
+                            video_vae=vae,
+                            audio_vae=audio_vae,
+                            decode_video=False,
+                        )
+                        hyper_decoded = graph.node(
+                            "VAEDecode",
+                            id=f"hyper_decode_{task_index}",
+                            samples=av_decoded.out(2),
+                            vae=output_vae_link,
+                        )
+                        output_images = hyper_decoded.out(0)
+                    else:
+                        decoded_images = graph.node(
+                            "VAEDecode",
+                            id=f"decode_image_frames_{task_index}",
+                            samples=final_latent,
+                            vae=vae,
+                        )
+                        output_images = decoded_images.out(0)
                     output_audio = None
                 elif has_output_vae:
                     # Deciia 2026-10-05：对齐 P8a 拓扑 —— 采样结束后先
@@ -2725,7 +2855,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                 saved_video_end = graph.node(
                     "easy h3SegmentSaveEnd",
                     id=f"save_end_{task_index}",
-                    video_path=saved_video.out(1),
+                    # saveVideo 输出槽顺序：0 图像 / 1 视频 / 2 音频 / 3 文件路径。
+                    # 这里要的是磁盘上的暂存文件路径（STRING），不是 VIDEO 对象。
+                    video_path=saved_video.out(3),
                     project_name=safe_project_name,
                     segment_index=task_index,
                 )
@@ -2974,6 +3106,8 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 io.String.Output("FILENAME_PREFIX", display_name="文件名前缀"),
                 io.Video.Output("VIDEO", display_name="视频"),
                 TYPE_EASY_MEDIA.Output("MEDIA", display_name="多媒体"),
+                io.Audio.Output("AUDIO", display_name="音频"),
+                io.Image.Output("IMAGES", display_name="图片流", is_output_list=True),
             ],
             not_idempotent=True,
         )
@@ -3010,14 +3144,19 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             )
         if not auto_combine:
             blocker = ExecutionBlocker(None)
-            return io.NodeOutput(blocker, blocker, blocker)
+            return io.NodeOutput(blocker, blocker, blocker, blocker, blocker)
         fresh_data = load_h3_project_data(safe_name)
         if fresh_data.get("image_first"):
             images = compose_h3_project_images(safe_name, data)
+            # 图片流槽是 output_list：批次张量会被 ComfyUI 拆成无批次维的 [H,W,C]，
+            # 下游保存节点再把 dim0 当批次就会存出碎条；这里主动拆成每帧 [1,H,W,C]
+            image_list = [images[i : i + 1] for i in range(int(images.shape[0]))]
             return io.NodeOutput(
                 h3_project_filename_prefix(safe_name),
                 ExecutionBlocker(None),
                 images,
+                ExecutionBlocker(None),
+                image_list,
             )
         if fresh_data.get("audio_only"):
             composed_audio = compose_h3_project_audio(safe_name, data)
@@ -3042,11 +3181,28 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 h3_project_filename_prefix(safe_name),
                 ExecutionBlocker(None),
                 audio_payload,
+                audio_payload,
+                ExecutionBlocker(None),
             )
         composed_path = compose_h3_project_video(safe_name, data)
         composed_video = InputImpl.VideoFromFile(str(composed_path))
+        # 2026-11-10（用户需求）：音频槽在视频工程下也输出成片音轨；
+        # 图片流槽改为按工程类型输出——图片工程出候选帧，
+        # 视频工程出合并视频的每一帧。
+        from ..utils.video import decode_video_frames_to_tensors, extract_video_audio
+
+        video_audio = extract_video_audio(composed_video)
+        if video_audio is None:
+            print("[EasyMedia] 合并视频无音轨：音频输出阻断")
+        try:
+            video_frames = decode_video_frames_to_tensors(composed_path)
+        except (RuntimeError, OSError) as error:
+            print(f"[EasyMedia] 视频帧解码失败，图片流阻断：{error}")
+            video_frames = ExecutionBlocker(None)
         return io.NodeOutput(
             h3_project_filename_prefix(safe_name),
             composed_video,
             composed_video,
+            video_audio if video_audio is not None else ExecutionBlocker(None),
+            video_frames,
         )

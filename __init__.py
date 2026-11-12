@@ -119,6 +119,7 @@ class EasyMediaExtension(ComfyExtension):
             MakeImageList,
             MakeAudioList,
             MakeVideoList,
+            ResourceCollector,
             # Common
             ClipTiming,
             EasyModelLoaderPack,

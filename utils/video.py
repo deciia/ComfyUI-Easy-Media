@@ -766,6 +766,53 @@ def decode_multitrack_preview_frame(
     return result.stdout
 
 
+def decode_video_frames_to_tensors(
+    video_path: str | Path,
+    max_frames: int = 0,
+) -> "list[torch.Tensor]":
+    """Decode every frame of a video file into a list of CHW float tensors.
+
+    2026-11-10（用户需求）：多轨项目视频合并节点的「视频帧」输出——把合并
+    成片逐帧解码为图片张量。ffmpeg rawvideo rgb24 管道一次解码全部帧，
+    比 PNG 逐帧快且无临时文件。``max_frames > 0`` 时只保留前 N 帧
+    （长视频防内存爆）。
+    """
+    import numpy as np
+
+    ffmpeg = get_ffmpeg_path()
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg is required for video frame decoding")
+    info = ffprobe_info(str(video_path))
+    width = int(info.get("width", 0) or 0)
+    height = int(info.get("height", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise RuntimeError(f"Unable to determine video size: {video_path}")
+    result = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", str(video_path),
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=False, timeout=600,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Unable to decode video frames: "
+            + result.stderr.decode(errors="replace")[-600:]
+        )
+    frame_bytes = width * height * 3
+    data = result.stdout
+    total = len(data) // frame_bytes
+    if total == 0:
+        raise RuntimeError(f"No frames decoded from {video_path}")
+    limit = total if max_frames <= 0 else min(total, int(max_frames))
+    array = np.frombuffer(data[: limit * frame_bytes], dtype=np.uint8)
+    frames = array.reshape(limit, height, width, 3)
+    # ComfyUI IMAGE 格式是 [N,H,W,C]；图片流槽是 output_list，每项给 [1,H,W,C]，
+    # 避免 ComfyUI 拆批次后下游把 3 维张量的 dim0 误当批次（曾产生 1024 条 3x1024 碎条）
+    return [
+        torch.from_numpy(frames[i].copy()).unsqueeze(0).float() / 255.0
+        for i in range(limit)
+    ]
+
+
 def video_input_to_local_file(
     video: Any,
     suffix: str = ".mp4",

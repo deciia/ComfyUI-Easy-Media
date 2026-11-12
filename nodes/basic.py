@@ -1,3 +1,4 @@
+import datetime
 import json
 import math
 import os
@@ -74,9 +75,11 @@ from ..utils import (
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
 from ..utils.h3_subjects import compose_timeline, parse_subject_config_document
 from ..utils.multitrack import (
+    MAX_MULTITRACK_TASK_IMAGES,
     _as_list_input,
     _embedded_multitrack_media,
     _index_slot_audio,
+    _index_slot_image,
     _merge_audio_track,
     _multitrack_frame_value,
     _multitrack_timeline_end,
@@ -201,6 +204,22 @@ resolution_combo_options = [
     )
     for s in resolution_strings
 ]
+
+# 覆盖模式（高级输入）：仅在 override_mode 开启时生效，供 ComfyTV 侧栏绑定。
+override_resolution_follow = "跟随节点"
+override_aspect_ratio_follow = "跟随"
+override_aspect_ratio_options = [override_aspect_ratio_follow, *[ratio.value for ratio in AspectRatio]]
+override_task_type_options = ["自动推断", "t2v", "i2v", "r2v", "rv2v", "v2v", "vi2v", "l2v"]
+override_ref_image_size_options = ["跟随", "match", "max"]
+override_task_mode_by_type = {
+    "t2v": "default",
+    "i2v": "default",
+    "r2v": "ref",
+    "rv2v": "ref",
+    "v2v": "edit",
+    "vi2v": "edit",
+    "l2v": "l2v",
+}
 
 # ---------------------------------------------------------------------------
 # Custom types
@@ -1962,12 +1981,114 @@ def _infer_task_mode(kwargs: dict) -> str:
     return "default"
 
 
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        result = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _apply_resolution_fields(
+    resolution: object,
+    preset: str,
+    aspect_ratio: str,
+    megapixels: float,
+    width: int,
+    height: int,
+) -> dict:
+    """按覆盖字段合成 resolution：长宽对 > 比例/像素 > 预设。"""
+    base = dict(resolution) if isinstance(resolution, dict) else {}
+    if width > 0 and height > 0:
+        base["resolution"] = "width x height (custom)"
+        base["width"] = int(width)
+        base["height"] = int(height)
+        return base
+    ratio_used = aspect_ratio and aspect_ratio != override_aspect_ratio_follow
+    if ratio_used or megapixels > 0:
+        base["resolution"] = "width x height (megapixels)"
+        if ratio_used:
+            base["aspect_ratio"] = aspect_ratio
+        base["megapixels"] = float(megapixels) if megapixels > 0 else float(base.get("megapixels") or 1.0)
+        return base
+    if preset and preset != override_resolution_follow:
+        return _apply_resolution_preset(base, preset)
+    return base
+
+
+def _apply_resolution_preset(resolution: object, label: str) -> dict:
+    base = dict(resolution) if isinstance(resolution, dict) else {}
+    entry = next(
+        (item for item in BASE_RESOLUTIONS if f"{item[0]} x {item[1]} ({item[2]})" == label),
+        None,
+    )
+    base["resolution"] = label
+    kind = str(entry[2]) if entry else ""
+    if kind == "custom":
+        base.setdefault("width", 544)
+        base.setdefault("height", 960)
+    elif kind == "megapixels":
+        base.setdefault("aspect_ratio", AspectRatio.SQUARE.value)
+        base.setdefault("megapixels", 1.0)
+    elif kind in ("shortest", "longest"):
+        base.setdefault("resize_to_pixel", 960)
+    return base
+
+
+def _apply_task_overrides(
+    data: object,
+    task_type: str,
+    ref_image_size: str,
+) -> object:
+    if not isinstance(data, dict):
+        return data
+    forced_mode = override_task_mode_by_type.get(task_type)
+    for track in data.get("tracks") or []:
+        if not isinstance(track, dict) or track.get("type") != "task":
+            continue
+        for segment in track.get("segments") or []:
+            content = segment.get("content") if isinstance(segment, dict) else None
+            if not isinstance(content, dict):
+                continue
+            explicit_type = str(content.get("task_type") or "").strip()
+            if forced_mode and not explicit_type:
+                content["task_type"] = task_type
+                content["task_mode"] = forced_mode
+            if ref_image_size in ("match", "max"):
+                content["ref_image_size"] = ref_image_size
+    return data
+
+
+def _available_slot_images(image_input, limit: int = MAX_MULTITRACK_TASK_IMAGES) -> int:
+    """数出上游图片槽里实际有多少张图；判定规则与 _index_slot_image 一致（空槽/1x1 占位不算）。"""
+    if image_input is None:
+        return 0
+    count = 0
+    for index in range(limit):
+        if _index_slot_image(image_input, f"image{index + 1}") is None:
+            break
+        count += 1
+    return count
+
+def _valid_media_count(value) -> int:
+    """统计资源包媒体列表里的有效条目数（None / 空串不算）。"""
+    if isinstance(value, (list, tuple)):
+        return sum(
+            1
+            for item in value
+            if item is not None and item != ""
+        )
+    return 0
+
+
+
 def _build_duration_override_data(
     base: dict,
     duration_frames: int,
     prompt_text: str,
     task_mode: str,
     format_name: str,
+    image_count: int = 0,
 ) -> dict:
     """duration_frames/prompt_override 覆盖轨道：不追加，直接按帧数重建单段任务。"""
     data = deepcopy(base) if isinstance(base, dict) else {}
@@ -2019,7 +2140,17 @@ def _build_duration_override_data(
             "stable_key": "sk-1",
             "user_prompt": prompt_text,
             "user_prompt_variant": "a",
-            "images": [],
+            # 覆盖模式下这段图片全部来自上游（ComfyTV 任意张数 / 画布槽位），
+            # 用槽位名引用，便于 #303 物化后回填 media_index 传给任务输出。
+            "images": [
+                {
+                    "id": f"override-image-{index + 1}",
+                    "source_type": "slot",
+                    "slot_name": f"image{index + 1}",
+                    "file_name": f"image{index + 1}",
+                }
+                for index in range(max(0, min(int(image_count), MAX_MULTITRACK_TASK_IMAGES)))
+            ],
             "muted": False,
             "volume_db": 0,
         },
@@ -2033,6 +2164,316 @@ def _build_duration_override_data(
         flush=True,
     )
     return data
+
+
+def _override_first_task_segment(
+    base: dict,
+    duration_frames: int,
+    prompt_text: str,
+    task_mode: str,
+    format_name: str,
+    task_type: str = "自动推断",
+    image_count: int = 0,
+    audio_count: int = 0,
+    video_count: int = 0,
+) -> dict:
+    """资源包接管：只改写任务轨的第一个片段，其余片段保持原样。
+
+    ComfyTV 单阶段生成时，#658 提供的提示词/参考图/时长落到默认项目的第一个
+    任务片段上；后面的片段不删不改，生成范围交给「多轨项目」的片段开始编号与
+    片段最大数量控制。
+    """
+    data = deepcopy(base) if isinstance(base, dict) else {}
+    try:
+        fps = float(data.get("frame_rate") or 24.0)
+    except (TypeError, ValueError):
+        fps = 24.0
+    if not math.isfinite(fps) or fps <= 0:
+        fps = 24.0
+    max_seconds = 15.0 if format_name == "MiniMax" else 30.0
+    max_frames = max(1, int(round(max_seconds * fps)))
+    requested = int(duration_frames)
+    frames = max(1, min(max_frames, requested))
+    if frames != requested:
+        print(
+            f"[EasyMedia] duration_frames={requested} 超出允许范围 1-{max_frames} 帧"
+            f"（{max_seconds:g}s × {fps:g}fps），已裁剪为 {frames} 帧",
+            flush=True,
+        )
+
+    tracks = deepcopy(data.get("tracks")) if isinstance(data.get("tracks"), list) else []
+    task_track = next(
+        (track for track in tracks if isinstance(track, dict) and track.get("type") == "task"),
+        None,
+    )
+    if task_track is None:
+        task_track = {
+            "id": "task-auto-0",
+            "name": "Task 0",
+            "type": "task",
+            "color": "var(--primary)",
+            "muted": False,
+            "locked": False,
+            "segments": [],
+        }
+        tracks.insert(0, task_track)
+    segments = task_track.get("segments")
+    if not isinstance(segments, list):
+        segments = []
+        task_track["segments"] = segments
+    if segments and isinstance(segments[0], dict):
+        first = segments[0]
+    else:
+        first = {"id": "task-auto-1", "start_frame": 0, "end_frame": frames, "content": {}}
+        segments.insert(0, first)
+    content = first.get("content")
+    if not isinstance(content, dict):
+        content = {}
+        first["content"] = content
+
+    later = [seg for seg in segments[1:] if isinstance(seg, dict)]
+    # 首段变长时把后面的片段整体右移，避免片段区间重叠导致工程解析报错。
+    if later:
+        try:
+            next_start = int(later[0].get("start_frame") or frames)
+        except (TypeError, ValueError):
+            next_start = frames
+        shift = max(0, frames - next_start)
+        if shift:
+            for seg in later:
+                try:
+                    seg["start_frame"] = int(seg.get("start_frame") or 0) + shift
+                    seg["end_frame"] = int(seg.get("end_frame") or 0) + shift
+                except (TypeError, ValueError):
+                    continue
+
+    first["start_frame"] = 0
+    first["end_frame"] = frames
+    first.setdefault("color", task_track.get("color") or "var(--primary)")
+    content["media_type"] = "none"
+    content["task_mode"] = task_mode
+    if task_type in override_task_mode_by_type:
+        content["task_type"] = task_type
+    content.setdefault("continuity_mode", "shot")
+    content.setdefault("ref_image_size", "match")
+    content.setdefault("user_prompt_variant", "a")
+    content["muted"] = False
+    content.setdefault("volume_db", 0)
+    if prompt_text:
+        content["user_prompt"] = prompt_text
+    count = max(0, min(int(image_count), MAX_MULTITRACK_TASK_IMAGES))
+    if count:
+        content["images"] = [
+            {
+                "id": f"override-image-{index + 1}",
+                "source_type": "slot",
+                "slot_name": f"image{index + 1}",
+                "file_name": f"image{index + 1}",
+            }
+            for index in range(count)
+        ]
+
+    # 参考音频 / 参考视频：由「资源采集器」的绑定槽（audio1..N / video1..N）提供。
+    # 音频沿用真实项目的参考段写法（shared_reference + reference_scope=full，
+    # 全量作参考，不按任务窗口裁剪）；每个槽位独占一条轨，避免同轨区间重叠。
+    def _ensure_track(track_type: str, index: int) -> dict:
+        existing = [
+            track
+            for track in tracks
+            if isinstance(track, dict) and track.get("type") == track_type
+        ]
+        if index < len(existing):
+            return existing[index]
+        track = {
+            "id": f"override-{track_type}-{index}",
+            "name": ("Audio %d" if track_type == "audio" else "Video %d") % (index + 1),
+            "type": track_type,
+            "color": "var(--highlight)" if track_type == "audio" else "var(--secondary)",
+            "muted": False,
+            "locked": False,
+            "segments": [],
+        }
+        tracks.append(track)
+        return track
+
+    def _write_reference_segments(track_type: str, count: int) -> None:
+        audio_n = max(0, min(int(count), 3))
+        for slot in range(audio_n):
+            track = _ensure_track(track_type, slot)
+            content = {
+                "media_type": track_type,
+                "source_type": "slot",
+                "slot_name": f"{track_type}{slot + 1}",
+                "file_name": f"{track_type}{slot + 1}",
+                "muted": False,
+                "volume_db": 0,
+                "shared_reference": True,
+            }
+            if track_type == "audio":
+                content["reference_mode"] = "global"
+                content["reference_scope"] = "full"
+            track["segments"] = [
+                {
+                    "id": f"override-{track_type}-ref-{slot + 1}",
+                    "start_frame": 0,
+                    "end_frame": frames,
+                    "color": track["color"],
+                    "content": content,
+                }
+            ]
+
+    _write_reference_segments("audio", audio_count)
+    _write_reference_segments("video", video_count)
+
+    data["tracks"] = tracks
+    data["frame_rate"] = fps
+    ends = [
+        int(seg.get("end_frame") or 0)
+        for seg in segments
+        if isinstance(seg, dict) and str(seg.get("end_frame") or "").lstrip("-").isdigit()
+    ]
+    try:
+        current_total = int(data.get("total_length") or 0)
+    except (TypeError, ValueError):
+        current_total = 0
+    data["total_length"] = max(current_total, max(ends) if ends else 0, frames)
+    print(
+        f"[EasyMedia] 资源包接管首段：片段 1 = {frames} 帧 = {frames / fps:g}s × {fps:g}fps，"
+        f"task_mode={task_mode}，图片 {count} 张，参考音频 {max(0, min(int(audio_count), 3))} 条，"
+        f"参考视频 {max(0, min(int(video_count), 3))} 条，其余任务片段 {len(later)} 个保持原样",
+        flush=True,
+    )
+    return data
+
+def _load_project_timeline(project_name: str):
+    """按项目名读取磁盘时间线（ComfyTV 没有自定义 widget，只能靠项目名找盘上的数据）。"""
+    import json
+    import folder_paths
+
+    safe = "".join(
+        "_" if ch in '<>:"/\\|?*' or ord(ch) < 32 else ch
+        for ch in str(project_name or "").strip()
+    ).strip(" .")
+    if not safe or safe in (".", ".."):
+        return None, ""
+    path = (
+        Path(folder_paths.get_output_directory()).resolve()
+        / "easy_media" / "projects" / safe / "timeline.json"
+    )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print(f"[EasyMedia] 项目时间线不存在：{path}（按空时间线继续）")
+        return None, ""
+    except Exception as exc:
+        print(f"[EasyMedia] 项目时间线读取失败：{path}：{exc}")
+        return None, ""
+    track = payload.get("track_data") if isinstance(payload, dict) else None
+    if isinstance(track, str):
+        try:
+            track = json.loads(track)
+        except Exception:
+            track = None
+    if not isinstance(track, dict):
+        print(f"[EasyMedia] 项目时间线缺少 track_data：{path}")
+        return None, ""
+    name = str(payload.get("project_name") or safe).strip() or safe
+    print(f"[EasyMedia] 已按项目名载入时间线：{path}")
+    return track, name
+
+
+def _default_project_skeleton() -> dict:
+    """默认项目的初始时间线：一条任务轨（含唯一首段）+ 视频轨 + 音频轨。"""
+    task_color = "var(--multitrack-task-bg)"
+    return {
+        "muted": False,
+        "volume_db": 0,
+        "task_markers": [],
+        "task_overview": False,
+        "tracks": [
+            {
+                "id": "task-default-0",
+                "name": "Task",
+                "type": "task",
+                "color": task_color,
+                "muted": False,
+                "locked": False,
+                "segments": [
+                    {
+                        "id": "task-default-1",
+                        "start_frame": 0,
+                        "end_frame": 240,
+                        "color": task_color,
+                        "content": {
+                            "media_type": "none",
+                            "task_mode": "default",
+                            "continuity_mode": "shot",
+                            "ref_image_size": "match",
+                            "images": [],
+                            "muted": False,
+                            "volume_db": 0,
+                            "user_prompt": "",
+                        },
+                    }
+                ],
+            },
+            {
+                "id": "video-default-0",
+                "name": "Video",
+                "type": "video",
+                "color": "var(--multitrack-video-bg)",
+                "muted": False,
+                "locked": False,
+                "segments": [],
+            },
+            {
+                "id": "audio-default-0",
+                "name": "Audio",
+                "type": "audio",
+                "color": "var(--multitrack-audio-bg)",
+                "muted": False,
+                "locked": False,
+                "segments": [],
+            },
+        ],
+        "total_length": 240,
+        "frame_rate": 24,
+    }
+
+
+def _ensure_default_project_timeline() -> dict:
+    """取默认项目时间线；不存在时建骨架并落盘，保证 ComfyTV 有稳定的默认工程。"""
+    track, _name = _load_project_timeline("default")
+    if isinstance(track, dict):
+        return track
+    data = _default_project_skeleton()
+    path = (
+        Path(folder_paths.get_output_directory()).resolve()
+        / "easy_media" / "projects" / "default" / "timeline.json"
+    )
+    payload = {
+        "version": 2,
+        "project_kind": "video",
+        "resolution": {
+            "preset": "width x height (megapixels)",
+            "aspect_ratio": "9:16 (Portrait Widescreen)",
+            "megapixels": 2,
+        },
+        "format": "MiniMax",
+        "track_data": data,
+        "project_name": "default",
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "meta": {"app": "easy-media", "editor": "multitrack-v1"},
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"[EasyMedia] 已创建默认项目时间线：{path}", flush=True)
+    except Exception as exc:
+        print(f"[EasyMedia] 默认项目时间线写入失败：{path}：{exc}", flush=True)
+    return data
+
+TYPE_COLLECTOR_BUNDLE = io.Custom(io_type="EASY_COLLECTOR")
 
 
 class MultiTrackEditor(io.ComfyNode):
@@ -2055,24 +2496,17 @@ class MultiTrackEditor(io.ComfyNode):
                     tooltip="Select a resolution or choose 'Custom'. Width and height of 32 enable audio-only output in MultiTrack Project.",
                 ),
                 io.Combo.Input("format", options=list(VIDEO_FORMATS.keys()), default="Wan",  tooltip="Choose a video format to automatically set resolution and frame rate."),
-                TYPE_TRACK_DATA.Input("track_data"),
-                io.AnyType.Input("prompt_override", optional=True, tooltip="If provided, overrides all segment prompts in the timeline.",),
-                io.Image.Input("image", optional=True, lazy=True, tooltip="Optional image media list for slot-based multitrack segments."),
-                io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
-                io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
-                # 仅作为上游覆盖接口：不设 widget，只在连线上生效；时长本身仍在任务轨上设置。
-                # 单位为帧数，建议由 easy clipTiming 节点（fps + 秒 → 帧）提供。
-                io.AnyType.Input(
-                    "duration_frames",
+                TYPE_COLLECTOR_BUNDLE.Input(
+                    "collector",
                     optional=True,
                     tooltip=(
-                        "可选（仅连线）：上游传入本次生成时长（帧数，如 120）。"
-                        "可用「Clip Timing」节点把帧率+秒换算成帧。"
-                        "接上后忽略轨道任务段，按该帧数重建单段；"
-                        "任务类型按接入的图片/音频/视频自动推断（无输入=文生视频，有任一输入=参考生视频）。"
-                        "prompt_override 带 [0-5s] 区间时以区间为准。"
+                        "资源采集器的资源包（连「资源采集器」的 BUNDLE 输出）。"
+                        "接上并放行后，媒体/帧数/提示词全部由采集器提供，"
+                        "等同采集器直接接在本节点下游：本节点的时间线与覆盖设置都不再生效。"
                     ),
                 ),
+                # optional：ComfyTV 转换器会丢弃自定义 widget，必须允许缺省（缺省时按空时间线处理）。
+                TYPE_TRACK_DATA.Input("track_data", optional=True),
             ],
             outputs=[
                 TYPE_TRACKS_INFO.Output("TRACKS_INFO"),
@@ -2093,72 +2527,18 @@ class MultiTrackEditor(io.ComfyNode):
         )
 
     @classmethod
-    def check_lazy_status(
-        cls,
-        resolution: str | dict,
-        format: str,
-        track_data: str | dict,
-        prompt_override: object = None,
-        image: object = None,
-        audio: object = None,
-        video: object = None,
-        duration_frames: object = None,
-    ) -> list[str]:
-        del resolution
-        raw_format = format[0] if isinstance(format, list) and format else format
-        raw_track_data = track_data[0] if isinstance(track_data, list) and track_data else track_data
-        raw_override = (
-            prompt_override[0]
-            if isinstance(prompt_override, list) and len(prompt_override) == 1
-            else prompt_override
-        )
-        duration_value = _unwrap_optional_value(duration_frames)
-        try:
-            duration_count = int(round(float(duration_value))) if duration_value not in (None, "") else 0
-        except (TypeError, ValueError):
-            duration_count = 0
-        if duration_count > 0 and not prompt_override_has_frame_ranges(raw_override):
-            # duration 覆盖模式：按连线推断任务类型，需要惰性求值已接入的媒体输入
-            def _unevaluated(value: object) -> bool:
-                return (
-                    isinstance(value, (list, tuple))
-                    and len(value) > 0
-                    and all(item is None for item in value)
-                )
-
-            requested = [
-                media_type
-                for media_type, value in (("image", image), ("audio", audio), ("video", video))
-                if _unevaluated(value)
-            ]
-            return requested
-        if raw_format == "MiniMax" and is_minimax_prompt_override(raw_override):
-            slot_types = minimax_prompt_override_media_types(raw_override)
-        else:
-            data = _parse_track_data(raw_track_data)
-            if prompt_override_has_value(raw_override):
-                data = build_multitrack_data_from_prompt_override(data, raw_override)
-            slot_types = multitrack_slot_media_types(data)
-        values = {"image": image, "audio": audio, "video": video}
-
-        def _missing_lazy_input(v):
-            # An unevaluated lazy input under is_input_list arrives as (None,) rather
-            # than None; treat None / empty / all-None sequences as missing so the
-            # engine is asked to evaluate it.
-            if v is None:
-                return True
-            if isinstance(v, (list, tuple)):
-                return len(v) == 0 or all(x is None for x in v)
-            return False
-
-        return [media_type for media_type in sorted(slot_types) if _missing_lazy_input(values[media_type])]
+    def check_lazy_status(cls, **kwargs: object) -> list[str]:
+        # 媒体/帧数/提示词现在统一由「资源采集器」的 BUNDLE 提供（连线输入），
+        # 本节点不再声明 image/audio/video/duration_frames，因此没有需要惰性求值的输入。
+        del kwargs
+        return []
 
     @classmethod
     def execute(
         cls,
         resolution: str | dict,
         format: str,
-        track_data: str | dict,
+        track_data: str | dict | None = None,
         **kwargs: object,
     ) -> io.NodeOutput:
         if isinstance(resolution, list):
@@ -2168,9 +2548,68 @@ class MultiTrackEditor(io.ComfyNode):
         if isinstance(track_data, list):
             track_data = track_data[0]
 
+        # 覆盖设置由「资源采集器」(#658) 随 bundle 下发：本节点不再有自己的覆盖控件。
+        # 阻断 / 未接线时 bundle 不生效，完全按本节点时间线与 resolution 跑。
+        bundle = kwargs.get("collector")
+        if isinstance(bundle, (list, tuple)) and len(bundle) == 1:
+            bundle = bundle[0]
+        bundle_active = isinstance(bundle, dict) and bool(bundle.get("active"))
+        settings = bundle if bundle_active else {}
+        # 采集器提供长宽 + 任务类型；放行即覆盖，其余（参考图尺寸/画幅）随笔者的时间线走。
+        override_mode = bundle_active
+        override_resolution = ""
+        override_task_type = (
+            str(settings.get("task_type_override") or "").strip()
+            if bundle_active
+            else ""
+        ) or "自动推断"
+        override_ref_image_size = "跟随"
+        override_aspect_ratio = override_aspect_ratio_follow
+        override_megapixels = 0.0
+        override_width = int(_safe_float(settings.get("resolution_width"), 0))
+        override_height = int(_safe_float(settings.get("resolution_height"), 0))
+        if override_mode:
+            resolution = _apply_resolution_fields(
+                resolution,
+                override_resolution,
+                override_aspect_ratio,
+                override_megapixels,
+                override_width,
+                override_height,
+            )
+
         prompt_override = kwargs.get('prompt_override')
         if isinstance(prompt_override, list) and len(prompt_override) == 1:
             prompt_override = prompt_override[0]
+
+        # 资源包接管：放行时等同采集器直接接在本节点下游——
+        # 媒体列表、帧数、提示词全部来自 bundle，本节点时间线被重建为单段。
+        if bundle_active:
+            bundle_frames = 0
+            try:
+                bundle_frames = int(round(float(bundle.get("frames") or 0)))
+            except (TypeError, ValueError):
+                bundle_frames = 0
+            if bundle_frames > 0:
+                kwargs["duration_frames"] = bundle_frames
+            bundle_prompt = bundle.get("prompt")
+            if isinstance(bundle_prompt, str) and bundle_prompt.strip():
+                prompt_override = bundle_prompt
+            for socket, key in (("image", "images"), ("audio", "audio"), ("video", "videos")):
+                values = bundle.get(key)
+                if isinstance(values, (list, tuple)) and values:
+                    kwargs[socket] = list(values)
+            print(
+                "[EasyMedia] 资源包接管：%d 图 / %d 音频 / %d 视频 / %d 帧 / 提示词 %d 字"
+                % (
+                    len(bundle.get("images") or []),
+                    len(bundle.get("audio") or []),
+                    len(bundle.get("videos") or []),
+                    bundle_frames,
+                    len(str(bundle.get("prompt") or "")),
+                ),
+                flush=True,
+            )
 
         duration_value = _unwrap_optional_value(kwargs.get("duration_frames"))
         try:
@@ -2180,7 +2619,16 @@ class MultiTrackEditor(io.ComfyNode):
         if duration_frames < 0:
             duration_frames = 0
 
-        data = _parse_track_data(track_data)
+        if bundle_active and not prompt_override_has_value(track_data):
+            # 画布清空时 track_data 可能为空串；资源包模式不依赖它，直接用默认项目骨架。
+            data = _default_project_skeleton()
+        else:
+            data = _parse_track_data(track_data)
+        if bundle_active:
+            # 接上资源采集器时，本节点的内置逻辑只面向默认项目：
+            # 读默认项目时间线，覆盖它的第一个任务片段，其余片段保持原样。
+            data = _ensure_default_project_timeline()
+            print("[EasyMedia] 资源包模式：使用默认项目时间线，只覆盖第一个任务片段", flush=True)
         is_minimax_override = format == "MiniMax" and is_minimax_prompt_override(prompt_override)
         has_frame_ranges = (not is_minimax_override) and prompt_override_has_frame_ranges(prompt_override)
         if is_minimax_override:
@@ -2188,15 +2636,40 @@ class MultiTrackEditor(io.ComfyNode):
         elif duration_frames > 0 and not has_frame_ranges:
             # 覆盖语义：忽略轨道既有任务段，按帧数（+可选 prompt）重建单段
             prompt_text = str(prompt_override).strip() if prompt_override_has_value(prompt_override) else ""
-            data = _build_duration_override_data(
-                data,
-                duration_frames,
-                prompt_text,
-                _infer_task_mode(kwargs),
-                format,
+            override_task_mode_value = (
+                override_task_mode_by_type.get(override_task_type, _infer_task_mode(kwargs))
+                if override_mode and override_task_type in override_task_mode_by_type
+                else _infer_task_mode(kwargs)
             )
+            if bundle_active:
+                # ComfyTV 路线：只改写现有时间线的第一个任务片段，其余片段不删不改。
+                data = _override_first_task_segment(
+                    data,
+                    duration_frames,
+                    prompt_text,
+                    override_task_mode_value,
+                    format,
+                    task_type=override_task_type,
+                    image_count=_available_slot_images(kwargs.get("image")),
+                    audio_count=_valid_media_count(kwargs.get("audio")),
+                    video_count=_valid_media_count(kwargs.get("video")),
+                )
+            else:
+                # 画布路线：忽略轨道既有任务段，按帧数（+可选 prompt）重建单段
+                data = _build_duration_override_data(
+                    data,
+                    duration_frames,
+                    prompt_text,
+                    override_task_mode_value,
+                    format,
+                    image_count=_available_slot_images(kwargs.get("image")),
+                )
         elif prompt_override_has_value(prompt_override):
             data = build_multitrack_data_from_prompt_override(data, prompt_override)
+        if override_mode:
+            # 任务类型只写进第一个任务片段（_override_first_task_segment 已处理），
+            # 不再用 _apply_task_overrides 全轨盖章，避免影响其余片段。
+            data = _apply_task_overrides(data, "自动推断", override_ref_image_size)
         materialize_media = multitrack_slot_media_types(data)
         tracks_info, images_out, audio_out, video_out = _build_tracks_info_and_media_outputs(
             data,

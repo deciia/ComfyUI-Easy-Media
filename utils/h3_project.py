@@ -385,6 +385,13 @@ def compose_h3_project_images(project_name: Any, project_data: Any = None):
         source = fresh_by_index.get(index)
         if source is None:
             continue
+        # 2026-11-08：同一项目目录里可能残留 audio_first 运行的音频片段，
+        # 图片工程合并只取视频片段；否则会拿 WAV 去抽帧并报
+        # "Output file does not contain any stream"。
+        if source.get("media_kind") == "audio" or str(source.get("file_path", "")).lower().endswith(
+            (".wav", ".mp3", ".flac", ".m4a", ".ogg")
+        ):
+            continue
         frame_index = clip.get("image_frame")
         if not isinstance(frame_index, (int, float)):
             frame_index = default_frame
@@ -1094,9 +1101,19 @@ def initialize_h3_project(
     # 变更后的即将生成分辨率；旧 manifest 无此字段时保持缺失（前端回落）。
     if isinstance(info.get("gen_settings"), dict):
         manifest["gen_settings"] = info["gen_settings"]
+    # 2026-11-08：工程类型随本次运行同步，不能只置位不清位——否则视频/音频
+    # 运行复用同一项目名时，会残留上一次的 image_first / audio_only，
+    # 合并节点据此走错分支（例如拿 WAV 当视频抽帧）。
     if info.get("image_first"):
         manifest["image_first"] = True
         manifest["图片候选帧"] = str(info.get("图片候选帧") or "15")
+    else:
+        manifest.pop("image_first", None)
+        manifest.pop("图片候选帧", None)
+    if is_h3_audio_only_project(info):
+        manifest["audio_only"] = True
+    else:
+        manifest.pop("audio_only", None)
     manifest.pop("tracks_info", None)
     manifest.pop("last_render", None)
     if not isinstance(manifest.get("segments"), dict):
