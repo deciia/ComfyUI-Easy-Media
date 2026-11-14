@@ -1,4 +1,9 @@
-# P3a · Easy Project All-in-One（beta3）参考工作流
+# P3a · Easy Project All-in-One 参考工作流
+
+> **最新：beta5 版** → [Easy_Project_AllInOnev_deciia_beta5.json](./Easy_Project_AllInOnev_deciia_beta5.json)
+> 基于 P3a beta5 的精简版案例（38 节点）：多轨编辑器 + 项目生成 + 合并 + 保存媒体，已内置「示例项目」时间线（诊所对话场景，参考图 `女医生 / 男病人 / 诊所` 需自行放入 `input/h3-accel-test/`，或改成你自己的参考图）。项目名等标识已脱敏，节点与连线与原版完全一致。
+
+## P3a · Easy Project All-in-One（beta3）参考工作流
 
 MiniMax H3「一采 + 二采 + 多轨项目」All-in-One 参考工作流。一条链路里包含：多轨编辑器项目时间线、参考图/音/视频挂载、OmniCam 相机编排运动层、语义桥（T8）+ HyperVAE 2× 超级解码、一采/二采双阶段采样与 LoRA 加速、以及 **RTX / VOSR2 / SeedVR2 三条超分出口**。
 
