@@ -6,9 +6,8 @@ import { scheduleInitialRender } from '@/lib/staggered-mount'
 
 const NODE_NAME = 'easy multitrackProject'
 const WIDGET_NAME = 'easy-media-sampling-preview'
-const COLLAPSED_HEIGHT = 8
 const PREVIEW_HEIGHT = 280
-const PREVIEW_HEIGHT_DELTA = PREVIEW_HEIGHT - COLLAPSED_HEIGHT
+const PREVIEW_COLLAPSED_HEIGHT = 8
 
 interface PreviewWidget {
   computedHeight?: number
@@ -40,7 +39,6 @@ interface PreviewNodeType {
 
 function installWidget(node: PreviewNode, app: ComfyApp) {
   let visible = false
-  let previewHeightApplied = false
   let executionRevision = 0
   let root: Root | null = null
   let hostObserver: MutationObserver | null = null
@@ -64,8 +62,8 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
   })
 
   const widget = node.addDOMWidget(WIDGET_NAME, WIDGET_NAME, container, {
-    getMinHeight: () => visible ? PREVIEW_HEIGHT : COLLAPSED_HEIGHT,
-    getMaxHeight: () => visible ? PREVIEW_HEIGHT : COLLAPSED_HEIGHT,
+    getMinHeight: () => (visible ? PREVIEW_HEIGHT : PREVIEW_COLLAPSED_HEIGHT),
+    getMaxHeight: () => (visible ? PREVIEW_HEIGHT : PREVIEW_COLLAPSED_HEIGHT),
     hideOnZoom: false,
     margin: 0,
     serialize: false,
@@ -83,7 +81,7 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
       hostObserver?.disconnect()
       hostObserver = null
     }
-    const height = visible ? PREVIEW_HEIGHT : COLLAPSED_HEIGHT
+    const height = PREVIEW_HEIGHT
     const pointerEvents = visible ? 'auto' : 'none'
     let changed = false
     if (host.style.maxHeight !== `${height}px`) { host.style.maxHeight = `${height}px`; changed = true }
@@ -112,15 +110,7 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
     container.hidden = !visible
     container.style.pointerEvents = visible ? 'auto' : 'none'
     delete widget.computedHeight
-    if (node.size && node.setSize) {
-      if (visible && !previewHeightApplied) {
-        node.setSize([node.size[0], node.size[1] + PREVIEW_HEIGHT_DELTA])
-        previewHeightApplied = true
-      } else if (!visible && previewHeightApplied) {
-        node.setSize([node.size[0], Math.max(COLLAPSED_HEIGHT, node.size[1] - PREVIEW_HEIGHT_DELTA)])
-        previewHeightApplied = false
-      }
-    }
+    // 节点高度由 advanced-node-height 的内容自适应统一管理，这里不再改动尺寸。
     node.onResize?.(node.size)
     node.graph?.setDirtyCanvas?.(true, true)
     globalThis.requestAnimationFrame?.(syncHostBounds)

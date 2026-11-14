@@ -159,10 +159,22 @@ def _video_tail_bounds(
             "whole H3 latent steps"
         )
     if steps > total_steps:
-        raise ValueError(
-            f"easy h3 motion context: requested {steps} latent steps, but the "
-            f"context latent contains {total_steps}"
+        snapped = total_steps
+        while snapped > 0 and (total_steps - snapped) % 5 != 0:
+            snapped -= 1
+        if snapped < 1:
+            raise ValueError(
+                "easy h3 motion context: the context latent is too short to "
+                "provide a video tail"
+            )
+        LOGGER.warning(
+            "Requested %d latent steps but the context latent contains only %d; "
+            "using the %d-step tail",
+            steps,
+            total_steps,
+            snapped,
         )
+        steps = snapped
     start = total_steps - steps
     if start % 5 != 0:
         raise RuntimeError(

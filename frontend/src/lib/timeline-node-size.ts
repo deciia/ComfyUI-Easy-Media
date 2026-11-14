@@ -130,10 +130,19 @@ export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?:
 
   nodeType.prototype.onConfigure = function (serialisedNode: any) {
     originalOnConfigure?.call(this, serialisedNode)
-    const savedHeight = readStoredHeight(this, serialisedNode)
     invalidatePendingHeightRestores(this)
+    // 文件里的 size 是用户最后一次手动调整（含缩小）的结果，必须以它为准。
+    // 属性里的 easyMediaTimelineHeight 只是“最近一次高度”的快照，用来兜住
+    // 老工作流（没有 size）以及控件显隐时的临时回弹；若在这里反过来覆盖
+    // size，用户缩小节点并保存后，刷新就会被打回调整前的高度。
+    const serialisedSize = readSize(serialisedNode?.size)
+    if (serialisedSize) {
+      preserveHeight(this, serialisedSize[1])
+      return
+    }
+    const savedHeight = readStoredHeight(this, serialisedNode)
     if (savedHeight !== null) preserveHeight(this, savedHeight)
-    restoreHeight(this, savedHeight, readSize(serialisedNode?.size)?.[0])
+    restoreHeight(this, savedHeight, undefined)
   }
 
   nodeType.prototype.onResize = function (size: unknown) {

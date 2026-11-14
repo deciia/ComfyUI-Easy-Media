@@ -139,7 +139,20 @@ def _h3_required_node_defaults(node_id: str) -> dict[str, Any]:
             and isinstance(specification[1], dict)
             and "default" in specification[1]
         ):
-            defaults[name] = specification[1]["default"]
+            default = specification[1]["default"]
+            options = specification[0]
+            if (
+                isinstance(options, (list, tuple))
+                and options
+                and default not in options
+            ):
+                # 2026-11-14：部分第三方节点把下拉项的默认值写成非字符串
+                # （KJNodes 的 ImageResizeKJv2 就把 keep_proportion 默认写成
+                # False），子图里直接透传会让节点拿到 bool 当字符串用，
+                # 报 'bool' object has no attribute 'startswith'。
+                # 遇到非法默认值时退回第一个合法选项。
+                default = options[0]
+            defaults[name] = default
         elif (
             isinstance(specification, (list, tuple))
             and specification
@@ -176,6 +189,8 @@ def _h3_image_resize_inputs(
             "width": width,
             "height": height,
             "upscale_method": "nvidia_rtx_vsr",
+            # 与 KJNodes 原意一致：只缩放、不变形不改比例。
+            "keep_proportion": "stretch",
         }
     )
     return inputs
@@ -391,6 +406,11 @@ def _h3_project_kind(project_name: Any) -> str:
 
 
 _H3_SAMPLING_MODE_FOLLOW = "跟随节点"
+
+# 2026-11-14：图片任务（image_first）帧数档位。H3 原生帧数是 17n+5 的网格点。
+_IMAGE_FRAME_TIER_FOLLOW = "跟随上游"
+_IMAGE_FRAME_TIER_FRAMES = {"1 帧": 1, "5 帧": 5, "22 帧": 22, "124 帧": 124}
+_IMAGE_FRAME_TIERS = (_IMAGE_FRAME_TIER_FOLLOW, *tuple(_IMAGE_FRAME_TIER_FRAMES))
 _H3_SAMPLING_MODE_CHOICES = (
     _H3_SAMPLING_MODE_FOLLOW,
     "single",
@@ -432,6 +452,8 @@ def _h3_tiling_config(value: Any) -> tuple[bool, int]:
     config = _first_input(value)
     if config is None:
         return False, 0
+    if isinstance(config, bool):
+        return config, 2
     if isinstance(config, str):
         enabled = config.lower() == "true"
         return enabled, 2 if enabled else 0
@@ -922,6 +944,239 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
             raise RuntimeError(f"Failed to prepare H3 project static inputs: {error}") from error
 
 
+# 2026-11-14：控件按采样模式分组后，id 带「模式·」前缀；这里把新 id 映射回
+# 旧的内部键名，执行逻辑一律继续读旧名（避免大范围改动引入风险）。
+_MODE_INPUT_ALIASES = {
+    "音频·视频提交次数": "视频提交次数",
+    "音频·仅音频分辨率": "仅音频分辨率",
+    "图片·候选帧": "图片候选帧",
+    "图片·帧数档位": "图片帧数档位",
+    "◆ 采样模式": "采样模式覆盖",
+    "◆ 自抬升·过渡点": "过渡点覆盖",
+    "◆ 自抬升·低清比例": "低清比例覆盖",
+    "二采·仅一采预览": "1st_pass_only",
+    "二采·禁用噪声": "disable_2nd_noise",
+    "二采·放大倍率": "upscale_by",
+    "二采·放大模型": "upscale_model",
+    "二采·启用分块": "enabled_tiling",
+    "二采·分块数": "tile_count",
+    "偏移·视频": "shift_video",
+    "偏移·音频": "shift_audio",
+    "自抬升·卸载放大模型": "upscaler_unload",
+    "自抬升·权重下限": "w_min",
+    "自抬升·权重上限": "w_max",
+}
+
+
+# (侧栏镜像控件, 原生子控件键, 节点默认值)
+_MIRROR_SPECS = (
+    ("◆ 图片·候选帧", "图片候选帧", "15"),
+    ("◆ 图片·帧数档位", "图片帧数档位", _IMAGE_FRAME_TIER_FOLLOW),
+    ("◆ 音频·提交次数", "视频提交次数", 1),
+    ("◆ 音频·分辨率", "仅音频分辨率", "64x64"),
+    ("◆ 二采·放大倍率", "upscale_by", 1.25),
+    ("◆ 二采·放大模型", "upscale_model", "None"),
+    ("◆ 二采·启用分块", "enabled_tiling", False),
+    ("◆ 二采·分块数", "tile_count", 2),
+    ("◆ 自抬升·权重下限", "w_min", 0.25),
+    ("◆ 自抬升·权重上限", "w_max", 0.7),
+)
+
+
+def _same_value(left, right) -> bool:
+    """镜像值与原生值是否等价（数值按 float 比较，其余按字符串）。"""
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return str(left).strip() == str(right).strip()
+
+
+def _apply_flat_overrides(kwargs):
+    """侧栏镜像控件覆盖节点原生值：只有它与原生值不同、且不是默认值时才生效。"""
+    for mirror, target, default in _MIRROR_SPECS:
+        if mirror not in kwargs:
+            continue
+        value = _first_input(kwargs.get(mirror), default)
+        native = kwargs.get(target, default)
+        if _same_value(value, native) or _same_value(value, default):
+            continue
+        if target in ("视频提交次数", "tile_count"):
+            try:
+                value = int(float(value))
+            except (TypeError, ValueError):
+                continue
+        elif isinstance(value, str):
+            value = value.strip()
+            if not value:
+                continue
+        kwargs[target] = value
+    return kwargs
+
+
+def _apply_mode_input_aliases(kwargs):
+    """把带模式前缀的控件 id 复制回旧内部键名（旧名已存在时不覆盖）。"""
+    if not kwargs:
+        return kwargs
+    for new_key, old_key in _MODE_INPUT_ALIASES.items():
+        if new_key in kwargs and old_key not in kwargs:
+            kwargs[old_key] = kwargs[new_key]
+    return kwargs
+
+
+def _image_first_inputs():
+    """image_first 模式专属控件（只在选中该模式时渲染）。"""
+    return [
+        io.String.Input(
+            "图片·候选帧",
+            default="15",
+            tooltip=(
+                "仅 image_first 生效：从生成帧里挑哪些帧作为图片候选，逗号分隔，"
+                "例如 0,3,7,11,15,19,21；只填 15 表示单帧。"
+                "必须小于实际帧数，调小帧数后要同步调小本项。"
+            ),
+        ),
+        io.Combo.Input(
+            "图片·帧数档位",
+            options=list(_IMAGE_FRAME_TIERS),
+            default=_IMAGE_FRAME_TIER_FOLLOW,
+            tooltip=(
+                "仅 image_first 生效：用档位直接覆盖每个任务段的帧数，"
+                "不再跟段长 / ComfyTV 时长走。1 帧最省时（实验），5 帧快，"
+                "22 帧是原生网格点，124 帧是训练区间（最慢）。"
+                "「跟随上游」= 保持原有行为。"
+            ),
+        ),
+    ]
+
+
+_AUDIO_FIRST_RESOLUTIONS = ("64x64", "32x32", "跟随上游")
+
+
+def _audio_first_resolution_options():
+    return list(_AUDIO_FIRST_RESOLUTIONS)
+
+
+def _audio_first_inputs():
+    """audio_first 模式专属控件。"""
+    return [
+        io.Int.Input(
+            "音频·视频提交次数",
+            default=1,
+            min=1,
+            max=64,
+            step=1,
+            tooltip=(
+                "仅 audio_first 生效：音频每步更新，视频只在这些次数上提交；"
+                "1 = 整段只提交一次。"
+            ),
+        ),
+        io.Combo.Input(
+            "音频·仅音频分辨率",
+            options=_audio_first_resolution_options(),
+            default="64x64",
+            tooltip=(
+                "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
+                "32x32（更快）；「跟随上游」= 不缩图，直接用多轨信息里的分辨率"
+                "（其它模式的默认行为）。真实音频时长仍由段时长决定。"
+            ),
+        ),
+    ]
+
+
+def _second_pass_inputs():
+    """二采（dual / dual_t8 / selflift）共用的高清阶段控件。"""
+    return [
+        io.Boolean.Input(
+            "二采·仅一采预览",
+            default=False,
+            tooltip=(
+                "Run and save only the first selected segment's "
+                "first pass. Turn this off on the next run to "
+                "resume directly from that checkpoint at pass two."
+            ),
+            advanced=True,
+        ),
+        io.Boolean.Input(
+            "二采·禁用噪声",
+            default=False,
+            tooltip="Disable noise in second-pass for dual-sampling",
+            advanced=True,
+        ),
+        io.Float.Input(
+            "二采·放大倍率",
+            default=1.250,
+            min=1.0,
+            max=8.0,
+            step=0.001,
+            round=0.001,
+            extra_dict={"precision": 3},
+        ),
+        io.Combo.Input(
+            "二采·放大模型",
+            options=["None"] + folder_paths.get_filename_list("latent_upscale_models"),
+            default="None",
+            advanced=True,
+        ),
+        io.Boolean.Input(
+            "二采·启用分块",
+            default=False,
+            tooltip="Enable shared high-resolution H3 spatial tiling.",
+        ),
+        io.Int.Input(
+            "二采·分块数",
+            default=2,
+            min=2,
+            max=8,
+            step=1,
+            tooltip="Spatial tile count shared by Dual and SelfLift high-res sampling.",
+        ),
+    ]
+
+
+def _selflift_extra_inputs():
+    """selflift 额外的高级控件（放大器卸载与伪影修正区间）。"""
+    return [
+        io.Boolean.Input(
+            "自抬升·卸载放大模型",
+            default=True,
+            advanced=True,
+            tooltip=(
+                "高级：SelfLift 学习放大器完成举升后立即从显存卸载（默认开启，与 "
+                "YZ金鱼 SelfLift Progressive Sampler 的 upscaler_unload 一致），把"
+                "显存让给高清阶段——12GB 卡上尤其有用。关闭则保留在显存中供后续复用"
+                "（省去重新加载的几百毫秒）。仅 selflift 模式生效。"
+            ),
+        ),
+        io.Float.Input(
+            "自抬升·权重下限",
+            default=0.25,
+            min=0.0,
+            max=1.0,
+            step=0.05,
+            advanced=True,
+            tooltip=(
+                "高级：SelfLift 伪影一致性修正的强度下限（默认 0.25 = 原本硬编码值，"
+                "不动即与旧行为完全一致）。两组推荐值（成对使用，改一个请同时改另一个）："
+                "①温和（现行默认）w_min / w_max = 0.25 / 0.7——配合学习放大器防过矫；"
+                "②论文 & YZ金鱼 SelfLift Progressive Sampler 默认 = 0.5 / 1.0——修正更"
+                "彻底、画面更锐。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样开始会明确报错"
+                "（不静默纠正）。仅 selflift 模式生效。"
+            ),
+        ),
+        io.Float.Input(
+            "自抬升·权重上限",
+            default=0.7,
+            min=0.0,
+            max=1.0,
+            step=0.05,
+            advanced=True,
+            tooltip=(
+                "高级：SelfLift 伪影一致性修正的强度上限（默认 0.7 = 原本硬编码值，"
+                "不动即与旧行为完全一致）。约束 0 ≤ w_min ≤ w_max ≤ 1。仅 selflift 模式生效。"
+            ),
+        ),
+    ]
+
 class EasyMultiTrackProject(io.ComfyNode):
     @classmethod
     def _sampling_plan_options(cls) -> list[str]:
@@ -932,7 +1187,7 @@ class EasyMultiTrackProject(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="easy multitrackProject",
-            display_name="MultiTrack Project",
+            display_name="多轨项目 · H3 生成",
             category="EasyUse/MultiTrackEditor",
             description=(
                 "Build and execute a multi-track MiniMax H3 project with optional "
@@ -1027,10 +1282,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "sampling_mode",
                     options=[
                         io.DynamicCombo.Option("single", []),
-                        io.DynamicCombo.Option("dual", []),
-                        io.DynamicCombo.Option("dual_t8", []),
-                        io.DynamicCombo.Option("audio_first", []),
-                        io.DynamicCombo.Option("image_first", []),
+                        io.DynamicCombo.Option("dual", _second_pass_inputs()),
+                        io.DynamicCombo.Option("dual_t8", _second_pass_inputs()),
+                        io.DynamicCombo.Option("audio_first", _audio_first_inputs()),
+                        io.DynamicCombo.Option("image_first", _image_first_inputs()),
                         io.DynamicCombo.Option(
                             "selflift",
                             [
@@ -1063,81 +1318,17 @@ class EasyMultiTrackProject(io.ComfyNode):
                                         "to the target latent."
                                     ),
                                 ),
-                            ],
+                            ]
+                            + _second_pass_inputs()
+                            + _selflift_extra_inputs(),
                         ),
                         io.DynamicCombo.Option("passthrough", []),
                     ],
                 ),
-                io.Int.Input(
-                    "视频提交次数",
-                    default=1,
-                    min=1,
-                    max=64,
-                    step=1,
-                    tooltip=(
-                        "仅 audio_first 生效：音频每步更新，视频只在这些次数上提交；"
-                        "1 = 整段只提交一次。"
-                    ),
-                ),
-                io.Combo.Input(
-                    "仅音频分辨率",
-                    options=["64x64", "32x32", "跟随上游"],
-                    default="64x64",
-                    tooltip=(
-                        "仅 audio_first 生效：占位画面 64x64（推荐，音质稳定）或 "
-                        "32x32（更快）；「跟随上游」= 不缩图，直接用多轨信息里的分辨率"
-                        "（其它模式的默认行为）。真实音频时长仍由段时长决定。"
-                    ),
-                ),
-                io.Boolean.Input(
-                    "1st_pass_only",
-                    default=False,
-                    tooltip=(
-                        "Run and save only the first selected segment's "
-                        "first pass. Turn this off on the next run to "
-                        "resume directly from that checkpoint at pass two."
-                    ),
-                ),
-                io.Boolean.Input("disable_2nd_noise", default=False, tooltip="Disable noise in second-pass for dual-sampling"),
-                io.Float.Input(
-                    "upscale_by",
-                    default=1.250,
-                    min=1.0,
-                    max=8.0,
-                    step=0.001,
-                    round=0.001,
-                    extra_dict={"precision": 3},
-                ),
-                io.Combo.Input(
-                    "upscale_model",
-                    options=["None"]
-                    + folder_paths.get_filename_list("latent_upscale_models"),
-                    default="None",
-                ),
-                io.DynamicCombo.Input(
-                    "enabled_tiling",
-                    options=[
-                        io.DynamicCombo.Option("false", []),
-                        io.DynamicCombo.Option(
-                            "true",
-                            [
-                                io.Int.Input(
-                                    "tile_count",
-                                    default=2,
-                                    min=2,
-                                    max=8,
-                                    step=1,
-                                    tooltip="Spatial tile count shared by Dual and SelfLift high-res sampling.",
-                                ),
-                            ],
-                        ),
-                    ],
-                    tooltip="Enable shared high-resolution H3 spatial tiling.",
-                ),
                 # 高级输入（2026-10-11）：追加在列表末尾，避免旧工作流 widget 值错位；
                 # 默认折叠，节点底部原生「显示高级输入」按钮展开。新增高级参数往这组里加。
                 io.Float.Input(
-                    "shift_video",
+                    "偏移·视频",
                     default=12.0,
                     min=0.01,
                     max=100.0,
@@ -1153,7 +1344,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     ),
                 ),
                 io.Float.Input(
-                    "shift_audio",
+                    "偏移·音频",
                     default=3.0,
                     min=0.01,
                     max=100.0,
@@ -1167,66 +1358,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "DMAD 协议用 2.0，其余情况保持 3.0。改动影响很大，非必要不要改。"
                     ),
                 ),
-                # 高级输入（2026-10-13 追加；2026-10-17 过渡点已移入 selflift 子选项里
-                # 原地替换旧 transition_ratio，顶层不再重复；此处只留放大器卸载开关）。
-                io.Boolean.Input(
-                    "upscaler_unload",
-                    default=True,
-                    advanced=True,
-                    tooltip=(
-                        "高级：SelfLift 学习放大器完成举升后立即从显存卸载（默认开启，与 "
-                        "YZ金鱼 SelfLift Progressive Sampler 的 upscaler_unload 一致），把"
-                        "显存让给高清阶段——12GB 卡上尤其有用。关闭则保留在显存中供后续复用"
-                        "（省去重新加载的几百毫秒）。仅 selflift 模式生效。"
-                    ),
-                ),
-                # 高级输入（2026-10-17）：SelfLift 伪影修正强度区间，追加在末尾不错位。
-                io.Float.Input(
-                    "w_min",
-                    default=0.25,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    advanced=True,
-                    tooltip=(
-                        "高级：SelfLift 伪影一致性修正的强度下限（默认 0.25 = 原本硬编码值，"
-                        "不动即与旧行为完全一致）。两组推荐值（成对使用，改一个请同时改另一个）："
-                        "①温和（现行默认）w_min / w_max = 0.25 / 0.7——配合学习放大器防过矫；"
-                        "②论文 & YZ金鱼 SelfLift Progressive Sampler 默认 = 0.5 / 1.0——修正更"
-                        "彻底、画面更锐。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样开始会明确报错"
-                        "（不静默纠正）。注意：w 仅在 rho>0 时才参与计算，而 rho 目前由代码按段"
-                        "自动决定（上下文连续段 0.1，其余 0）。仅 selflift 模式生效。"
-                    ),
-                ),
-                io.Float.Input(
-                    "w_max",
-                    default=0.7,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    advanced=True,
-                    tooltip=(
-                        "高级：SelfLift 伪影一致性修正的强度上限（默认 0.7 = 原本硬编码值，"
-                        "不动即与旧行为完全一致）。两组推荐值（成对使用）：①温和（现行默认）"
-                        "w_min / w_max = 0.25 / 0.7；②论文 & YZ金鱼 SelfLift Progressive "
-                        "Sampler 默认 = 0.5 / 1.0。约束 0 ≤ w_min ≤ w_max ≤ 1，违反时采样"
-                        "开始会明确报错（不静默纠正）。同样只在 rho>0 时参与计算。仅 selflift "
-                        "模式生效。"
-                    ),
-                ),
-                io.String.Input(
-                    "图片候选帧",
-                    default="15",
-                    tooltip=(
-                        "仅 image_first 生效：从 22 帧里挑哪些帧作为图片候选，逗号分隔，"
-                        "例如 0,3,7,11,15,19,21；只填 15 表示单帧。"
-                    ),
-                ),
                 # 2026-11-07：ComfyTV 侧栏只能渲染普通控件（DynamicCombo 会被整块跳过），
                 # 因此把「采样模式」与 selflift 的两个子项各做一份普通控件覆盖入口。
                 # 默认「跟随节点 / 0」= 不生效，旧工作流与画布行为完全不变。
                 io.Combo.Input(
-                    "采样模式覆盖",
+                    "◆ 采样模式",
                     options=list(_H3_SAMPLING_MODE_CHOICES),
                     default=_H3_SAMPLING_MODE_FOLLOW,
                     optional=True,
@@ -1237,7 +1373,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     ),
                 ),
                 io.Float.Input(
-                    "过渡点覆盖",
+                    "◆ 自抬升·过渡点",
                     default=0.0,
                     min=0.0,
                     max=10000.0,
@@ -1250,7 +1386,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     ),
                 ),
                 io.Float.Input(
-                    "低清比例覆盖",
+                    "◆ 自抬升·低清比例",
                     default=0.0,
                     min=0.0,
                     max=1.0,
@@ -1262,16 +1398,50 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "0 = 跟随画布上 selflift 子项。"
                     ),
                 ),
+                # 2026-11-14：ComfyTV 侧栏用的普通控件镜像。默认值与节点原生控件完全一致，
+                # 侧栏里看到的数字就是画布上的数字；只有与原生值不同时才覆盖（见
+                # _MIRROR_SPECS 的比较逻辑），所以旧工作流行为不变。
+                io.String.Input("◆ 图片·候选帧", default="15", optional=True, advanced=True,
+                                tooltip="image_first 生效；默认与 图片·候选帧 相同。"),
+                io.Combo.Input("◆ 图片·帧数档位", options=list(_IMAGE_FRAME_TIERS),
+                               default=_IMAGE_FRAME_TIER_FOLLOW, optional=True, advanced=True,
+                               tooltip="image_first 生效；默认与 图片·帧数档位 相同。"),
+                io.Int.Input("◆ 音频·提交次数", default=1, min=1, max=64, step=1,
+                             optional=True, advanced=True,
+                             tooltip="audio_first 生效；默认与 音频·视频提交次数 相同。"),
+                io.Combo.Input("◆ 音频·分辨率", options=_audio_first_resolution_options(),
+                               default="64x64", optional=True, advanced=True,
+                               tooltip="audio_first 生效；默认与 音频·仅音频分辨率 相同。"),
+                io.Float.Input("◆ 二采·放大倍率", default=1.25, min=1.0, max=8.0, step=0.001,
+                               optional=True, advanced=True,
+                               tooltip="dual/dual_t8/selflift 生效；默认与 二采·放大倍率 相同。"),
+                io.Combo.Input("◆ 二采·放大模型",
+                               options=["None"] + folder_paths.get_filename_list("latent_upscale_models"),
+                               default="None", optional=True, advanced=True,
+                               tooltip="dual/dual_t8/selflift 生效；默认与 二采·放大模型 相同。"),
+                io.Boolean.Input("◆ 二采·启用分块", default=False, optional=True, advanced=True,
+                                 tooltip="dual/dual_t8/selflift 生效；默认与 二采·启用分块 相同。"),
+                io.Int.Input("◆ 二采·分块数", default=2, min=2, max=8, step=1,
+                             optional=True, advanced=True,
+                             tooltip="dual/dual_t8/selflift 生效；默认与 二采·分块数 相同。"),
+                io.Float.Input("◆ 自抬升·权重下限", default=0.25, min=0.0, max=1.0, step=0.001,
+                               optional=True, advanced=True,
+                               tooltip="selflift 生效；默认与 自抬升·权重下限 相同。"),
+                io.Float.Input("◆ 自抬升·权重上限", default=0.7, min=0.0, max=1.0, step=0.001,
+                               optional=True, advanced=True,
+                               tooltip="selflift 生效；默认与 自抬升·权重上限 相同。"),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
                 io.String.Output("PROJECT_NAME"),
                 io.Audio.Output("LOCKED_AUDIO"),
+                io.String.Output("SAMPLING_MODE", display_name="采样模式"),
             ],
         )
 
     @classmethod
     def execute(cls, **kwargs: Any) -> io.NodeOutput:
+        kwargs = _apply_mode_input_aliases(kwargs)
         node_name = "MultiTrack Project"
         progress_total = 100
         progress_bar = ProgressBar(progress_total)
@@ -1345,6 +1515,16 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
         # 项目类型（图片/音频/视频）与采样模式解耦：不再按项目类型强制 image_first / audio_first，
         # 采样模式完全由输入决定（ComfyTV 侧才能手动设置）。
+        # 2026-11-14：模式专属控件已搬进 sampling_mode 的 DynamicCombo 选项，
+        # 它们以子键形式出现在 sampling_config 里。先合并回 kwargs 再跑一次别名映射，
+        # 下方所有 kwargs.get("图片候选帧") 之类的旧读法保持不变。
+        if isinstance(sampling_config, dict):
+            for _child_key, _child_value in sampling_config.items():
+                if _child_key in ("sampling_mode",):
+                    continue
+                kwargs.setdefault(_child_key, _child_value)
+            kwargs = _apply_mode_input_aliases(kwargs)
+        kwargs = _apply_flat_overrides(kwargs)
         is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         is_dual_t8 = sampling_mode == "dual_t8"
@@ -1353,24 +1533,33 @@ class EasyMultiTrackProject(io.ComfyNode):
         image_candidate_frames = str(
             _first_input(kwargs.get("图片候选帧"), "15")
         ).strip()
+        image_frame_tier = str(
+            _first_input(kwargs.get("图片帧数档位"), _IMAGE_FRAME_TIER_FOLLOW)
+        ).strip()
+        image_frame_override = _IMAGE_FRAME_TIER_FRAMES.get(image_frame_tier, 0)
         _effective = []
         _ignored = []
         if is_audio_first:
-            _effective += ["视频提交次数", "仅音频分辨率"]
+            _effective += ["音频·视频提交次数", "音频·仅音频分辨率"]
         else:
-            _ignored += ["视频提交次数", "仅音频分辨率"]
+            _ignored += ["音频·视频提交次数", "音频·仅音频分辨率"]
         if is_image_first:
-            _effective.append("图片候选帧")
+            _effective += ["图片·候选帧", "图片·帧数档位"]
         else:
-            _ignored.append("图片候选帧")
+            _ignored += ["图片·候选帧", "图片·帧数档位"]
         if sampling_mode in ("dual", "dual_t8") or is_selflift:
-            _effective += ["二采放大倍率", "放大模型", "禁用二采噪声"]
+            _effective += ["二采·放大倍率", "二采·放大模型", "二采·禁用噪声"]
         else:
-            _ignored += ["二采放大倍率", "放大模型", "禁用二采噪声"]
+            _ignored += ["二采·放大倍率", "二采·放大模型", "二采·禁用噪声"]
         if is_selflift:
-            _effective += ["过渡点", "低清比例", "卸载放大模型", "w_min", "w_max"]
+            _effective += ["◆ 自抬升·过渡点", "◆ 自抬升·低清比例", "自抬升·卸载放大模型", "自抬升·权重下限", "自抬升·权重上限"]
         else:
-            _ignored += ["过渡点", "低清比例", "w_min", "w_max"]
+            _ignored += ["◆ 自抬升·过渡点", "◆ 自抬升·低清比例", "自抬升·卸载放大模型", "自抬升·权重下限", "自抬升·权重上限"]
+        if image_frame_override > 0 and is_image_first:
+            print(
+                f"[EasyMedia] 图片帧数档位：{image_frame_tier}"
+                f" → 每个任务段固定 {image_frame_override} 帧（覆盖段长计算）"
+            )
         print(
             f"[EasyMedia] 采样模式={sampling_mode}；生效："
             + ("、".join(_effective) or "无")
@@ -1417,7 +1606,14 @@ class EasyMultiTrackProject(io.ComfyNode):
         # 伪影修正强度区间（2026-10-17 起可在高级输入里手调；默认=原硬编码值）
         w_min_override = 0.25
         w_max_override = 0.7
-        tiling_enabled, tile_count = _h3_tiling_config(kwargs.get("enabled_tiling"))
+        tiling_enabled, _default_tile = _h3_tiling_config(kwargs.get("enabled_tiling"))
+        # 2026-11-14：启用分块从 DynamicCombo 改为普通布尔，分块数是独立整数控件
+        try:
+            tile_count = int(_first_input(kwargs.get("tile_count"), _default_tile))
+        except (TypeError, ValueError):
+            tile_count = _default_tile
+        if tiling_enabled and not 2 <= tile_count <= 8:
+            raise ValueError("tile_count must be between 2 and 8")
         if is_selflift:
             raw_point = sampling_config.get("transition_point")
             if raw_point is None:
@@ -1619,6 +1815,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             "audio_only": bool(audio_only),
             "image_first": bool(is_image_first),
             "图片候选帧": image_candidate_frames,
+            "图片帧数档位": image_frame_tier,
             "sampling_mode": sampling_mode,
             "gen_settings": {
                 "base_width": first_pass_width,
@@ -1925,6 +2122,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                 int(entry.get("end_frame", task_start_frame)),
             )
             task_duration_frames = max(1, task_end_frame - task_start_frame)
+            if image_frame_override > 0 and is_image_first:
+                # 档位优先于段长：图片任务只出这几帧，段长再长也不追加。
+                # 只在 image_first 生效：音频/视频模式的段长同时决定音频时长，
+                # 若被帧数档位改写会让出片时长错乱。
+                task_duration_frames = image_frame_override
             if uses_linked_prepare:
                 segment_static = graph.node(
                     "easy h3ProjectStaticPrepare", id=f"segment_static_prepare_{task_index}",
@@ -2963,6 +3165,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         return io.NodeOutput(
             last_project_output,
             full_locked_audio,
+            str(sampling_mode or ""),
             expand=_timed_h3_project_graph(graph, safe_project_name, segment_nodes),
         )
 
@@ -3148,14 +3351,21 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
         fresh_data = load_h3_project_data(safe_name)
         if fresh_data.get("image_first"):
             images = compose_h3_project_images(safe_name, data)
-            # 图片流槽是 output_list：批次张量会被 ComfyUI 拆成无批次维的 [H,W,C]，
-            # 下游保存节点再把 dim0 当批次就会存出碎条；这里主动拆成每帧 [1,H,W,C]
-            image_list = [images[i : i + 1] for i in range(int(images.shape[0]))]
+            # 图片流槽是 output_list：ComfyUI 会把列表逐项展开成多次下游执行。
+            # 2026-11-14：整批作为「单元素列表」输出，下游一次拿到 [N,H,W,C]。
+            # 原实现拆成每帧 [1,H,W,C]，导致「保存媒体」每次只看到 1 张，
+            # 图片转视频阈值永远不触发（用户报 24 帧仍存图）。
+            # 整批输出后：保存节点能数到 N 帧存视频；超分节点内部仍按帧循环。
+            image_list = [images]
+            # 2026-11-14：未使用的视频/音频槽不再返回 ExecutionBlocker。
+            # 核心 execution.process_inputs 判定「任一输入是 blocker 就整节点阻断」
+            # （不区分是否可选），图片流槽接给「超分调度」等带可选音频口的节点时，
+            # 会让整个下游被静默跳过。改为 None：下游拿不到媒体，保存节点自行空转。
             return io.NodeOutput(
                 h3_project_filename_prefix(safe_name),
-                ExecutionBlocker(None),
+                None,
                 images,
-                ExecutionBlocker(None),
+                None,
                 image_list,
             )
         if fresh_data.get("audio_only"):
@@ -3179,10 +3389,10 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
                 pass
             return io.NodeOutput(
                 h3_project_filename_prefix(safe_name),
-                ExecutionBlocker(None),
+                None,
                 audio_payload,
                 audio_payload,
-                ExecutionBlocker(None),
+                None,
             )
         composed_path = compose_h3_project_video(safe_name, data)
         composed_video = InputImpl.VideoFromFile(str(composed_path))
@@ -3193,16 +3403,16 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
 
         video_audio = extract_video_audio(composed_video)
         if video_audio is None:
-            print("[EasyMedia] 合并视频无音轨：音频输出阻断")
+            print("[EasyMedia] 合并视频无音轨：音频输出为空")
         try:
             video_frames = decode_video_frames_to_tensors(composed_path)
         except (RuntimeError, OSError) as error:
-            print(f"[EasyMedia] 视频帧解码失败，图片流阻断：{error}")
-            video_frames = ExecutionBlocker(None)
+            print(f"[EasyMedia] 视频帧解码失败，图片流为空：{error}")
+            video_frames = None
         return io.NodeOutput(
             h3_project_filename_prefix(safe_name),
             composed_video,
             composed_video,
-            video_audio if video_audio is not None else ExecutionBlocker(None),
+            video_audio,
             video_frames,
         )

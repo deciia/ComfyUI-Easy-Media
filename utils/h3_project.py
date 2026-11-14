@@ -140,12 +140,28 @@ def _h3_extract_video_frame(video_path: Path, frame_index: int, ffmpeg: str):
             "-frames:v", "1", "-update", "1", str(out),
         ]
         result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-            raise RuntimeError(
-                f"Failed to extract frame {frame_index} from {video_path.name}: "
-                f"{(result.stderr or '').strip()[:200]}"
+        if result.returncode == 0 and out.is_file() and out.stat().st_size > 0:
+            return Image.open(out).convert("RGB").copy()
+        # 2026-11-14：帧数被手动调小（例如图片任务从 22 帧改成 5 帧）时，
+        # 「图片候选帧」里记录的序号（默认 15）会超出实际帧数，直接抛错让整个
+        # 项目合并失败。这里退一步取第 0 帧并在日志里说明，属于防错而非改语义。
+        fallback_command = [
+            ffmpeg, "-y", "-nostdin", "-v", "error", "-i", str(video_path),
+            "-vf", "select=eq(n\\,0)", "-vsync", "0",
+            "-frames:v", "1", "-update", "1", str(out),
+        ]
+        fallback = subprocess.run(fallback_command, capture_output=True, text=True)
+        if fallback.returncode == 0 and out.is_file() and out.stat().st_size > 0:
+            print(
+                f"[EasyMedia] 抽帧越界：{video_path.name} 没有第 {frame_index} 帧"
+                f"（视频帧数可能已被调小），已回退到第 0 帧；"
+                f"如需指定别的帧，请把「图片候选帧」调小。"
             )
-        return Image.open(out).convert("RGB").copy()
+            return Image.open(out).convert("RGB").copy()
+        raise RuntimeError(
+            f"Failed to extract frame {frame_index} from {video_path.name}: "
+            f"{(result.stderr or '').strip()[:200]}"
+        )
 
 
 CAMERA_PRESET_PHRASES = {

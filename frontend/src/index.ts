@@ -21,6 +21,7 @@ import type { ResourceMediaValue } from '@/components/widgets'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 import { installWorkflowSubmission } from '@/lib/workflow-submission'
 import { installProjectSamplingPreview } from '@/lib/project-sampling-preview-node'
+import { syncAdvancedWidgetHeights } from '@/lib/advanced-node-height'
 import { installOmniCamChinese } from '@/lib/omnicam-zh'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
@@ -75,6 +76,7 @@ comfyApp.registerExtension({
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
     installProjectSamplingPreview(nodeType, nodeData, comfyApp)
+    syncAdvancedWidgetHeights(nodeType, nodeData)
     installTrackDataRealignment(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
     installDynamicComboRuntimeRebuild(nodeType as unknown as { prototype: never }, nodeData, comfyApp)
     installDynamicListInputs(nodeType, nodeData)

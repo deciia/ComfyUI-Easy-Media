@@ -26,7 +26,23 @@ logger = logging.getLogger(__name__)
 CATEGORY_VIDEO = "EasyUse/Video"
 TYPE_COMPARE_VIDEO = io.Custom(io_type="EASY_COMPARE_VIDEO")
 
-_OUTPUT_MODE_OPTIONS = ["save", "preview_only", "hide", "hide&save"]
+_OUTPUT_MODE_OPTIONS = ["保存", "仅预览", "静默临时", "静默保存"]
+
+# 旧英文值 -> 新中文值（旧存档 / 旧 API 负载仍可使用）
+_OUTPUT_MODE_ALIASES = {
+    "save": "保存",
+    "preview_only": "仅预览",
+    "hide": "静默临时",
+    "hide&save": "静默保存",
+}
+
+
+def _normalize_output_mode(value) -> str:
+    """把中文/英文输出模式统一归一成内部英文键。未知值回退 save。"""
+    key = str(value or "save").strip()
+    key = _OUTPUT_MODE_ALIASES.get(key, key)
+    internal = {v: k for k, v in _OUTPUT_MODE_ALIASES.items()}
+    return internal.get(key, "save")
 
 # 用普通下拉 + 固定输入，避免 DynamicCombo 切换子输入导致
 # 存档按位置还原时整体串位（重启后 input_mode/output_mode/filename_prefix 错位）。
@@ -142,6 +158,7 @@ def _image_batch_count(images) -> int:
         except (TypeError, ValueError):
             return 1
     return 1
+_SAVE_KIND_OPTIONS = ["自动", "单张图片", "多张图片", "视频", "按阈值判断"]
 _IMAGE_FORMAT_OPTIONS = ["PNG", "JPG", "WEBP"]
 _AUDIO_FORMAT_OPTIONS = ["WAV", "MP3", "FLAC"]
 
@@ -369,15 +386,6 @@ class EasySaveVideo(io.ComfyNode):
                 "出片后清理显存、出片提示音。"
             ),
             inputs=[
-                io.Combo.Input(
-                    "input_mode",
-                    options=list(_INPUT_MODE_OPTIONS),
-                    default="images+audio",
-                    tooltip=(
-                        "images+audio：把 IMAGES（可带 AUDIO）按 fps 编码成视频。"
-                        "video：直接保存 VIDEO（接了 AUDIO 则替换其音轨）。"
-                    ),
-                ),
                 io.Image.Input(
                     "images",
                     optional=True,
@@ -390,7 +398,8 @@ class EasySaveVideo(io.ComfyNode):
                     min=1.0,
                     max=120.0,
                     step=1.0,
-                    tooltip="images+audio 模式的帧率；video 模式忽略。",
+                    display_name="🎬 帧率",
+                    tooltip="图片流转视频时使用的帧率；直接保存视频时忽略。",
                 ),
                 io.Video.Input(
                     "video",
@@ -410,23 +419,26 @@ class EasySaveVideo(io.ComfyNode):
                 io.Combo.Input(
                     "output_mode",
                     options=list(_OUTPUT_MODE_OPTIONS),
-                    default="save",
+                    default="保存",
+                    display_name="输出模式",
                     tooltip=(
-                        "save：写入 output；preview_only：只写 temp 并预览；"
-                        "hide：只写 temp 不预览；hide&save：写 output 不预览。"
+                        "保存：写入 output 并预览；仅预览：只写 temp 并预览；"
+                        "静默临时：只写 temp 不预览；静默保存：写 output 不预览。"
                     ),
                 ),
                 io.Boolean.Input(
                     "save_metadata",
                     default=False,
+                    display_name="保存元数据",
                     tooltip="Write ComfyUI prompt/workflow metadata into the saved file.",
                 ),
-                io.String.Input("filename_prefix", default="easy_media"),
+                io.String.Input("filename_prefix", default="easy_media", display_name="文件名前缀"),
                 # —— 以下为追加输入（位置必须在末尾，避免旧存档按位置回填时错位）——
                 io.Combo.Input(
                     "video_format",
                     options=list(_VIDEO_FORMAT_OPTIONS),
                     default="跟随源 (AUTO)",
+                    display_name="🎬 视频格式",
                     tooltip=(
                         "输出容器/编码。AUTO/MP4(H264)/MKV/WEBM 走原生保存；"
                         "MP4(H265)/MOV(H264)/MOV(ProRes)/GIF/WEBP 走 FFmpeg 转码。"
@@ -435,6 +447,7 @@ class EasySaveVideo(io.ComfyNode):
                 io.String.Input(
                     "custom_save_path",
                     default="",
+                    display_name="自定义目录",
                     tooltip=(
                         "自定义保存目录（仅 save / hide&save 生效）。绝对路径直接用，"
                         "相对路径按 output 目录解析；留空保持原行为。"
@@ -443,6 +456,7 @@ class EasySaveVideo(io.ComfyNode):
                 io.Boolean.Input(
                     "adopt_source_video",
                     default=False,
+                    display_name="🎬 流复制直存",
                     tooltip=(
                         "video 模式：目标容器与源一致、未替换音轨、未写元数据时，"
                         "直接复制文件（流复制，不重新编码）。"
@@ -451,12 +465,14 @@ class EasySaveVideo(io.ComfyNode):
                 io.Boolean.Input(
                     "cleanup_after_save",
                     default=False,
+                    display_name="出片后清显存",
                     tooltip="出片后卸载模型并清理显存（出错也会清理）。",
                 ),
                 io.Int.Input(
                     "image_to_video_threshold",
                     default=_AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT,
                     min=-1,
+                    display_name="🖼️ 图片转视频阈值",
                     tooltip=(
                         "图片转视频阈值（保存类型按上游输入自动判定）："
                         "图片帧数大于该值时存视频，否则存多张图片；"
@@ -466,23 +482,30 @@ class EasySaveVideo(io.ComfyNode):
                     ),
                 ),
                 io.String.Input(
-                    "project_name",
+                    "sampling_mode",
+                    optional=True,
                     default="",
+                    display_name="🎬 采样模式",
                     tooltip=(
-                        "项目名称：阈值=-1 时读取该项目的时间线任务片段数作为实际阈值；"
-                        "留空且阈值=-1 时回退默认阈值 2。"
+                        "接「多轨项目」的采样模式输出："
+                        "image_first → 保存图片（多帧即多张图片，单帧即单张）；"
+                        "audio_first → 保存音频（有画面也忽略）；其它模式 → 保存视频；"
+                        "留空时按阈值判断：帧数大于「图片转视频阈值」或有音频输入"
+                        "存视频，否则存图片；只有音频输入时存音频。"
                     ),
                 ),
                 io.Combo.Input(
                     "image_format",
                     options=list(_IMAGE_FORMAT_OPTIONS),
                     default="PNG",
+                    display_name="🖼️ 图片格式",
                     tooltip="自动判定为多张图片时的图片格式。",
                 ),
                 io.Combo.Input(
                     "audio_format",
                     options=list(_AUDIO_FORMAT_OPTIONS),
                     default="WAV",
+                    display_name="🔊 音频格式",
                     tooltip="自动判定为音频时的音频格式。",
                 ),
                 io.MultiType.Input(
@@ -501,6 +524,7 @@ class EasySaveVideo(io.ComfyNode):
                     "notify_sound",
                     options=_list_notify_sounds(),
                     default=_NOTIFY_MUTE,
+                    display_name="出片提示音",
                     tooltip=(
                         "出片完成后播放的提示音。把音频放进插件的 sounds/ 目录即可出现在这里；"
                         "默认静音。"
@@ -522,7 +546,7 @@ class EasySaveVideo(io.ComfyNode):
         cls,
         input_mode: str = "images+audio",
         fps: float = 24.0,
-        output_mode: str = "save",
+        output_mode: str = "保存",
         filename_prefix: str = "easy_media",
         images=None,
         video=None,
@@ -534,13 +558,22 @@ class EasySaveVideo(io.ComfyNode):
         cleanup_after_save: bool = False,
         notify_sound: str = _NOTIFY_MUTE,
         image_to_video_threshold: int = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT,
-        project_name: str = "",
+        sampling_mode: str = "",
         image_format: str = "PNG",
         audio_format: str = "WAV",
         media=None,
     ) -> io.NodeOutput:
         if not str(filename_prefix or "").strip() or str(filename_prefix).strip() == "ComfyUI":
             filename_prefix = "easy_media/save"
+        # 旧工作流兼容：删除「输入模式」控件后 widget 序列整体漂移，可能把
+        # 音频格式/图片格式的值串到别的槽位上（如 audio_format='PNG'）。
+        # VALIDATE_INPUTS 已放行这些脏值，这里统一归一回默认。
+        if str(image_format or "").upper() not in _IMAGE_FORMAT_OPTIONS:
+            image_format = "PNG"
+        if str(audio_format or "").upper() not in _AUDIO_FORMAT_OPTIONS:
+            audio_format = "WAV"
+        if notify_sound not in _list_notify_sounds():
+            notify_sound = _NOTIFY_MUTE
         # 旧存档 / 旧 API 负载兼容：动态输入时代这些值会被装成 dict 传进来。
         if isinstance(input_mode, dict):
             payload = input_mode
@@ -596,17 +629,17 @@ class EasySaveVideo(io.ComfyNode):
                     "取消上游 bypass，或把 video 直接接到输出视频的节点。"
                 )
 
-        input_mode_key: str = str(input_mode or "images+audio")
-        if input_mode_key != "video" and video is not None and images is None:
-            # 只接视频（含 media 槽传入视频）：自动进入 video 通道
+        # 保存类型完全按实际输入自动判断（2026-11-13 起移除 input_mode 控件）：
+        # 有 VIDEO→视频；有 IMAGES（可带 AUDIO）→图片流转视频；只有 AUDIO→音频。
+        if video is not None:
             input_mode_key = "video"
-        if input_mode_key == "video" and video is None:
-            # video 槽其实接的是图片/音频：自动退回对应通道
-            input_mode_key = "images+audio" if images is not None else "audio"
-        if images is None and video is None and audio is not None:
-            # 只接音频（含 video/media 槽传入音频的情况）：走纯音频通道
+        elif images is not None:
+            input_mode_key = "images+audio"
+        elif audio is not None:
             input_mode_key = "audio"
-        output_mode_key: str = str(output_mode or "save")
+        else:
+            input_mode_key = str(input_mode or "images+audio")  # 全空时沿用旧报错路径
+        output_mode_key: str = _normalize_output_mode(output_mode)
         hide_preview = output_mode_key in {"hide", "hide&save"}
         write_temp = output_mode_key in {"preview_only", "hide"}
 
@@ -621,27 +654,41 @@ class EasySaveVideo(io.ComfyNode):
             threshold = int(image_to_video_threshold)
         except (TypeError, ValueError):
             threshold = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT
-        if threshold == -1:
-            # 阈值 -1：对齐多轨编辑器当前项目的任务片段数
-            segment_count = _project_task_segment_count(project_name)
-            if segment_count > 0:
-                threshold = segment_count
-                print(
-                    f"[EasyMedia] 阈值=-1：已对齐项目「{str(project_name).strip()}」任务片段数 {segment_count}"
-                )
-            else:
-                threshold = _AUTO_IMAGE_VIDEO_THRESHOLD_DEFAULT
-                print(
-                    f"[EasyMedia] 阈值=-1：项目「{str(project_name).strip()}」读取不到任务片段，回退默认阈值 {threshold}"
-                )
-        else:
-            threshold = max(1, threshold)
+        # 阈值 -1（旧「对齐项目片段数」）已废弃，统一按默认阈值处理
+        threshold = max(1, threshold)
         image_frame_count = _image_batch_count(images) if has_image_input else 0
+        sampling_text = str(sampling_mode or "").strip()
         readable = {"video": "视频", "images": "图片", "audio": "音频"}
+        images_single = False
         if has_video_input:
             kind = "video"
             evidence = "视频输入"
-        elif has_image_input and (image_frame_count > threshold or has_audio_input):
+        elif has_image_input and sampling_text == "image_first":
+            # 图片工程：一张候选帧存一张图，多帧就存多张图，绝不拼成视频
+            kind = "images"
+            images_single = image_frame_count <= 1
+            evidence = f"采样模式=image_first（图片 {image_frame_count} 张）"
+        elif sampling_text == "audio_first" and (has_audio_input or has_video_input):
+            # 语音工程：只要拿到声音就是纯音频工程，画面（哪怕有）一律不参与保存；
+            # 没有音频输入且视频无声时才有意义地落到视频分支（见下方兜底）。
+            kind = "audio"
+            evidence = "采样模式=audio_first"
+            if not has_audio_input and has_video_input:
+                # 只接了视频：先把音轨取出来；视频无声则退回收视频
+                extracted = _extract_audio_with_ffmpeg(video) or _fallback_video_audio(video)
+                if isinstance(extracted, dict) and extracted.get("waveform") is not None:
+                    audio = extracted
+                    evidence += "（从视频提取音轨）"
+                else:
+                    kind = "video"
+                    evidence = "采样模式=audio_first，但视频无音轨 → 按视频保存"
+        elif has_image_input and sampling_text:
+            # 其它采样模式（dual / dual_t8 / selflift / single …）出的是成片
+            kind = "video"
+            evidence = f"采样模式={sampling_text}（图片流 {image_frame_count} 张）"
+        elif has_image_input and (
+            image_frame_count > threshold or has_audio_input
+        ):
             kind = "video"
             evidence = f"图片流 {image_frame_count} 张" + (" + 音频" if has_audio_input else "")
         elif has_image_input:
@@ -651,10 +698,12 @@ class EasySaveVideo(io.ComfyNode):
             kind = "audio"
             evidence = "音频输入"
         else:
-            raise ValueError(
-                "保存媒体：上游没有任何有效输入（图像/视频/音频均为空），无法判定保存类型。"
-            )
-        print(f"[EasyMedia] 保存类型={readable[kind]}（依据：{evidence}）")
+            # 2026-11-14：上游没送任何媒体时不再抛错中断整个 prompt
+            # （多轨合并节点现在用 None 表示「该槽为空」，而不是 ExecutionBlocker），
+            # 直接空转返回，和默认 ComfyUI 保存节点的行为一致。
+            print("[EasyMedia] 保存媒体：上游没有媒体输入 —— 跳过保存。")
+            return io.NodeOutput(None, None, None, "", ui={"easy_video_info": []})
+        print(f"[EasyMedia] 保存类型=自动：{readable[kind]}（依据：{evidence}）")
         if input_mode_key == "video":
             source_video = video
             if source_video is None:
@@ -664,8 +713,8 @@ class EasySaveVideo(io.ComfyNode):
                 )
             if audio is not None:
                 source_video = _replace_video_audio(source_video, audio)
-        elif input_mode_key == "audio":
-            # 只有音频（本次检查新增）：仅允许导出音频文件
+        elif input_mode_key == "audio" or kind == "audio":
+            # 只有音频，或采样模式判定为纯音频工程（画面一律忽略）
             if audio is None:
                 raise ValueError("没有可保存的输入：接上 images / video / audio 任意一个。")
             if kind != "audio":
@@ -679,13 +728,19 @@ class EasySaveVideo(io.ComfyNode):
                     "An IMAGES input is required when input_mode is 'images+audio': "
                     "接上 images 端口，或把 input_mode 改成 'video'。"
                 )
+            if images_single:
+                images = images[:1]
             normalized, changed = normalize_video_images(images)
             # 单张图 + 音频 → 以该图作背景铺满音频时长，生成等长视频（原先只出 1 帧极短视频）
             try:
                 frame_total = int(getattr(normalized, "shape", [0])[0] or 0)
             except Exception:  # noqa: BLE001
                 frame_total = 0
-            if frame_total == 1 and audio is not None and kind == "video":
+            if (
+                frame_total == 1
+                and audio is not None
+                and kind == "video"
+            ):
                 repeat_times = _frames_for_audio(audio, fps)
                 if repeat_times > 1:
                     normalized = normalized.repeat(repeat_times, 1, 1, 1)

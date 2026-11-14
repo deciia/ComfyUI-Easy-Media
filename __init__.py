@@ -167,6 +167,7 @@ class EasyMediaExtension(ComfyExtension):
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
 # H3 T8 fork（来源 t8star/comfyui-minimax-h3-audio-T8，见 THIRD_PARTY_NOTICES.md）
+            DeciiaH3DualClockSampler,
             DeciiaH3AVDecode,
             DeciiaH3LearnedLatentUpscale,
             DeciiaH3TwoPassLatentReconcile,

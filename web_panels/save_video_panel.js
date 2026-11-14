@@ -218,10 +218,10 @@ function buildPanel() {
   kindBadge.title = "保存类型按上游输入自动判定：视频/图片流+音频→视频；图片≤阈值→多张图片；只接音频→音频";
   kindBar.appendChild(kindBadge);
   // 右侧三个按钮（都在三角形折叠键左边 → 详情、调色台，最右是三角形）：
-  //   📋 视频详情折叠（默认折叠） / 🎨 调色台 / ▲ 只折叠上方的设置参数
+  //   📋 详情折叠（默认折叠） / 🎨 调色台 / ▲ 只折叠上方的设置参数
   const barBtnCss = `width:22px;height:19px;padding:0;${BTN_CSS}`;
   const detailsBtn = el("button", `margin-left:auto;${barBtnCss}`, "📋");
-  detailsBtn.title = "展开/收起视频详情（默认折叠）";
+  detailsBtn.title = "展开/收起详情（默认折叠）";
   detailsBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   const colorBtn = el("button", barBtnCss, "🎨");
   colorBtn.title = "调色台（展开/收起）";
@@ -295,7 +295,7 @@ function buildPanel() {
   videoWrap.appendChild(mistLayer);
   videoWrap.appendChild(halationLayer);
 
-  // 三点菜单已移除：调色台与视频详情各自有按钮，避免与原生播放器 ⋮ 重复
+  // 三点菜单已移除：调色台与详情各自有按钮，避免与原生播放器 ⋮ 重复
   root.appendChild(videoWrap);
 
   // ── 详情标题栏（固定）──
@@ -304,11 +304,11 @@ function buildPanel() {
     `display:flex;align-items:center;gap:6px;height:${HEADER_HEIGHT}px;flex:0 0 auto;padding:0 8px;background:#1b1b1b;border-top:1px solid #333;user-select:none;font-size:11px;color:#bbb;box-sizing:border-box;`,
   );
   const foldBtn = el("button", BTN_CSS, "▾");
-  foldBtn.title = "折叠/展开视频详情";
+  foldBtn.title = "折叠/展开详情";
   foldBtn.addEventListener("mousedown", (event) => event.stopPropagation());
-  const title = el("span", "flex:1 1 auto;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", "📋 视频详情");
+  const title = el("span", "flex:1 1 auto;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;", "📋 详情");
   const copyAllBtn = el("button", BTN_CSS, "复制全部");
-  copyAllBtn.title = "复制视频详情文本";
+  copyAllBtn.title = "复制详情文本";
   copyAllBtn.addEventListener("mousedown", (event) => event.stopPropagation());
   header.appendChild(foldBtn);
   header.appendChild(title);
@@ -913,6 +913,11 @@ function applyInfo(panel, info) {  if (!info) return;
 
 function ensurePanel(node) {
   if (node._easyVideoPanel) return node._easyVideoPanel;
+  // 2026-11-14：抑制 ComfyUI 0.45.x 核心自带的原生预览。本节点有 VIDEO 输入，核心的
+  // 预览判定（GraphView：nodeData.inputs.some(type==='VIDEO') + nodeOutputs.images）会把
+  // 我们存的 PNG 当成视频塞进 <video>，于是节点底部多出一块「视频加载失败 / Invalid URL」。
+  // 面板自己已有完整预览，这里直接关掉原生输出预览。
+  node.hideOutputImages = true;
   const panel = buildPanel();
   node._easyVideoPanel = panel;
   panel.node = node;
@@ -954,10 +959,45 @@ function ensurePanel(node) {
   return panel;
 }
 
+
+// 2026-11-13：本节点删掉「输入模式」控件后，旧工作流按位置保存的 widgets_values
+// 整体串位——image_format 读到 ''、audio_format 读到 'PNG'、notify_sound 读到 'FLAC'，
+// 前端会标「无效输入」并阻止运行。这里在载入旧存档时把错位的三个值挪回正确槽位。
+const EASY_IMG_FORMATS = ["PNG", "JPG", "WEBP"];
+const EASY_AUDIO_FORMATS = ["WAV", "MP3", "FLAC"];
+
+function fixLegacyFormatWidgets(node) {
+  const widgets = node?.widgets || [];
+  const find = (name) => widgets.find((w) => w?.name === name);
+  const imageWidget = find("image_format");
+  const audioWidget = find("audio_format");
+  const notifyWidget = find("notify_sound");
+  if (!imageWidget || !audioWidget || !notifyWidget) return;
+
+  const upper = (v) => String(v ?? "").toUpperCase();
+  const imageOk = EASY_IMG_FORMATS.includes(upper(imageWidget.value));
+  const audioOk = EASY_AUDIO_FORMATS.includes(upper(audioWidget.value));
+  const notifyOptions = Array.isArray(notifyWidget.options) ? notifyWidget.options : null;
+  const notifyOk = !notifyOptions || notifyOptions.includes(notifyWidget.value);
+  if (imageOk && audioOk && notifyOk) return;
+
+  // 串位时值向后错一格：image 缺的那格实际落在 audio 上，audio 的落在 notify 上。
+  const shiftedImage = EASY_IMG_FORMATS.includes(upper(audioWidget.value)) ? upper(audioWidget.value) : "PNG";
+  const shiftedAudio = EASY_AUDIO_FORMATS.includes(upper(notifyWidget.value)) ? upper(notifyWidget.value) : "WAV";
+  if (!imageOk) imageWidget.value = shiftedImage;
+  if (!audioOk) audioWidget.value = shiftedAudio;
+  if (!notifyOk) notifyWidget.value = notifyOptions?.[0] ?? "🔇 不播放提示音";
+  try {
+    node.setDirtyCanvas?.(true, true);
+  } catch (error) { /* 只影响重绘 */ }
+  console.log("[EasyMedia] 旧存档格式控件已修复：", imageWidget.value, audioWidget.value, notifyWidget.value);
+}
+
 app.registerExtension({
   name: "easy.media.saveVideo.panel",
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData?.name !== "easy saveVideo") return;
+
 
     const onNodeCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function (...args) {
@@ -1009,6 +1049,8 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function (info, ...rest) {
       const result = onConfigure?.apply(this, [info, ...rest]);
       try {
+        // 载入旧存档（含刷新工作流）时先修串位的格式控件，避免前端判无效输入
+        fixLegacyFormatWidgets(this);
         // properties 里的成片信息会跟工作流一起序列化，切标签页后还在；内存缓存只在本会话有效
         const cached = this.properties?.easyVideoInfo ?? this._easyVideoInfo;
         const panel = ensurePanel(this);
